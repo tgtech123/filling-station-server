@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+
 export interface IStaff extends Document {
   firstName: string;
   lastName: string;
