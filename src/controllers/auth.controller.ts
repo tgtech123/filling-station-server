@@ -20,24 +20,43 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       lastName,
       email,
       phone,
-      address,
-      city,
-      state,
-      zipCode,
-      emergencyContact,
       image,
       role,
       password,
+      shiftType,
+      responsibility,
+      addSaleTarget,
+      payType,
+      amount,
       twoFactorAuthEnabled,
       notificationPreferences,
     } = req.body;
 
-    // Validate required fields manually or with express-validator if applied
+    // ✅ Validate required fields
+    if (
+      !firstName ||
+      !lastName ||
+      !email ||
+      !phone ||
+      !role ||
+      !password ||
+      !shiftType ||
+      !payType ||
+      amount === undefined || 
+      !Array.isArray(responsibility)
+    ) {
+      return res.status(400).json({
+        message:
+          "Missing required fields. Ensure firstName, lastName, email, phone, role, password, shiftType, responsibility (array), payType, and amount are provided.",
+      });
+    }
 
     // Ensure the manager has an assigned station
-    const stationId = manager.station ;
+    const stationId = manager.station;
     if (!stationId) {
-      return res.status(400).json({ message: "Manager is not associated with any station" });
+      return res
+        .status(400)
+        .json({ message: "Manager is not associated with any station" });
     }
 
     const station = await FillingStation.findById(stationId);
@@ -48,32 +67,42 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     // Check for duplicate email
     const existingStaff = await Staff.findOne({ email });
     if (existingStaff) {
-      return res.status(409).json({ message: "A staff with this email already exists" });
+      return res
+        .status(409)
+        .json({ message: "A staff with this email already exists" });
     }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create staff
+    // Create staff with schema-only fields
     const newStaff = await Staff.create({
       firstName,
       lastName,
       email,
       phone,
-      address,
-      city,
-      state,
-      zipCode,
-      emergencyContact,
       image,
       role,
       station: new Types.ObjectId(station._id as Types.ObjectId),
       password: hashedPassword,
-      twoFactorAuthEnabled,
-      notificationPreferences,
+      shiftType,
+      responsibility,
+      addSaleTarget: addSaleTarget ?? false,
+      payType,
+      amount,
+      twoFactorAuthEnabled: twoFactorAuthEnabled ?? false,
+      notificationPreferences: {
+        email: notificationPreferences?.email ?? false,
+        sms: notificationPreferences?.sms ?? false,
+        push: notificationPreferences?.push ?? false,
+        lowStock: notificationPreferences?.lowStock ?? false,
+        mail: notificationPreferences?.mail ?? false,
+        sales: notificationPreferences?.sales ?? false,
+        staffs: notificationPreferences?.staffs ?? false,
+      },
     });
 
-    // Optionally push staff to station
+    // Add staff to station staff list
     station.staff.push(newStaff._id as Types.ObjectId);
     await station.save();
 
@@ -83,7 +112,9 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error("Error creating staff:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 };
 
