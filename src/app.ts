@@ -2,7 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.route"
 import fillinStation from "./routes/fillinStation.route"
-
+import cors from "cors"
 // import authRoutes from "./routes/auth.routes"; // you'll create this soon
 
 const app = express();
@@ -14,6 +14,13 @@ app.use(cookieParser());
 // Route Setup
 // app.use("/api/auth", authRoutes); // placeholder
 app.use(express.json()); // for parsing application/json
+
+app.use(cors({
+  origin: 'http://localhost:3000', // Your frontend URL
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Routes
 app.use("/api/auth", authRoutes); // Login endpoint: POST /api/auth/login
