@@ -6,15 +6,16 @@ export interface IStaff extends Document {
   lastName: string;
   email: string;
   phone: string;
-  address: string;
-  city: string;
-  state: string;
-  zipCode: string;
-  emergencyContact: string;
+
   image?: string;
   role: "manager" | "supervisor" | "accountant" | "cashier" | "attendant";
   station: mongoose.Types.ObjectId;
   password: string;
+  shiftType: string;
+  responsibility: string[];
+  addSaleTarget?: boolean;
+  payType: string;
+  amount: number;
   twoFactorAuthEnabled: boolean;
   notificationPreferences: {
     email: boolean;
@@ -33,12 +34,7 @@ const StaffSchema = new Schema<IStaff>(
     lastName: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     phone: { type: String, required: true },
-    address: { type: String, required: true },
-    city: { type: String, required: true },
-    state: { type: String, required: true },
-    zipCode: { type: String, required: true },
-    emergencyContact: { type: String, required: true },
-    image: { type: String },
+    image: { type: String, default: "" },
     role: {
       type: String,
       enum: ["manager", "supervisor", "accountant", "cashier", "attendant"],
@@ -46,6 +42,11 @@ const StaffSchema = new Schema<IStaff>(
     },
     station: { type: Schema.Types.ObjectId, ref: "FillingStation" },
     password: { type: String, required: true },
+    shiftType:  { type: String, required: true },
+    responsibility: [String],
+    addSaleTarget: { type: Boolean, required: true, default: false },
+    payType: { type: String, required: true },
+    amount: { type: Number, required: true, default: 0 },
     twoFactorAuthEnabled: { type: Boolean, default: false },
     notificationPreferences: {
       email: { type: Boolean, default: false },
