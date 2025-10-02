@@ -138,3 +138,36 @@ Error Responses:
 401 → Invalid credentials
 
 500 → Server error
+
+
+ ----FORGET PASSWORD
+
+ 🔑 Forgot Password
+
+Endpoint: POST /api/auth/forgot-password
+
+Request body:
+
+{
+  "email": "staff@example.com"
+}
+
+
+Response:
+
+{ "message": "Password reset email sent" }
+
+🔑 Reset Password
+
+Endpoint: POST /api/auth/reset-password?token=<RESET_TOKEN>
+
+Request body:
+
+{
+  "password": "NewSecurePassword123!"
+}
+
+
+Response:
+
+{ "message": "Password has been reset successfully" }
