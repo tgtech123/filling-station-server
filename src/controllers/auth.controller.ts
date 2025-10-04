@@ -7,7 +7,7 @@ import { Types } from "mongoose";
 import jwt from "jsonwebtoken";
 import ResetPassword from "../models/resetPassword.model";
 import crypto from "crypto";
-import nodemailer from "nodemailer";
+import { transporter } from "../middlewares/transporter.middleware";
 
 
 
@@ -211,13 +211,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password/change-password/?token=${resetToken}`;
 
     // 5. Send email
-    const transporter = nodemailer.createTransport({
-      service: "gmail", // or SendGrid, Mailgun etc.
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+
 
     await transporter.sendMail({
       to: staff.email,
@@ -256,7 +250,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
       <!-- Footer -->
       <div style="background: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #888;">
-        <p>© ${new Date().getFullYear()} Your Company. All rights reserved.</p>
+        <p>© ${new Date().getFullYear()} Flourish station. All rights reserved.</p>
       </div>
     </div>
   </div>
