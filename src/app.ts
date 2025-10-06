@@ -3,6 +3,8 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.route"
 import fillinStation from "./routes/fillinStation.route"
 import tank from "./routes/tank.route"
+import delivery from "./routes/delivery.route"
+
 
 import cors from 'cors'
 import contactus from "./routes/contact.route"
@@ -27,6 +29,8 @@ app.use("/api/auth", authRoutes); // Login endpoint: POST /api/auth/login
 app.use("/api/register", fillinStation); // Login endpoint: POST /api/auth/login
 app.use("/api/contactus", contactus)
 app.use("/api/tank", tank)
+app.use("/api/delivery", delivery)
+
 
 
 
