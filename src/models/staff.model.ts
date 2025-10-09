@@ -11,10 +11,10 @@ export interface IStaff extends Document {
   role: "manager" | "supervisor" | "accountant" | "cashier" | "attendant";
   station: mongoose.Types.ObjectId;
   password: string;
-  shiftType: string;
+  shiftType?: string;
   responsibility: string[];
   addSaleTarget?: boolean;
-  payType: string;
+  payType?: string;
   amount: number;
   twoFactorAuthEnabled: boolean;
   notificationPreferences: {
@@ -42,10 +42,10 @@ const StaffSchema = new Schema<IStaff>(
     },
     station: { type: Schema.Types.ObjectId, ref: "FillingStation" },
     password: { type: String, required: true },
-    shiftType:  { type: String, required: true },
+    shiftType:  { type: String },
     responsibility: [String],
     addSaleTarget: { type: Boolean, required: true, default: false },
-    payType: { type: String, required: true },
+    payType: { type: String },
     amount: { type: Number, required: true, default: 0 },
     twoFactorAuthEnabled: { type: Boolean, default: false },
     notificationPreferences: {
