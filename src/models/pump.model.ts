@@ -6,7 +6,7 @@ export interface IPumpProps extends Document {
   // fuelType removed — tank should provide fuel metadata
   status: "Active" | "Idle" | "Maintenance" | "Inactive";
   pricePerLtr: number;
-  dailyLtrSales: { date: Date; ltrSale: number }[];
+  dailyLtrSales: { date: Date; ltrSale: number; pricePerLtr: number }[];
   lastMaintenance?: Date | null;
   startDate: Date;
 }
@@ -25,7 +25,7 @@ const PumpItemSchema = new Schema<IPumpProps>(
       type: String,
       trim: true,
     },
-    // fuelType removed intentionally
+    // fuelType removed intentionally 
     status: {
       type: String,
       enum: ["Active", "Idle", "Maintenance", "Inactive"],
@@ -44,6 +44,8 @@ const PumpItemSchema = new Schema<IPumpProps>(
       {
         date: { type: Date, required: true },
         ltrSale: { type: Number, required: true, min: 0 },
+        pricePerLtr: { type: Number, required: true, min: 0 },
+
       },
     ],
     lastMaintenance: {
