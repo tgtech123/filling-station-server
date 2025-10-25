@@ -8,6 +8,7 @@ import jwt from "jsonwebtoken";
 import ResetPassword from "../models/resetPassword.model";
 import crypto from "crypto";
 import { transporter } from "../middlewares/transporter.middleware";
+import mongoose from "mongoose";
 
 
 
@@ -309,3 +310,227 @@ export const resetPassword = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+export const getAllStaff = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user;
+
+    if (!user) {
+      return res.status(401).json({ message: "Unauthorized: No logged-in user" });
+    }
+
+    // Fetch all staff in the same filling station (if applicable)
+    // and exclude the currently logged-in user
+    const query: any = {
+      _id: { $ne: user.id
+
+    
+       }, // exclude current user
+    };
+
+    if (user.station) {
+      query.station = user.station; // ensure staff belong to same station
+    }
+
+    // Retrieve staff, optionally excluding sensitive fields like password
+    const staffList = await Staff.find(query)
+      .select("-password -__v") // hide password and version key
+      .sort({ createdAt: -1 }); // latest first
+
+    if (!staffList.length) {
+      return res.status(200).json({
+        message: "No other staff found",
+        staff: [],
+      });
+    }
+
+    return res.status(200).json({
+      message: "Staff list retrieved successfully",
+      staff: staffList,
+    });
+  } catch (error: any) {
+    console.error("Error fetching staff:", error);
+    return res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
+export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const manager = req.user;
+    const staffId = req.params.id;
+
+    if (!manager) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    // Only managers can update staff (adjust if other roles allowed)
+    if (manager.role !== "manager") {
+      return res.status(403).json({ message: "Only managers can update staff" });
+    }
+
+    // Validate staffId
+    if (!Types.ObjectId.isValid(staffId)) {
+      return res.status(400).json({ message: "Invalid staff id" });
+    }
+
+    // Fetch staff to update
+    const staff = await Staff.findById(staffId);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    // Ensure manager and staff belong to same station
+    const managerStation = manager.station;
+    if (!managerStation || staff.station?.toString() !== managerStation.toString()) {
+      return res.status(403).json({ message: "You can only update staff from your station" });
+    }
+
+    // Allowed fields to update
+    const allowedFields = new Set([
+      "firstName",
+      "lastName",
+      "email",
+      "phone",
+      "image",
+      "role",
+      "onDuty",
+      "shiftType",
+      "responsibility",
+      "addSaleTarget",
+      "payType",
+      "amount",
+      "twoFactorAuthEnabled",
+      "notificationPreferences",
+    ]);
+
+    // Build update object from req.body but whitelist fields
+    const updates: any = {};
+    for (const key of Object.keys(req.body)) {
+      if (allowedFields.has(key)) {
+        updates[key] = req.body[key];
+      }
+    }
+
+    // Prevent changing station via this route even if provided
+    if ("station" in req.body) {
+      return res.status(400).json({ message: "Cannot change staff station via this endpoint" });
+    }
+
+    // If email is being changed, ensure uniqueness
+    if (updates.email && updates.email !== staff.email) {
+      const existing = await Staff.findOne({ email: updates.email });
+      if (existing && existing.id.toString() !== staff.id.toString()) {
+        return res.status(409).json({ message: "Another staff already uses that email" });
+      }
+    }
+
+    // If password is provided, hash it (not included in allowedFields above)
+    if (req.body.password) {
+      const plain = req.body.password;
+      if (typeof plain !== "string" || plain.length < 6) {
+        return res.status(400).json({ message: "Password must be a string with at least 6 characters" });
+      }
+      const hashed = await bcrypt.hash(plain, 10);
+      updates.password = hashed;
+    }
+
+    // Apply the update and return the new doc (validate: true to run mongoose validators)
+    const updated = await Staff.findByIdAndUpdate(staffId, updates, {
+      new: true,
+      runValidators: true,
+      context: "query",
+    }).select("-password -__v");
+
+    if (!updated) {
+      return res.status(500).json({ message: "Failed to update staff" });
+    }
+
+    return res.status(200).json({ message: "Staff updated successfully", staff: updated });
+  } catch (err: any) {
+    console.error("Error updating staff:", err);
+    return res.status(500).json({ message: "Server error", error: err.message || String(err) });
+  }
+};
+
+
+export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
+  const manager = req.user;
+  const staffId = req.params.id;
+
+  if (!manager) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  // Only managers allowed (adjust role logic if needed)
+  if (manager.role !== "manager") {
+    return res.status(403).json({ message: "Only managers can delete staff" });
+  }
+
+  // Validate staffId
+  if (!Types.ObjectId.isValid(staffId)) {
+    return res.status(400).json({ message: "Invalid staff id" });
+  }
+
+  // Prevent manager deleting themself
+  if (manager.id && manager.id.toString() === staffId) {
+    return res.status(400).json({ message: "You cannot delete your own account" });
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    let deletedStaff: any = null;
+
+    await session.withTransaction(async () => {
+      // Find staff (inside session)
+      const staff = await Staff.findById(staffId).session(session);
+      if (!staff) {
+        // Throw an object so the outer catch can handle and return appropriate status
+        throw { status: 404, message: "Staff not found" };
+      }
+
+      // Ensure staff is in the same station as manager
+      const managerStation = manager.station;
+      if (!managerStation || staff.station?.toString() !== managerStation.toString()) {
+        throw { status: 403, message: "You can only delete staff from your station" };
+      }
+
+      // Remove staff id from the FillingStation.staff array
+      const station = await FillingStation.findById(managerStation).session(session);
+      if (!station) {
+        throw { status: 404, message: "Associated station not found" };
+      }
+
+      // Pull staff id from station.staff
+      station.staff = station.staff.filter((sId: Types.ObjectId | string) => sId.toString() !== staffId);
+      await station.save({ session });
+
+      // Delete staff document
+      deletedStaff = await Staff.findByIdAndDelete(staffId, { session }).select("-password -__v");
+      if (!deletedStaff) {
+        // If deletion failed for any reason, throw to abort the transaction
+        throw { status: 500, message: "Failed to delete staff" };
+      }
+
+      // (Optional) Add other cleanup here (e.g., remove references in other collections)
+    });
+
+    // If we reach here the transaction committed successfully
+    return res.status(200).json({
+      message: "Staff deleted successfully",
+      staff: deletedStaff,
+    });
+  } catch (err: any) {
+    console.error("Error deleting staff:", err);
+    // Handle intentionally thrown errors from within the transaction
+    if (err && err.status && err.message) {
+      return res.status(err.status).json({ message: err.message });
+    }
+    return res.status(500).json({ message: "Server error", error: err?.message || String(err) });
+  } finally {
+    session.endSession();
+  }
+}; 
