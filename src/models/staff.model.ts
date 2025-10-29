@@ -16,6 +16,7 @@ export interface IStaff extends Document {
   addSaleTarget?: boolean;
   payType?: string;
   amount: number;
+  onDuty?: boolean;
   twoFactorAuthEnabled: boolean;
   notificationPreferences: {
     email: boolean;
@@ -44,6 +45,7 @@ const StaffSchema = new Schema<IStaff>(
     password: { type: String, required: true },
     shiftType:  { type: String },
     responsibility: [String],
+    onDuty: {type: Boolean, required: true, default: false},
     addSaleTarget: { type: Boolean, required: true, default: false },
     payType: { type: String },
     amount: { type: Number, required: true, default: 0 },

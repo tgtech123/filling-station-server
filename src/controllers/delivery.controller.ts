@@ -32,8 +32,7 @@ export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // 4️⃣ Calculate new quantity (simulate update before saving)
-    const newTotal = foundTank.currentQuantity + quantity;
-
+   const newTotal = Number(foundTank.currentQuantity) + Number(quantity);
     if (newTotal > foundTank.limit) {
       return res.status(400).json({
         error: `Cannot add ${quantity}L — this will exceed the tank limit of ${foundTank.limit}L.`,
