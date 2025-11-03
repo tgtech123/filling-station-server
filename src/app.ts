@@ -7,6 +7,7 @@ import fillinStation from "./routes/fillinStation.route"
 import tank from "./routes/tank.route"
 import pump from "./routes/pump.route"
 import delivery from "./routes/delivery.route"
+import lubricant from "./routes/lubricant.route"
 
 
 import cors from 'cors'
@@ -34,6 +35,8 @@ app.use("/api/contactus", contactus)
 app.use("/api/tank", tank)
 app.use("/api/pump", pump)
 app.use("/api/delivery", delivery)
+app.use("/api/lubricant", lubricant)
+
 
 
 
