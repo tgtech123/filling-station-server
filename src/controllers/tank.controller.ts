@@ -1,6 +1,8 @@
 import { Response } from "express";
 import Tank from "../models/tanks.model";
 import { AuthenticatedRequest } from "../interfaces";
+import Pump from "../models/pump.model";
+import { Types } from "mongoose";
 
 export const addTank = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -250,5 +252,148 @@ export const deleteTank = async (req: AuthenticatedRequest, res: Response) => {
       message: "Server error",
       error: error.message,
     });
+  }
+};
+
+
+export const getTankConsumptionAndCapacity = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+    const stationObjectId = new Types.ObjectId(fillingStation);
+
+    // --- Date ranges ---
+    const now = new Date();
+
+    // Today: midnight -> 23:59:59.999
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Calendar week: Monday 00:00 -> Sunday 23:59:59.999
+    const day = now.getDay(); // 0 = Sunday, 1 = Monday, ...
+    const diffToMonday = (day + 6) % 7; // days to subtract to reach Monday
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - diffToMonday);
+    weekStart.setHours(0, 0, 0, 0);
+
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+
+    // --- Aggregation on Pump to sum liters for today and this calendar week ---
+    // We lookup the tank to ensure pumps belong to this fillingStation.
+    const pipeline: any[] = [
+      {
+        $lookup: {
+          from: "tanks",
+          localField: "tank",
+          foreignField: "_id",
+          as: "tankDoc",
+        },
+      },
+      { $unwind: { path: "$tankDoc", preserveNullAndEmptyArrays: false } },
+      { $match: { "tankDoc.fillingStation": stationObjectId } },
+
+      // unwind pumps[] so we can access dailyLtrSales per pump head
+      { $unwind: { path: "$pumps", preserveNullAndEmptyArrays: true } },
+
+      // facet to compute both totals in one pass
+      {
+        $facet: {
+          daily: [
+            { $unwind: { path: "$pumps.dailyLtrSales", preserveNullAndEmptyArrays: true } },
+            {
+              $match: {
+                "pumps.dailyLtrSales.date": { $gte: startOfDay, $lte: endOfDay },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                litres: { $sum: "$pumps.dailyLtrSales.ltrSale" },
+              },
+            },
+          ],
+
+          weekly: [
+            { $unwind: { path: "$pumps.dailyLtrSales", preserveNullAndEmptyArrays: true } },
+            {
+              $match: {
+                "pumps.dailyLtrSales.date": { $gte: weekStart, $lte: weekEnd },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                litres: { $sum: "$pumps.dailyLtrSales.ltrSale" },
+              },
+            },
+          ],
+        },
+      },
+    ];
+
+    const aggRes = await Pump.aggregate(pipeline).exec();
+
+    let dailyConsumption = 0;
+    let weeklyConsumption = 0;
+
+    if (Array.isArray(aggRes) && aggRes.length > 0) {
+      const facet = aggRes[0];
+      if (Array.isArray(facet.daily) && facet.daily.length > 0) {
+        dailyConsumption = Number(facet.daily[0].litres || 0);
+      }
+      if (Array.isArray(facet.weekly) && facet.weekly.length > 0) {
+        weeklyConsumption = Number(facet.weekly[0].litres || 0);
+      }
+    }
+
+    // --- Tanks: compute total capacity, current total quantity, and available capacity ---
+    const stationTanksDoc = await Tank.findOne({ fillingStation: stationObjectId })
+      .select("tanks.limit tanks.currentQuantity")
+      .lean();
+
+    let totalCapacity = 0; // sum of limits
+    let totalCurrentQuantity = 0; // sum of currentQuantity
+    let totalCapacityAvailable = 0; // totalCapacity - totalCurrentQuantity
+
+    if (stationTanksDoc && Array.isArray(stationTanksDoc.tanks)) {
+      for (const t of stationTanksDoc.tanks) {
+        const limit = Number(t.limit) || 0;
+        const current = Number(t.currentQuantity) || 0;
+        totalCapacity += limit;
+        totalCurrentQuantity += current;
+      }
+      totalCapacityAvailable = Math.max(0, totalCapacity - totalCurrentQuantity);
+    }
+
+    return res.status(200).json({
+      message: "Tank consumption & capacity retrieved successfully",
+      period: {
+        today: {
+          from: startOfDay.toISOString(),
+          to: endOfDay.toISOString(),
+        },
+        calendarWeek: {
+          from: weekStart.toISOString(),
+          to: weekEnd.toISOString(),
+          note: "Calendar week (Monday 00:00 → Sunday 23:59:59.999)",
+        },
+      },
+      data: {
+        dailyConsumption,       // litres
+        weeklyConsumption,      // litres (calendar week Mon→Sun)
+        totalCapacity,          // total tank capacity (sum of limits) in litres
+        totalCurrentQuantity,   // current stored litres across tanks
+        totalCapacityAvailable, // remaining capacity in litres
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in getTankConsumptionAndCapacity:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
