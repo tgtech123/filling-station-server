@@ -458,6 +458,92 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
   }
 };
 
+export const getLubricantSaleById = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const { id } = req.params;
+    if (!id || !Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid sale id" });
+    }
+
+    const stationObjectId = new Types.ObjectId(fillingStation);
+    const saleObjectId = new Types.ObjectId(id);
+
+    // aggregation pipeline to join staff and lubricant and project desired fields
+    const pipeline: any[] = [
+      {
+        $match: {
+          _id: saleObjectId,
+          fillingStation: stationObjectId,
+        },
+      },
+      // Join staff
+      {
+        $lookup: {
+          from: "staffs",
+          localField: "staff",
+          foreignField: "_id",
+          as: "staff",
+        },
+      },
+      { $unwind: { path: "$staff", preserveNullAndEmptyArrays: true } },
+
+      // Join lubricant
+      {
+        $lookup: {
+          from: "lubricants",
+          localField: "lubricant",
+          foreignField: "_id",
+          as: "lubricant",
+        },
+      },
+      { $unwind: { path: "$lubricant", preserveNullAndEmptyArrays: true } },
+
+      // Project required fields and compute amountSold
+      {
+        $project: {
+          _id: 0,
+          id: "$_id",
+          date: "$createdAt",
+          txnId: 1,
+          staffId: "$staff._id",
+          staffName: {
+            $cond: [
+              { $and: [{ $ifNull: ["$staff.firstName", false] }, { $ifNull: ["$staff.lastName", false] }] },
+              { $concat: ["$staff.firstName", " ", "$staff.lastName"] },
+              { $ifNull: ["$staff.firstName", { $ifNull: ["$staff.email", "Unknown Staff"] }] },
+            ],
+          },
+          barcode: "$lubricant.barcode",
+          productName: "$lubricant.productName",
+          qtySold: 1,
+          priceSold: 1,
+          amountSold: { $multiply: ["$qtySold", "$priceSold"] },
+          paymentMethod: 1,
+        },
+      },
+    ];
+
+    const results = await lubricantSaleModels.aggregate(pipeline).exec();
+
+    if (!results || results.length === 0) {
+      return res.status(404).json({ error: "Lubricant sale not found" });
+    }
+
+    return res.status(200).json({
+      message: "Lubricant sale retrieved successfully",
+      data: results[0],
+    });
+  } catch (err: any) {
+    console.error("Error fetching lubricant sale by id:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
 
 export const getDailyLubricantSummary = async (req: AuthenticatedRequest, res: Response) => {
   try {
