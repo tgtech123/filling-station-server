@@ -39,6 +39,9 @@ the GET endpoints
 3. get the weekly sales and top 3 sales per weekly
 /api/lubricant/lubricant-weekly-summary
 
+4. to get the following (totalAmountSold,totalLubricants,totalInventoryValue,lowStockCount)
+/api/lubricant/lubricant-daily-summary
+
 
 
 

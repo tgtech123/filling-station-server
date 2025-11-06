@@ -29,7 +29,7 @@ const PumpItemSchema = new Schema<IPumpProps>(
     status: {
       type: String,
       enum: ["Active", "Idle", "Maintenance", "Inactive"],
-      default: "Idle",
+      default: "Inactive",
     },
     pricePerLtr: {
       type: Number,
