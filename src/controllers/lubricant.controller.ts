@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import lubricantModel from "../models/lubricant.model"; // adjust path to your model
 import lubricantSaleModels from "../models/lubricant-sale.models";
+import LubricantTransaction from "../models/lubricant-transaction.model";
 import mongoose from "mongoose";
 
 export const addLubricant = async (req: AuthenticatedRequest, res: Response) => {
@@ -607,5 +608,245 @@ export const getDailyLubricantSummary = async (req: AuthenticatedRequest, res: R
   } catch (err: any) {
     console.error("Error in getDailyLubricantSummary:", err);
     return res.status(500).json({ error: err.message || "Server error" });
+  }
+};
+
+// 🆕 NEW: Add grouped transaction sale
+export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const staffId = req.user?.id;
+    const fillingStation = req.user?.station;
+    const { items, paymentMethod } = req.body;
+
+    // 🔒 Check authorization
+    if (!fillingStation) {
+      await session.abortTransaction();
+      return res.status(403).json({ 
+        success: false,
+        error: "You are not authorized to perform this action" 
+      });
+    }
+
+    // ✅ Validate input
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        success: false,
+        error: "Items array is required and must not be empty" 
+      });
+    }
+
+    if (!paymentMethod) {
+      await session.abortTransaction();
+      return res.status(400).json({ 
+        success: false,
+        error: "Payment method is required" 
+      });
+    }
+
+    const stationObjectId = new mongoose.Types.ObjectId(fillingStation);
+    const processedItems = [];
+    let totalAmount = 0;
+
+    // 🔄 Process each item
+    for (const item of items) {
+      const { lubricantId, quantity, unitPrice } = item;
+
+      if (!lubricantId || !quantity || !unitPrice) {
+        await session.abortTransaction();
+        return res.status(400).json({ 
+          success: false,
+          error: "Each item must have lubricantId, quantity, and unitPrice" 
+        });
+      }
+
+      // 🔍 Find the lubricant
+      const lubricant = await lubricantModel.findOne({
+        _id: new mongoose.Types.ObjectId(lubricantId),
+        fillingStation: stationObjectId,
+      }).session(session);
+
+      if (!lubricant) {
+        await session.abortTransaction();
+        return res.status(404).json({ 
+          success: false,
+          error: `Lubricant not found: ${lubricantId}` 
+        });
+      }
+
+      // 🧮 Check stock
+      const currentQty = lubricant.qtyInStock;
+      if (isNaN(currentQty) || currentQty <= 0) {
+        await session.abortTransaction();
+        return res.status(400).json({ 
+          success: false,
+          error: `Out of stock: ${lubricant.productName}` 
+        });
+      }
+
+      if (quantity > currentQty) {
+        await session.abortTransaction();
+        return res.status(400).json({ 
+          success: false,
+          error: `Cannot sell ${quantity} units of ${lubricant.productName}. Only ${currentQty} available.` 
+        });
+      }
+
+      // 💰 Deduct stock
+      lubricant.qtyInStock = currentQty - quantity;
+      await lubricant.save({ session });
+
+      // 📝 Prepare item for transaction
+      const amount = quantity * unitPrice;
+      processedItems.push({
+        lubricant: lubricant._id,
+        productName: lubricant.productName,
+        barcode: lubricant.barcode,
+        priceSold: unitPrice,
+        qtySold: quantity,
+        amount,
+      });
+
+      totalAmount += amount;
+    }
+
+    // 🧾 Create the transaction
+    const transaction = await LubricantTransaction.create(
+      [
+        {
+          fillingStation: stationObjectId,
+          staff: staffId,
+          items: processedItems,
+          totalAmount,
+          paymentMethod,
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+
+    return res.status(201).json({
+      success: true,
+      message: "Transaction recorded successfully",
+      data: {
+        txnId: transaction[0].txnId,
+        totalAmount,
+        itemCount: processedItems.length,
+        transaction: transaction[0],
+      },
+    });
+  } catch (error: any) {
+    await session.abortTransaction();
+    console.error("Error adding lubricant transaction:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+// 🆕 Get all transactions (grouped sales)
+export const getAllLubricantTransactions = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const transactions = await LubricantTransaction.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(fillingStation),
+        },
+      },
+      // Join staff
+      {
+        $lookup: {
+          from: "staffs",
+          localField: "staff",
+          foreignField: "_id",
+          as: "staff",
+        },
+      },
+      { $unwind: { path: "$staff", preserveNullAndEmptyArrays: true } },
+      
+      // Project fields
+      {
+        $project: {
+          _id: 0,
+          transactionId: "$_id",
+          txnId: 1,
+          date: "$createdAt",
+          staffName: {
+            $cond: [
+              { 
+                $and: [
+                  { $ifNull: ["$staff.firstName", false] }, 
+                  { $ifNull: ["$staff.lastName", false] }
+                ] 
+              },
+              { $concat: ["$staff.firstName", " ", "$staff.lastName"] },
+              { $ifNull: ["$staff.firstName", { $ifNull: ["$staff.email", "Unknown Staff"] }] },
+            ],
+          },
+          items: 1,
+          totalAmount: 1,
+          paymentMethod: 1,
+          itemCount: { $size: "$items" },
+        },
+      },
+      
+      { $sort: { date: -1 } },
+    ]).exec();
+
+    return res.status(200).json({
+      message: "Transactions retrieved successfully",
+      total: transactions.length,
+      data: transactions,
+    });
+  } catch (err: any) {
+    console.error("Error fetching transactions:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+// 🆕 Get single transaction by ID
+export const getLubricantTransactionById = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const { id } = req.params;
+    if (!id || !Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid transaction id" });
+    }
+
+    const transaction = await LubricantTransaction.findOne({
+      _id: new Types.ObjectId(id),
+      fillingStation: new Types.ObjectId(fillingStation),
+    })
+      .populate("staff", "firstName lastName email")
+      .lean();
+
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    return res.status(200).json({
+      message: "Transaction retrieved successfully",
+      data: transaction,
+    });
+  } catch (err: any) {
+    console.error("Error fetching transaction:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
