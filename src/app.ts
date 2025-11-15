@@ -9,6 +9,8 @@ import pump from "./routes/pump.route"
 import delivery from "./routes/delivery.route"
 import lubricant from "./routes/lubricant.route"
 import dashboard from "./routes/dshboard.route"
+import financial from "./routes/financial.route"
+import expense from "./routes/expense.route"
 
 
 import cors from 'cors'
@@ -38,6 +40,8 @@ app.use("/api/pump", pump)
 app.use("/api/delivery", delivery)
 app.use("/api/lubricant", lubricant)
 app.use("/api/dashboard", dashboard)
+app.use("/api/financial", financial)
+app.use("/api/expenses", expense)
 
 
 
