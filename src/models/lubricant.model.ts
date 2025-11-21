@@ -9,8 +9,8 @@ export interface ILubricant extends Document {
   qtyInStock: number;
   reOrderLevel: number;
   unitCost: number;
-  sellingPrice: number;
   unitPrice: number;
+  sellingPercentage: number; // Markup percentage
 }
 
 const LubricantSchema: Schema = new Schema<ILubricant>(
@@ -22,7 +22,7 @@ const LubricantSchema: Schema = new Schema<ILubricant>(
     },
     barcode: {
       type: String,
-      required: true,
+      required: false,
       unique: true,
       trim: true,
     },
@@ -33,7 +33,7 @@ const LubricantSchema: Schema = new Schema<ILubricant>(
     },
     productType: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
     brand: {
@@ -55,14 +55,16 @@ const LubricantSchema: Schema = new Schema<ILubricant>(
       type: Number,
       required: true,
     },
-    sellingPrice: {
-      type: Number,
-      required: true,
-    },
     unitPrice: {
       type: Number,
       required: true,
     },
+    sellingPercentage: {
+      type: Number,
+      required: false,
+      default: 0,
+      min: 0,
+    }, // 🆕 Markup percentage (e.g., 20 for 20%)
   },
   { timestamps: true }
 );

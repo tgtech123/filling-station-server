@@ -40,11 +40,11 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
     const processedItems: ILubricantPurchaseItem[] = [];
 
     for (const item of items) {
-      const { lubricantId, barcode, productName, unitCost, quantity, sellingPercentage, sellingPrice } = item;
+      const { lubricantId, barcode, productName, unitCost, quantity, sellingPercentage, sellingPrice, amount } = item;
 
-      if (!lubricantId || !barcode || !productName || !unitCost || !quantity || !sellingPrice) {
+      if (!lubricantId || !barcode || !productName || !unitCost || !quantity || !sellingPrice || !amount) {
         await session.abortTransaction();
-        return res.status(400).json({ error: "Each item must have lubricantId, barcode, productName, unitCost, quantity, sellingPrice" });
+        return res.status(400).json({ error: "Each item must have lubricantId, barcode, productName, unitCost, quantity, sellingPrice, amount" });
       }
 
       const lubricant = await Lubricant.findOne({
@@ -60,16 +60,21 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
       // Track old cost
       const oldUnitCost = lubricant.unitCost;
 
-      // Update stock
+      // Update stock quantity
       lubricant.qtyInStock = (lubricant.qtyInStock || 0) + quantity;
 
-      // Update pricing
+      // Update pricing fields in the database
       lubricant.unitCost = unitCost;
-      lubricant.sellingPrice = sellingPrice;
+      lubricant.unitPrice = sellingPrice; // Using sellingPrice from frontend as unitPrice
+      
+      // Update selling percentage in the database
+      if (sellingPercentage !== undefined && sellingPercentage !== null) {
+        lubricant.sellingPercentage = sellingPercentage;
+      }
 
       await lubricant.save({ session });
 
-      const amount = quantity * unitCost;
+      // Use the amount from the frontend (total purchase cost for this item)
       totalAmount += amount;
 
       processedItems.push({
@@ -206,4 +211,4 @@ export const deleteLubricantPurchase = async (req: AuthenticatedRequest, res: Re
     console.error("Error deleting purchase:", error);
     return res.status(500).json({ error: error.message || "Server error" });
   }
-};
+}
