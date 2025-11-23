@@ -348,6 +348,9 @@ export const getAllLubricantSales = async (req: AuthenticatedRequest, res: Respo
   }
 };
 
+
+// Update the getWeeklyLubricantSummaryCalendarWeek function to use transactions
+
 export const getWeeklyLubricantSummaryCalendarWeek = async (
   req: AuthenticatedRequest,
   res: Response
@@ -372,7 +375,7 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
 
     const stationObjectId = new Types.ObjectId(fillingStation);
 
-    // Aggregation pipeline: gather per-lubricant weekly qtySold
+    // 🔥 NEW: Aggregation pipeline using transactions instead of lubricantsales
     const pipeline: any[] = [
       { $match: { fillingStation: stationObjectId } },
 
@@ -387,16 +390,16 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
         },
       },
 
+      // 🔥 CHANGED: Lookup from lubricanttransactions instead
       {
         $lookup: {
-          from: "lubricantsales",
+          from: "lubricanttransactions",
           let: { lubricantId: "$_id" },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
-                    { $eq: ["$lubricant", "$$lubricantId"] },
                     { $eq: ["$fillingStation", stationObjectId] },
                     { $gte: ["$createdAt", weekStart] },
                     { $lte: ["$createdAt", weekEnd] },
@@ -404,10 +407,19 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
                 },
               },
             },
+            // Unwind items array to process each item
+            { $unwind: "$items" },
+            // Match only items for this lubricant
+            {
+              $match: {
+                $expr: { $eq: ["$items.lubricant", "$$lubricantId"] },
+              },
+            },
+            // Sum up quantities sold
             {
               $group: {
                 _id: null,
-                qtySoldThisWeek: { $sum: "$qtySold" },
+                qtySoldThisWeek: { $sum: "$items.qtySold" },
               },
             },
           ],
@@ -428,6 +440,7 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
           _id: 0,
           lubricantId: "$_id",
           barcode: 1,
+          productName: 1,
           productType: 1,
           qtyInStock: "$qtyInStockNum",
           unitPrice: "$unitPriceNum",
@@ -435,15 +448,13 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
         },
       },
 
-      { $sort: { barcode: 1 } },
+      { $sort: { qtySoldThisWeek: -1 } },
     ];
 
     const summary = await lubricantModel.aggregate(pipeline).exec();
 
-    const topThree = summary
-      .slice()
-      .sort((a, b) => (b.qtySoldThisWeek ?? 0) - (a.qtySoldThisWeek ?? 0))
-      .slice(0, 3);
+    // Top three products by sales
+    const topThree = summary.slice(0, 3);
 
     return res.status(200).json({
       message: "Weekly (calendar week Mon→Sun) lubricant summary retrieved successfully",
@@ -459,6 +470,72 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
   } catch (err: any) {
     console.error("Error fetching weekly calendar-week summary:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+// 🔥 NEW: Update getDailyLubricantSummary to use transactions too
+export const getDailyLubricantSummary = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const stationObjectId = new Types.ObjectId(fillingStation);
+
+    // 🕒 Define today's range (midnight → 23:59:59)
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // 💰 Calculate total amount sold today from transactions
+    const salesToday = await LubricantTransaction.aggregate([
+      {
+        $match: {
+          fillingStation: stationObjectId,
+          createdAt: { $gte: startOfDay, $lte: endOfDay },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmountSold: { $sum: "$totalAmount" },
+        },
+      },
+    ]);
+
+    const totalAmountSold = salesToday[0]?.totalAmountSold || 0;
+
+    // 🧮 Get lubricants data
+    const lubricants = await lubricantModel.find({ fillingStation: stationObjectId }).lean();
+
+    const totalLubricants = lubricants.length;
+
+    // 💼 Total inventory value (sum of qtyInStock * unitPrice)
+    const totalInventoryValue = lubricants.reduce((sum, lube) => {
+      const qty = Number(lube.qtyInStock) || 0;
+      const price = Number(lube.unitPrice) || 0;
+      return sum + qty * price;
+    }, 0);
+
+    // ⚠️ Count of low-stock lubricants (qtyInStock < reOrderLevel)
+    const lowStockCount = lubricants.filter(l => (Number(l.qtyInStock) || 0) < (Number(l.reOrderLevel) || 15)).length;
+
+    // ✅ Response
+    return res.status(200).json({
+      message: "Daily lubricant summary retrieved successfully",
+      date: startOfDay.toISOString().split("T")[0],
+      summary: {
+        totalAmountSold,
+        totalLubricants,
+        totalInventoryValue,
+        lowStockCount,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in getDailyLubricantSummary:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 };
 
@@ -544,70 +621,6 @@ export const getLubricantSaleById = async (req: AuthenticatedRequest, res: Respo
   }
 };
 
-export const getDailyLubricantSummary = async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const fillingStation = req.user?.station;
-    if (!fillingStation) {
-      return res.status(403).json({ error: "You are not authorized to perform this action" });
-    }
-
-    const stationObjectId = new Types.ObjectId(fillingStation);
-
-    // 🕒 Define today's range (midnight → 23:59:59)
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-
-    // 💰 Calculate total amount sold today
-    const salesToday = await lubricantSaleModels.aggregate([
-      {
-        $match: {
-          fillingStation: stationObjectId,
-          createdAt: { $gte: startOfDay, $lte: endOfDay },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalAmountSold: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
-        },
-      },
-    ]);
-
-    const totalAmountSold = salesToday[0]?.totalAmountSold || 0;
-
-    // 🧮 Get lubricants data
-    const lubricants = await lubricantModel.find({ fillingStation: stationObjectId }).lean();
-
-    const totalLubricants = lubricants.length;
-
-    // 💼 Total inventory value (sum of qtyInStock * unitPrice)
-    const totalInventoryValue = lubricants.reduce((sum, lube) => {
-      const qty = Number(lube.qtyInStock) || 0;
-      const price = Number(lube.unitPrice) || 0;
-      return sum + qty * price;
-    }, 0);
-
-    // ⚠️ Count of low-stock lubricants (qtyInStock < reOrderLevel)
-    const lowStockCount = lubricants.filter(l => (Number(l.qtyInStock) || 0) < (Number(l.reOrderLevel) || 15)).length;
-
-    // ✅ Response
-    return res.status(200).json({
-      message: "Daily lubricant summary retrieved successfully",
-      date: startOfDay.toISOString().split("T")[0],
-      summary: {
-        totalAmountSold,
-        totalLubricants,
-        totalInventoryValue,
-        lowStockCount,
-      },
-    });
-  } catch (err: any) {
-    console.error("Error in getDailyLubricantSummary:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
-  }
-};
 
 // 🆕 NEW: Add grouped transaction sale
 export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Response) => {
@@ -846,3 +859,5 @@ export const getLubricantTransactionById = async (req: AuthenticatedRequest, res
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
+
+
