@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
-import lubricantModel from "../models/lubricant.model"; // adjust path to your model
+import lubricantModel from "../models/lubricant.model";
 import lubricantSaleModels from "../models/lubricant-sale.models";
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import mongoose from "mongoose";
@@ -21,87 +21,104 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       qtyInStock,
       reOrderLevel,
       unitCost,
-      sellingPrice,
-      unitPrice,
+      sellingPercentage, // Changed from sellingPrice to sellingPercentage
     } = req.body;
 
-    // Basic required validation
-    if (!barcode || !productName || !productType || !brand) {
+    // Required fields now
+    if (!productName || !brand) {
       return res.status(400).json({
-        error: "Required fields missing. Provide barcode, productName, productType and brand.",
+        error: "Required fields missing. Provide productName and brand.",
       });
     }
 
-    // Coerce numeric fields and validate
+    // Numbers
     const qty = Number(qtyInStock ?? 0);
     const reorder = Number(reOrderLevel ?? 0);
     const unitCostNum = Number(unitCost ?? 0);
-    const sellingPriceNum = Number(sellingPrice ?? 0);
-    const unitPriceNum = Number(unitPrice ?? 0);
+    const percentage = Number(sellingPercentage ?? 0);
 
-    if (!Number.isFinite(qty) || qty < 0) {
-      return res.status(400).json({ error: "qtyInStock must be a non-negative number" });
-    }
-    if (!Number.isFinite(reorder) || reorder < 0) {
-      return res.status(400).json({ error: "reOrderLevel must be a non-negative number" });
-    }
-    if (!Number.isFinite(unitCostNum) || unitCostNum < 0) {
-      return res.status(400).json({ error: "unitCost must be a non-negative number" });
-    }
-    if (!Number.isFinite(sellingPriceNum) || sellingPriceNum < 0) {
-      return res.status(400).json({ error: "sellingPrice must be a non-negative number" });
-    }
-    if (!Number.isFinite(unitPriceNum) || unitPriceNum < 0) {
-      return res.status(400).json({ error: "unitPrice must be a non-negative number" });
+    // Validation
+    if (!Number.isFinite(qty) || qty < 0)
+      return res.status(400).json({ error: "qtyInStock must be non-negative" });
+
+    if (!Number.isFinite(reorder) || reorder < 0)
+      return res.status(400).json({ error: "reOrderLevel must be non-negative" });
+
+    if (!Number.isFinite(unitCostNum) || unitCostNum < 0)
+      return res.status(400).json({ error: "unitCost must be non-negative" });
+
+    // sellingPercentage is PERCENTAGE
+    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) {
+      return res.status(400).json({
+        error: "sellingPercentage must be a percentage between 0 and 100",
+      });
     }
 
-    // Build the query: find by station + barcode (barcode unique per station)
-    const query = {
-      fillingStation: new Types.ObjectId(fillingStation),
-      barcode: barcode.toString().trim(),
-    };
+    // Compute unitPrice from formula: unitPrice = unitCost * (1 + percentage / 100)
+    const unitPriceNum = unitCostNum * (1 + percentage / 100);
 
-    // Build update:
-    // - if exists: increment qtyInStock and set price/levels to new values
-    // - if not exists: setOnInsert fields for creation
-    const update = {
-      $inc: { qtyInStock: qty },
-      $set: {
-        reOrderLevel: reorder,
-        unitCost: unitCostNum,
-        sellingPrice: sellingPriceNum,
-        unitPrice: unitPriceNum,
-        productName: productName.trim(),
-        productType: productType.trim(),
-        brand: brand.trim(),
-        // update timestamps handled by mongoose if timestamps:true on schema
-      },
-      $setOnInsert: {
-        // fields that should only be set on initial insert (station, barcode, created fields)
+    // 🔥 If barcode is provided → upsert/update
+    if (barcode) {
+      const query = {
         fillingStation: new Types.ObjectId(fillingStation),
-        barcode: barcode.toString().trim(),
-      },
-    };
+        barcode: barcode.trim(),
+      };
 
-    // Options: return the doc after update, create if not found
-    const options = {
-      new: true, // return the updated document (after update)
-      upsert: true, // create if missing
-      runValidators: true, // run mongoose validators on update
-      // useFindAndModify: false // not necessary on modern mongoose versions
-    };
+      const update = {
+        $inc: { qtyInStock: qty },
+        $set: {
+          productName: productName.trim(),
+          productType: productType?.trim() ?? "",
+          brand: brand.trim(),
+          reOrderLevel: reorder,
+          unitCost: unitCostNum,
+          sellingPercentage: percentage,
+          unitPrice: unitPriceNum,
+        },
+        $setOnInsert: {
+          fillingStation: new Types.ObjectId(fillingStation),
+          barcode: barcode.trim(),
+        },
+      };
 
-    // Perform atomic upsert
-    const result = await lubricantModel.findOneAndUpdate(query, update, options).lean().exec();
+      const options = {
+        new: true,
+        upsert: true,
+        runValidators: true,
+      };
 
-    return res.status(200).json({
-      message: "Lubricant added/updated successfully",
-      lubricant: result,
+      const result = await lubricantModel
+        .findOneAndUpdate(query, update, options)
+        .lean()
+        .exec();
+
+      return res.status(200).json({
+        message: "Lubricant added/updated successfully",
+        lubricant: result,
+      });
+    }
+
+    // 🔥 If NO barcode → create new product only
+    const newLubricant = await lubricantModel.create({
+      fillingStation,
+      productName,
+      productType,
+      brand,
+      qtyInStock: qty,
+      reOrderLevel: reorder,
+      unitCost: unitCostNum,
+      sellingPercentage: percentage,
+      unitPrice: unitPriceNum,
     });
+
+    return res.status(201).json({
+      message: "Lubricant created successfully",
+      lubricant: newLubricant,
+    });
+
   } catch (err: any) {
     console.error("Error in addLubricant:", err);
 
-    // handle duplicate key error gracefully (in case unique index conflicts)
     if (err?.code === 11000) {
       return res.status(409).json({ error: "Duplicate barcode detected" });
     }
@@ -109,7 +126,6 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
-
 
 export const getAllLubricants = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -146,7 +162,6 @@ export const getAllLubricants = async (req: AuthenticatedRequest, res: Response)
     });
   }
 };
-
 
 export const getLubricantByBarcode = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -193,7 +208,6 @@ export const getLubricantByBarcode = async (req: AuthenticatedRequest, res: Resp
     });
   }
 };
-
 
 export const addLubricantSale = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -260,7 +274,6 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
-
 export const getAllLubricantSales = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -278,7 +291,7 @@ export const getAllLubricantSales = async (req: AuthenticatedRequest, res: Respo
       // Join staff
       {
         $lookup: {
-          from: "staffs", // collection name for Staff model
+          from: "staffs",
           localField: "staff",
           foreignField: "_id",
           as: "staff",
@@ -289,7 +302,7 @@ export const getAllLubricantSales = async (req: AuthenticatedRequest, res: Respo
       // Join lubricant
       {
         $lookup: {
-          from: "lubricants", // collection name for Lubricant model
+          from: "lubricants",
           localField: "lubricant",
           foreignField: "_id",
           as: "lubricant",
@@ -336,6 +349,8 @@ export const getAllLubricantSales = async (req: AuthenticatedRequest, res: Respo
 };
 
 
+// Update the getWeeklyLubricantSummaryCalendarWeek function to use transactions
+
 export const getWeeklyLubricantSummaryCalendarWeek = async (
   req: AuthenticatedRequest,
   res: Response
@@ -348,9 +363,7 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
 
     // Calculate calendar week: Monday (00:00) -> Sunday (23:59:59.999)
     const now = new Date();
-    // getDay: 0 = Sunday, 1 = Monday, ... 6 = Saturday
     const day = now.getDay();
-    // days to subtract to reach Monday: if today is Monday (1) => 0; if Sunday (0) => 6
     const diffToMonday = (day + 6) % 7;
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - diffToMonday);
@@ -362,34 +375,31 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
 
     const stationObjectId = new Types.ObjectId(fillingStation);
 
-    // Aggregation pipeline: gather per-lubricant weekly qtySold
+    // 🔥 NEW: Aggregation pipeline using transactions instead of lubricantsales
     const pipeline: any[] = [
-      // only lubricants for this filling station
       { $match: { fillingStation: stationObjectId } },
 
-      // convert fields to numeric safely
       {
         $addFields: {
           qtyInStockNum: {
             $convert: { input: "$qtyInStock", to: "double", onError: 0, onNull: 0 },
           },
-          sellingPriceNum: {
-            $convert: { input: "$sellingPrice", to: "double", onError: 0, onNull: 0 },
+          unitPriceNum: {
+            $convert: { input: "$unitPrice", to: "double", onError: 0, onNull: 0 },
           },
         },
       },
 
-      // lookup sales for this lubricant in the calendar week range
+      // 🔥 CHANGED: Lookup from lubricanttransactions instead
       {
         $lookup: {
-          from: "lubricantsales",
+          from: "lubricanttransactions",
           let: { lubricantId: "$_id" },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
-                    { $eq: ["$lubricant", "$$lubricantId"] },
                     { $eq: ["$fillingStation", stationObjectId] },
                     { $gte: ["$createdAt", weekStart] },
                     { $lte: ["$createdAt", weekEnd] },
@@ -397,10 +407,19 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
                 },
               },
             },
+            // Unwind items array to process each item
+            { $unwind: "$items" },
+            // Match only items for this lubricant
+            {
+              $match: {
+                $expr: { $eq: ["$items.lubricant", "$$lubricantId"] },
+              },
+            },
+            // Sum up quantities sold
             {
               $group: {
                 _id: null,
-                qtySoldThisWeek: { $sum: "$qtySold" },
+                qtySoldThisWeek: { $sum: "$items.qtySold" },
               },
             },
           ],
@@ -408,7 +427,6 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
         },
       },
 
-      // flatten weeklySales to a number (0 if none)
       {
         $addFields: {
           qtySoldThisWeek: {
@@ -417,30 +435,26 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
         },
       },
 
-      // project desired fields
       {
         $project: {
           _id: 0,
           lubricantId: "$_id",
           barcode: 1,
+          productName: 1,
           productType: 1,
           qtyInStock: "$qtyInStockNum",
-          sellingPrice: "$sellingPriceNum",
+          unitPrice: "$unitPriceNum",
           qtySoldThisWeek: 1,
         },
       },
 
-      // you can sort by barcode or name; we'll sort by barcode for determinism
-      { $sort: { barcode: 1 } },
+      { $sort: { qtySoldThisWeek: -1 } },
     ];
 
-    const summary = await lubricantSaleModels.aggregate(pipeline).exec();
+    const summary = await lubricantModel.aggregate(pipeline).exec();
 
-    // compute top three by qtySoldThisWeek
-    const topThree = summary
-      .slice()
-      .sort((a, b) => (b.qtySoldThisWeek ?? 0) - (a.qtySoldThisWeek ?? 0))
-      .slice(0, 3);
+    // Top three products by sales
+    const topThree = summary.slice(0, 3);
 
     return res.status(200).json({
       message: "Weekly (calendar week Mon→Sun) lubricant summary retrieved successfully",
@@ -459,6 +473,72 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
   }
 };
 
+// 🔥 NEW: Update getDailyLubricantSummary to use transactions too
+export const getDailyLubricantSummary = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const stationObjectId = new Types.ObjectId(fillingStation);
+
+    // 🕒 Define today's range (midnight → 23:59:59)
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // 💰 Calculate total amount sold today from transactions
+    const salesToday = await LubricantTransaction.aggregate([
+      {
+        $match: {
+          fillingStation: stationObjectId,
+          createdAt: { $gte: startOfDay, $lte: endOfDay },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmountSold: { $sum: "$totalAmount" },
+        },
+      },
+    ]);
+
+    const totalAmountSold = salesToday[0]?.totalAmountSold || 0;
+
+    // 🧮 Get lubricants data
+    const lubricants = await lubricantModel.find({ fillingStation: stationObjectId }).lean();
+
+    const totalLubricants = lubricants.length;
+
+    // 💼 Total inventory value (sum of qtyInStock * unitPrice)
+    const totalInventoryValue = lubricants.reduce((sum, lube) => {
+      const qty = Number(lube.qtyInStock) || 0;
+      const price = Number(lube.unitPrice) || 0;
+      return sum + qty * price;
+    }, 0);
+
+    // ⚠️ Count of low-stock lubricants (qtyInStock < reOrderLevel)
+    const lowStockCount = lubricants.filter(l => (Number(l.qtyInStock) || 0) < (Number(l.reOrderLevel) || 15)).length;
+
+    // ✅ Response
+    return res.status(200).json({
+      message: "Daily lubricant summary retrieved successfully",
+      date: startOfDay.toISOString().split("T")[0],
+      summary: {
+        totalAmountSold,
+        totalLubricants,
+        totalInventoryValue,
+        lowStockCount,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in getDailyLubricantSummary:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+};
+
 export const getLubricantSaleById = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -474,7 +554,6 @@ export const getLubricantSaleById = async (req: AuthenticatedRequest, res: Respo
     const stationObjectId = new Types.ObjectId(fillingStation);
     const saleObjectId = new Types.ObjectId(id);
 
-    // aggregation pipeline to join staff and lubricant and project desired fields
     const pipeline: any[] = [
       {
         $match: {
@@ -482,7 +561,6 @@ export const getLubricantSaleById = async (req: AuthenticatedRequest, res: Respo
           fillingStation: stationObjectId,
         },
       },
-      // Join staff
       {
         $lookup: {
           from: "staffs",
@@ -493,7 +571,6 @@ export const getLubricantSaleById = async (req: AuthenticatedRequest, res: Respo
       },
       { $unwind: { path: "$staff", preserveNullAndEmptyArrays: true } },
 
-      // Join lubricant
       {
         $lookup: {
           from: "lubricants",
@@ -504,7 +581,6 @@ export const getLubricantSaleById = async (req: AuthenticatedRequest, res: Respo
       },
       { $unwind: { path: "$lubricant", preserveNullAndEmptyArrays: true } },
 
-      // Project required fields and compute amountSold
       {
         $project: {
           _id: 0,
@@ -545,71 +621,6 @@ export const getLubricantSaleById = async (req: AuthenticatedRequest, res: Respo
   }
 };
 
-
-export const getDailyLubricantSummary = async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const fillingStation = req.user?.station;
-    if (!fillingStation) {
-      return res.status(403).json({ error: "You are not authorized to perform this action" });
-    }
-
-    const stationObjectId = new Types.ObjectId(fillingStation);
-
-    // 🕒 Define today’s range (midnight → 23:59:59)
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-
-    // 💰 Calculate total amount sold today
-    const salesToday = await lubricantSaleModels.aggregate([
-      {
-        $match: {
-          fillingStation: stationObjectId,
-          createdAt: { $gte: startOfDay, $lte: endOfDay },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalAmountSold: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
-        },
-      },
-    ]);
-
-    const totalAmountSold = salesToday[0]?.totalAmountSold || 0;
-
-    // 🧮 Get lubricants data
-    const lubricants = await lubricantModel.find({ fillingStation: stationObjectId }).lean();
-
-    const totalLubricants = lubricants.length;
-
-    // 💼 Total inventory value (sum of qtyInStock * sellingPrice)
-    const totalInventoryValue = lubricants.reduce((sum, lube) => {
-      const qty = Number(lube.qtyInStock) || 0;
-      const price = Number(lube.sellingPrice) || 0;
-      return sum + qty * price;
-    }, 0);
-
-    // ⚠️ Count of low-stock lubricants (qtyInStock < 15)
-    const lowStockCount = lubricants.filter(l => (Number(l.qtyInStock) || 0) < 15).length;
-
-    // ✅ Response
-    return res.status(200).json({
-      message: "Daily lubricant summary retrieved successfully",
-      date: startOfDay.toISOString().split("T")[0],
-      summary: {
-        totalAmountSold,
-        totalLubricants,
-        totalInventoryValue,
-        lowStockCount,
-      },
-    });
-  } catch (err: any) {
-    console.error("Error in getDailyLubricantSummary:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
-  }
-};
 
 // 🆕 NEW: Add grouped transaction sale
 export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Response) => {
@@ -766,7 +777,6 @@ export const getAllLubricantTransactions = async (req: AuthenticatedRequest, res
           fillingStation: new Types.ObjectId(fillingStation),
         },
       },
-      // Join staff
       {
         $lookup: {
           from: "staffs",
@@ -777,7 +787,6 @@ export const getAllLubricantTransactions = async (req: AuthenticatedRequest, res
       },
       { $unwind: { path: "$staff", preserveNullAndEmptyArrays: true } },
       
-      // Project fields
       {
         $project: {
           _id: 0,
@@ -850,3 +859,5 @@ export const getLubricantTransactionById = async (req: AuthenticatedRequest, res
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
+
+
