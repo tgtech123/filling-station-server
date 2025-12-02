@@ -14,6 +14,7 @@ import {
   getLubricantByBarcode,
   getLubricantSaleById,
   getLubricantTransactionById,
+  getMonthlyLubricantSummary,
   getWeeklyLubricantSummaryCalendarWeek,
 } from "../controllers/lubricant.controller";
 
@@ -34,7 +35,7 @@ router.get("/", requireAuth, checkRole("manager", "cashier"), getAllLubricants);
 router.post("/get-lubricant", requireAuth, checkRole("manager", "cashier"), getLubricantByBarcode);
 
 // --- Lubricant sales ---
-router.post("/sell-lubricant", requireAuth, checkRole("cashier"), addLubricantSale);
+// router.post("/sell-lubricant", requireAuth, checkRole("cashier"), addLubricantSale);
 router.post("/sell-lubricant-transaction", requireAuth, checkRole("manager", "cashier"), addLubricantTransaction);
 router.get("/lubricant-sales", requireAuth, checkRole("manager", "cashier"), getAllLubricantSales);
 router.get("/lubricant-sales/:id", requireAuth, checkRole("manager", "cashier"), getLubricantSaleById);
@@ -42,6 +43,7 @@ router.get("/lubricant-sales/:id", requireAuth, checkRole("manager", "cashier"),
 // --- Lubricant summaries ---
 router.get("/lubricant-weekly-summary", requireAuth, checkRole("manager", "cashier"), getWeeklyLubricantSummaryCalendarWeek);
 router.get("/lubricant-daily-summary", requireAuth, checkRole("manager", "cashier"), getDailyLubricantSummary);
+router.get("/lubricant-monthly-summary", requireAuth, checkRole("manager", "cashier"), getMonthlyLubricantSummary);
 
 // --- Transactions ---
 router.get("/transactions", requireAuth, checkRole("manager", "cashier"), getAllLubricantTransactions);

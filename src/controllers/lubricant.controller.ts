@@ -209,23 +209,114 @@ export const getLubricantByBarcode = async (req: AuthenticatedRequest, res: Resp
   }
 };
 
+// export const addLubricantSale = async (req: AuthenticatedRequest, res: Response) => {
+//   try {
+//     const staffId = req.user?.id;
+//     const fillingStation = req.user?.station;
+//     const { lubricantId, paymentMethod, priceSold, qtySold } = req.body;
+
+//     // 🔒 Check authorization
+//     if (!fillingStation) {
+//       return res.status(403).json({ error: "You are not authorized to perform this action" });
+//     }
+
+//     // ✅ Validate input
+//     if (!lubricantId || !paymentMethod || !priceSold || !qtySold) {
+//       return res.status(400).json({ error: "Missing required fields" });
+//     }
+
+//     // 🔍 Find the lubricant in this station
+//     const lubricant = await lubricantModel.findOne({
+//       _id: new mongoose.Types.ObjectId(lubricantId),
+//       fillingStation: new mongoose.Types.ObjectId(fillingStation),
+//     });
+
+//     if (!lubricant) {
+//       return res.status(404).json({ error: "Lubricant not found in this filling station" });
+//     }
+
+//     // 🧮 Check stock level
+//     const currentQty = lubricant.qtyInStock;
+//     if (isNaN(currentQty) || currentQty <= 0) {
+//       return res.status(400).json({ error: "Out of stock" });
+//     }
+
+//     if (qtySold > currentQty) {
+//       return res.status(400).json({ error: `Cannot sell ${qtySold} units. Only ${currentQty} available.` });
+//     }
+
+//     // 💰 Deduct sold quantity and save
+//     const newQty = currentQty - qtySold;
+//     lubricant.qtyInStock = newQty;
+//     await lubricant.save();
+
+//     // 🧾 Record the sale
+//     const sale = await lubricantSaleModels.create({
+//       fillingStation,
+//       lubricant: lubricant._id,
+//       staff: staffId,
+//       paymentMethod,
+//       priceSold,
+//       qtySold,
+//     });
+
+//     return res.status(201).json({
+//       message: "Lubricant sale recorded successfully",
+//       data: sale,
+//       remainingStock: newQty,
+//     });
+//   } catch (error: any) {
+//     console.error("Error adding lubricant sale:", error);
+//     return res.status(500).json({
+//       message: "Server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
 export const addLubricantSale = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const staffId = req.user?.id;
     const fillingStation = req.user?.station;
-    const { lubricantId, paymentMethod, priceSold, qtySold } = req.body;
 
-    // 🔒 Check authorization
+    const { 
+      lubricantId, 
+      paymentMethod, 
+      priceSold, 
+      qtySold,
+      paymentBreakdown // ⭐ NEW FIELD
+    } = req.body;
+
+    // 🔒 Authorization
     if (!fillingStation) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    // ✅ Validate input
+    // ✅ Validate basic fields
     if (!lubricantId || !paymentMethod || !priceSold || !qtySold) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // 🔍 Find the lubricant in this station
+    // ⭐ If payment is mixed → validate breakdown
+    if (paymentMethod === "mixed") {
+      if (!paymentBreakdown) {
+        return res.status(400).json({
+          error: "Payment breakdown is required for mixed payments"
+        });
+      }
+
+      const { cash = 0, transfer = 0, POS = 0 } = paymentBreakdown;
+
+      const sum = cash + transfer + POS;
+
+      if (sum !== priceSold) {
+        return res.status(400).json({
+          error: `Payment breakdown total (${sum}) must equal priceSold (${priceSold})`
+        });
+      }
+    }
+
+    // 🔍 Verify lubricant belongs to station
     const lubricant = await lubricantModel.findOne({
       _id: new mongoose.Types.ObjectId(lubricantId),
       fillingStation: new mongoose.Types.ObjectId(fillingStation),
@@ -235,22 +326,25 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
       return res.status(404).json({ error: "Lubricant not found in this filling station" });
     }
 
-    // 🧮 Check stock level
+    // 🧮 Check stock
     const currentQty = lubricant.qtyInStock;
-    if (isNaN(currentQty) || currentQty <= 0) {
+
+    if (currentQty <= 0) {
       return res.status(400).json({ error: "Out of stock" });
     }
 
     if (qtySold > currentQty) {
-      return res.status(400).json({ error: `Cannot sell ${qtySold} units. Only ${currentQty} available.` });
+      return res.status(400).json({
+        error: `Cannot sell ${qtySold} units. Only ${currentQty} available.`,
+      });
     }
 
-    // 💰 Deduct sold quantity and save
+    // 🧮 Deduct sold quantity
     const newQty = currentQty - qtySold;
     lubricant.qtyInStock = newQty;
     await lubricant.save();
 
-    // 🧾 Record the sale
+    // 🧾 Create the sale record
     const sale = await lubricantSaleModels.create({
       fillingStation,
       lubricant: lubricant._id,
@@ -258,6 +352,7 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
       paymentMethod,
       priceSold,
       qtySold,
+      ...(paymentMethod === "mixed" && { paymentBreakdown }), // ⭐ Only add breakdown if mixed
     });
 
     return res.status(201).json({
@@ -265,6 +360,7 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
       data: sale,
       remainingStock: newQty,
     });
+
   } catch (error: any) {
     console.error("Error adding lubricant sale:", error);
     return res.status(500).json({
@@ -273,6 +369,7 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
     });
   }
 };
+
 
 export const getAllLubricantSales = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -536,6 +633,146 @@ export const getDailyLubricantSummary = async (req: AuthenticatedRequest, res: R
   } catch (err: any) {
     console.error("Error in getDailyLubricantSummary:", err);
     return res.status(500).json({ error: err.message || "Server error" });
+  }
+};
+
+//get monthly transaction 
+export const getMonthlyLubricantSummary = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    // Calculate current month: 1st day (00:00) -> Last day (23:59:59.999)
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+
+    const stationObjectId = new Types.ObjectId(fillingStation);
+
+    // 🔥 Aggregation pipeline using transactions
+    const pipeline: any[] = [
+      { $match: { fillingStation: stationObjectId } },
+
+      {
+        $addFields: {
+          qtyInStockNum: {
+            $convert: { input: "$qtyInStock", to: "double", onError: 0, onNull: 0 },
+          },
+          unitPriceNum: {
+            $convert: { input: "$unitPrice", to: "double", onError: 0, onNull: 0 },
+          },
+        },
+      },
+
+      // 🔥 Lookup from lubricanttransactions
+      {
+        $lookup: {
+          from: "lubricanttransactions",
+          let: { lubricantId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$fillingStation", stationObjectId] },
+                    { $gte: ["$createdAt", monthStart] },
+                    { $lte: ["$createdAt", monthEnd] },
+                  ],
+                },
+              },
+            },
+            // Unwind items array to process each item
+            { $unwind: "$items" },
+            // Match only items for this lubricant
+            {
+              $match: {
+                $expr: { $eq: ["$items.lubricant", "$$lubricantId"] },
+              },
+            },
+            // Sum up quantities and amounts sold
+            {
+              $group: {
+                _id: null,
+                qtySoldThisMonth: { $sum: "$items.qtySold" },
+                amountSoldThisMonth: { $sum: "$items.amount" },
+              },
+            },
+          ],
+          as: "monthlySales",
+        },
+      },
+
+      {
+        $addFields: {
+          qtySoldThisMonth: {
+            $ifNull: [{ $arrayElemAt: ["$monthlySales.qtySoldThisMonth", 0] }, 0],
+          },
+          amountSoldThisMonth: {
+            $ifNull: [{ $arrayElemAt: ["$monthlySales.amountSoldThisMonth", 0] }, 0],
+          },
+        },
+      },
+
+      {
+        $project: {
+          _id: 0,
+          lubricantId: "$_id",
+          barcode: 1,
+          productName: 1,
+          productType: 1,
+          qtyInStock: "$qtyInStockNum",
+          unitPrice: "$unitPriceNum",
+          qtySoldThisMonth: 1,
+          amountSoldThisMonth: 1,
+        },
+      },
+
+      { $sort: { qtySoldThisMonth: -1 } },
+    ];
+
+    const summary = await lubricantModel.aggregate(pipeline).exec();
+
+    // Top three products by sales quantity
+    const topThree = summary.slice(0, 3);
+
+    // Calculate total monthly revenue
+    const totalMonthlyRevenue = summary.reduce(
+      (sum, item) => sum + (item.amountSoldThisMonth || 0),
+      0
+    );
+
+    // Calculate total quantity sold
+    const totalQuantitySold = summary.reduce(
+      (sum, item) => sum + (item.qtySoldThisMonth || 0),
+      0
+    );
+
+    return res.status(200).json({
+      message: "Monthly lubricant summary retrieved successfully",
+      period: {
+        from: monthStart.toISOString(),
+        to: monthEnd.toISOString(),
+        month: monthStart.toLocaleString("en-US", { month: "long", year: "numeric" }),
+      },
+      summary: {
+        totalLubricants: summary.length,
+        totalQuantitySold,
+        totalMonthlyRevenue: Number(totalMonthlyRevenue.toFixed(2)),
+      },
+      data: summary,
+      topThree,
+    });
+  } catch (err: any) {
+    console.error("Error fetching monthly summary:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
 
