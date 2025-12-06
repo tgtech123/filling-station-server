@@ -265,28 +265,51 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
       matchFilter.attendant = new Types.ObjectId(attendantId as string);
     }
 
+    // FIRST: Let's see what raw shift data looks like
+    console.log("🔍 DEBUG: Match Filter:", JSON.stringify(matchFilter));
+    
+    const rawShifts = await Shift.find(matchFilter).limit(1).lean();
+    console.log("🔍 DEBUG: Raw Shift Sample:", JSON.stringify(rawShifts[0], null, 2));
+    
+    if (rawShifts.length > 0) {
+      const shift = rawShifts[0];
+      console.log("🔍 DEBUG: Attendant ID from shift:", shift.attendant);
+      console.log("🔍 DEBUG: Pump ID from shift:", shift.pump);
+      
+      // Check if attendant exists
+      if (shift.attendant) {
+        const attendantExists = await Staff.findById(shift.attendant).lean();
+        console.log("🔍 DEBUG: Attendant found:", attendantExists);
+      }
+    }
+
     // Get shifts with lookup to get product type from tank
     const shifts = await Shift.aggregate([
       { $match: matchFilter },
+      
+      // Lookup attendant information
       {
         $lookup: {
-          from: "tanks",
-          localField: "pump",
-          foreignField: "pumps._id",
-          as: "tankDoc",
-        },
-      },
-      { $unwind: { path: "$tankDoc", preserveNullAndEmptyArrays: true } },
-      { $unwind: { path: "$tankDoc.tanks", preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: "staff",
+          from: "staffs", // Changed from "staff" to "staffs"
           localField: "attendant",
           foreignField: "_id",
           as: "attendantDoc",
         },
       },
+      
+      // Debug: Add a field to see if lookup worked
+      {
+        $addFields: {
+          attendantLookupCount: { $size: "$attendantDoc" },
+          originalAttendantId: "$attendant",
+        }
+      },
+      
       { $unwind: { path: "$attendantDoc", preserveNullAndEmptyArrays: true } },
+      
+      // Note: Product is already in the shift document, no need for complex lookup
+      
+      // Lookup reconciliation information
       {
         $lookup: {
           from: "cashreconciliations",
@@ -301,30 +324,83 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
           as: "reconciliation",
         },
       },
+      
+      // Project final fields with null handling
       {
         $project: {
           shiftId: "$_id",
           shiftDate: 1,
-          attendantName: {
-            $concat: ["$attendantDoc.firstName", " ", "$attendantDoc.lastName"],
+          
+          // Debug fields
+          debug: {
+            attendantLookupCount: "$attendantLookupCount",
+            originalAttendantId: "$originalAttendantId",
+            attendantDocFirstName: "$attendantDoc.firstName",
+            attendantDocLastName: "$attendantDoc.lastName",
+            productFromShift: "$product",
           },
-          pumpTitle: 1,
-          product: "$tankDoc.tanks.fuelType",
+          
+          attendantName: {
+            $cond: {
+              if: { $and: ["$attendantDoc.firstName", "$attendantDoc.lastName"] },
+              then: { 
+                $concat: [
+                  { $ifNull: ["$attendantDoc.firstName", ""] }, 
+                  " ", 
+                  { $ifNull: ["$attendantDoc.lastName", ""] }
+                ] 
+              },
+              else: {
+                $cond: {
+                  if: "$attendantDoc.fullName",
+                  then: "$attendantDoc.fullName",
+                  else: {
+                    $cond: {
+                      if: "$attendantDoc.firstName",
+                      then: "$attendantDoc.firstName",
+                      else: "Unknown Attendant"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          pumpTitle: { $ifNull: ["$pumpTitle", "Unknown Pump"] },
+          product: { $ifNull: ["$product", "Unknown"] }, // Product is directly in shift document
           shiftOpen: "$openingMeterReading",
           shiftClose: "$closingMeterReading",
           litresSold: 1,
           pricePerLtr: 1,
           amount: "$totalAmount",
-          cashReceived: { $ifNull: [{ $arrayElemAt: ["$reconciliation.cashReceived", 0] }, null] },
-          discrepancies: { $ifNull: [{ $arrayElemAt: ["$reconciliation.discrepancy", 0] }, null] },
-          reconciliationStatus: { $ifNull: [{ $arrayElemAt: ["$reconciliation.status", 0] }, "Pending"] },
+          cashReceived: { 
+            $ifNull: [
+              { $arrayElemAt: ["$reconciliation.cashReceived", 0] }, 
+              null
+            ] 
+          },
+          discrepancies: { 
+            $ifNull: [
+              { $arrayElemAt: ["$reconciliation.discrepancy", 0] }, 
+              null
+            ] 
+          },
+          reconciliationStatus: { 
+            $ifNull: [
+              { $arrayElemAt: ["$reconciliation.status", 0] }, 
+              "Pending"
+            ] 
+          },
           reconciled: { $gt: [{ $size: "$reconciliation" }, 0] },
         },
       },
+      
       { $sort: { shiftDate: -1 } },
       { $skip: skip },
       { $limit: limitNum },
     ]).exec();
+
+    // Log the aggregation results for debugging
+    console.log("🔍 DEBUG: Aggregation Results:", JSON.stringify(shifts[0], null, 2));
 
     // Filter by status if provided (for reconciliation status)
     let filteredShifts = shifts;
@@ -346,17 +422,19 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
         day: "2-digit",
         year: "2-digit",
       }),
-      attendant: shift.attendantName,
-      pumpNo: shift.pumpTitle,
+      attendant: shift.attendantName || "Unknown Attendant",
+      pumpNo: shift.pumpTitle || "Unknown Pump",
       product: shift.product || "Unknown",
       shiftOpen: shift.shiftOpen || null,
       shiftClose: shift.shiftClose || null,
-      litresSold: shift.litresSold || 0,
-      amount: shift.amount || 0,
-      cashReceived: shift.cashReceived,
-      discrepancies: shift.discrepancies !== null ? shift.discrepancies : null,
+      litresSold: Number(shift.litresSold) || 0,
+      amount: Number(shift.amount) || 0,
+      cashReceived: shift.cashReceived !== null ? Number(shift.cashReceived) : null,
+      discrepancies: shift.discrepancies !== null ? Number(shift.discrepancies) : null,
       reconciled: shift.reconciled,
       status: shift.reconciliationStatus,
+      // Include debug info temporarily
+      debug: shift.debug,
     }));
 
     return res.status(200).json({
@@ -374,4 +452,3 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
-
