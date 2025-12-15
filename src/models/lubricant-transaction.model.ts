@@ -86,7 +86,7 @@ const lubricantTransactionSchema = new Schema<ILubricantTransaction>(
     },
     paymentMethod: {
       type: String,
-      enum: ["cash", "transfer", "POS"],
+      enum: ["cash", "transfer", "POS", "mixed"],
       required: true,
     },
   },
