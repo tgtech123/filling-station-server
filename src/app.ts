@@ -15,6 +15,7 @@ import attendant from "./routes/attendant.route"
 import cashier from "./routes/cashier.route"
 import shift from "./routes/shift.route"
 import reconciliation from "./routes/reconciliation.route"
+import supervisor from "./routes/supervisor.route"
 
 
 import cors from 'cors'
@@ -50,6 +51,7 @@ app.use("/api/attendant", attendant)
 app.use("/api/cashier", cashier)
 app.use("/api/shifts", shift)
 app.use("/api/reconcile", reconciliation)
+app.use("/api/supervisor", supervisor)
 
 
 

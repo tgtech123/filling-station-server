@@ -255,6 +255,111 @@ run_test "Delete Reconciliation (invalid ID test)" \
     "DELETE" "/reconcile/000000000000000000000000" "" "404" ""
 
 # ============================================
+# Supervisor Endpoints
+# ============================================
+print_header "6. Supervisor Dashboard Endpoints"
+
+test_with_role_check "Get Supervisor Dashboard" \
+    "GET" "/supervisor/dashboard" "" "supervisor"
+
+# ============================================
+# Shift Approval Endpoints
+# ============================================
+print_header "7. Shift Approval Endpoints"
+
+test_with_role_check "Get Pending Shifts" \
+    "GET" "/supervisor/shift-approval/pending?page=1&limit=10" "" "supervisor"
+
+test_with_role_check "Get Approved Shifts" \
+    "GET" "/supervisor/shift-approval/approved?page=1&limit=10" "" "supervisor"
+
+test_with_role_check "Approve Shift" \
+    "POST" "/supervisor/shift-approval/000000000000000000000000/approve" \
+    '{"comment":"Approved by supervisor"}' \
+    "supervisor"
+
+# ============================================
+# Schedule Shift Endpoints
+# ============================================
+print_header "8. Schedule Shift Endpoints"
+
+test_with_role_check "Get Attendant Directory" \
+    "GET" "/supervisor/schedule/attendant-directory" "" "supervisor"
+
+test_with_role_check "Get Scheduled Attendants" \
+    "GET" "/supervisor/schedule/scheduled-attendants" "" "supervisor"
+
+test_with_role_check "Schedule Attendant" \
+    "POST" "/supervisor/schedule/attendant" \
+    '{"attendantId":"000000000000000000000000","shiftType":"One-Day-Morning","startDate":"2024-01-15","pumpId":"000000000000000000000000"}' \
+    "supervisor"
+
+# ============================================
+# Sales & Cash Report Endpoints
+# ============================================
+print_header "9. Sales & Cash Report Endpoints"
+
+test_with_role_check "Get Sales Overview" \
+    "GET" "/supervisor/reports/sales-overview?duration=thismonth" "" "supervisor"
+
+test_with_role_check "Get Cash Overview" \
+    "GET" "/supervisor/reports/cash-overview?page=1&limit=10" "" "supervisor"
+
+test_with_role_check "Export Report" \
+    "POST" "/supervisor/reports/export" \
+    '{"reportType":"sales","startDate":"2024-01-01","endDate":"2024-01-31"}' \
+    "supervisor"
+
+# ============================================
+# Activity Logs Endpoints
+# ============================================
+print_header "10. Activity Logs Endpoints"
+
+test_with_role_check "Get Activity Logs" \
+    "GET" "/supervisor/activity-logs?page=1&limit=10" "" "supervisor"
+
+test_with_role_check "Get Activity Logs (with filters)" \
+    "GET" "/supervisor/activity-logs?status=Success&role=supervisor" "" "supervisor"
+
+# ============================================
+# Dip Reading Endpoints
+# ============================================
+print_header "11. Dip Reading Endpoints"
+
+test_with_role_check "Get Dip Readings" \
+    "GET" "/supervisor/dip-reading" "" "supervisor"
+
+test_with_role_check "Submit Dip Reading" \
+    "POST" "/supervisor/dip-reading" \
+    '{"tankId":"000000000000000000000000","manualReading":2500,"notes":"Manual reading taken"}' \
+    "supervisor"
+
+test_with_role_check "Get Dip Reading History" \
+    "GET" "/supervisor/dip-reading/history?page=1&limit=10" "" "supervisor"
+
+# ============================================
+# Pump Performance Endpoints
+# ============================================
+print_header "12. Pump Performance Endpoints"
+
+test_with_role_check "Get Pump Performance" \
+    "GET" "/supervisor/pump-performance" "" "supervisor"
+
+# ============================================
+# Staff Performance Endpoints
+# ============================================
+print_header "13. Staff Performance Endpoints"
+
+test_with_role_check "Get Staff Performance" \
+    "GET" "/supervisor/staff-performance?period=thismonth" "" "supervisor"
+
+test_with_role_check "Get Staff Performance Detail" \
+    "GET" "/supervisor/staff-performance/000000000000000000000000" "" "supervisor"
+
+test_with_role_check "Get Scheduled Attendants by Type" \
+    "GET" "/supervisor/schedule/scheduled-attendants-by-type" "" "supervisor"
+
+# ============================================
 # Test Summary
 # ============================================
 print_header "Test Summary"
