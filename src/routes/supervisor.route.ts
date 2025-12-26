@@ -43,11 +43,13 @@ router.get("/schedule/scheduled-attendants-by-type", getScheduledAttendantsByTyp
 router.post("/schedule/attendant", scheduleAttendant);
 
 // Reports
+//this endpoint is suppposed to be for manager not supervisor
 router.get("/reports/sales-overview", getSalesOverview);
 router.get("/reports/cash-overview", getCashOverview);
 router.post("/reports/export", exportReport);
 
 // Activity Logs
+//this endpoint is suppposed to be for manager not supervisor
 router.get("/activity-logs", getActivityLogs);
 
 // Dip Reading
