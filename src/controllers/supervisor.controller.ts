@@ -455,9 +455,9 @@ export const approveShift = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(404).json({ message: "Shift not found" });
     }
 
-    if (shift.fillingStation.toString() !== stationId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
+   if (shift.fillingStation.toString() !== stationId.toString()) {
+  return res.status(403).json({ message: "Unauthorized" });
+}
 
     // Check if reconciliation exists
     let reconciliation = await CashReconciliation.findOne({ shift: shiftId });
@@ -679,10 +679,9 @@ export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response
 
     // Get attendant
     const attendant = await Staff.findById(attendantId);
-    if (!attendant || attendant.station.toString() !== stationId) {
+    if (!attendant || attendant.station.toString() !== stationId.toString()) {
       return res.status(404).json({ message: "Attendant not found" });
     }
-
     // Get pump info
     const stationTanks = await Tank.findOne({ fillingStation: stationId }).lean();
     if (!stationTanks) {
@@ -1237,7 +1236,7 @@ export const getDipReadings = async (req: AuthenticatedRequest, res: Response) =
         manualReading: latestReading?.manualReading || null,
         deviation: latestReading?.deviation || null,
         status: latestReading?.status || "Pending",
-        lastUpdated: latestReading?.readingDate || stationTanks.updatedAt,
+        lastUpdated: latestReading?.readingDate || tank.updatedAt,
         comparison: latestReading
           ? latestReading.deviation === 0
             ? "Readings Matched"
@@ -1709,7 +1708,7 @@ export const getStaffPerformanceDetail = async (req: AuthenticatedRequest, res: 
 
     // Get staff member
     const staff = await Staff.findById(staffId).lean();
-    if (!staff || staff.station.toString() !== stationId) {
+    if (!staff || staff.station.toString() !== stationId.toString()) {
       return res.status(404).json({ message: "Staff member not found" });
     }
 
