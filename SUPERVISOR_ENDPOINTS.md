@@ -311,7 +311,11 @@ Schedule an attendant for shifts.
 
 ---
 
-## 4. Sales & Cash Report
+> **Note:** Sales & Cash Report and Activity Logs endpoints have been moved to Manager endpoints. See `/api/manager/reports/*` and `/api/manager/activity-logs` for these endpoints.
+
+---
+
+## 4. Dip Reading
 
 ### GET `/api/supervisor/reports/sales-overview`
 
@@ -443,66 +447,6 @@ Export reports in various formats.
   "dateRange": {
     "start": "2024-01-01T00:00:00.000Z",
     "end": "2024-01-31T23:59:59.999Z"
-  }
-}
-```
-
----
-
-## 5. Activity Logs
-
-### GET `/api/supervisor/activity-logs`
-
-Get activity logs with summary statistics.
-
-**Query Parameters:**
-- `page` (optional): Page number (default: 1)
-- `limit` (optional): Items per page (default: 10)
-- `startDate` (optional): Filter start date
-- `endDate` (optional): Filter end date
-- `role` (optional): Filter by user role
-- `status` (optional): Filter by status (Success, Failed, Critical)
-- `search` (optional): Search by user name, action, or description
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "summary": {
-      "totalActivities": 1334,
-      "activeUsers": 7,
-      "failedAttempts": 6,
-      "criticalActions": 3
-    },
-    "logs": [
-      {
-        "_id": "log_id",
-        "date": "2024-04-17T20:25:00.000Z",
-        "user": "John Melo",
-        "role": "Attendant",
-        "action": "Failed login",
-        "description": "Error logging in due to network",
-        "ipAddress": "IP-1343-34546",
-        "status": "Failed"
-      },
-      {
-        "_id": "log_id",
-        "date": "2024-04-17T20:25:00.000Z",
-        "user": "John Melo",
-        "role": "Supervisor",
-        "action": "Shift Approved",
-        "description": "Reconciled shift approved by supervisor",
-        "ipAddress": "IP-1343-34546",
-        "status": "Success"
-      }
-    ],
-    "pagination": {
-      "page": 1,
-      "limit": 10,
-      "total": 1334,
-      "pages": 134
-    }
   }
 }
 ```
@@ -652,7 +596,7 @@ Get dip reading history.
 
 ---
 
-## 7. Pump Performance
+## 6. Pump Performance
 
 ### GET `/api/supervisor/pump-performance`
 
@@ -700,7 +644,7 @@ Get pump performance data with sales metrics and reorder alerts.
 
 ---
 
-## 8. Staff Performance
+## 7. Staff Performance
 
 ### GET `/api/supervisor/staff-performance`
 
@@ -801,7 +745,7 @@ Get detailed performance for a specific staff member.
 
 ---
 
-## 9. Enhanced Scheduled Attendants
+## 8. Enhanced Scheduled Attendants
 
 ### GET `/api/supervisor/schedule/scheduled-attendants-by-type`
 

@@ -19,10 +19,12 @@ Authorization: Bearer <token>
 2. [Staff Management](#2-staff-management)
 3. [Financial Overview](#3-financial-overview)
 4. [Expense Management](#4-expense-management)
-5. [Tank Management](#5-tank-management)
-6. [Pump Management](#6-pump-management)
-7. [Delivery/Supply Management](#7-deliverysupply-management)
-8. [Lubricant Management](#8-lubricant-management)
+5. [Sales & Cash Reports](#5-sales--cash-reports)
+6. [Activity Logs](#6-activity-logs)
+7. [Tank Management](#7-tank-management)
+8. [Pump Management](#8-pump-management)
+9. [Delivery/Supply Management](#9-deliverysupply-management)
+10. [Lubricant Management](#10-lubricant-management)
 
 ---
 
@@ -564,7 +566,195 @@ Export expenses to CSV/Excel.
 
 ---
 
-## 5. Tank Management
+## 5. Sales & Cash Reports
+
+### GET `/api/manager/reports/sales-overview`
+
+Get sales report overview with trends and distribution.
+
+**Query Parameters:**
+- `duration` (optional): Duration filter (today, thisweek, thismonth, lastmonth, thisyear) - default: "thismonth"
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "todaySales": 120000000,
+    "totalTransactions": 4234,
+    "fuelSold": 4000,
+    "salesTrend": [
+      {
+        "month": "Jan",
+        "sales": 100000000
+      },
+      {
+        "month": "Feb",
+        "sales": 110000000
+      }
+    ],
+    "productSalesDistribution": [
+      {
+        "product": "PMS",
+        "litres": 2324.3,
+        "percentage": 0
+      },
+      {
+        "product": "AGO",
+        "litres": 2000,
+        "percentage": 0
+      }
+    ],
+    "recentTransactions": [
+      {
+        "timestamp": "2024-01-15T12:32:00.000Z",
+        "txnId": "TXN 001",
+        "pumpNo": "Pump 1",
+        "productType": "PMS",
+        "quantity": "22L",
+        "amount": 24000,
+        "role": "Attendant"
+      }
+    ]
+  }
+}
+```
+
+### GET `/api/manager/reports/cash-overview`
+
+Get cash report overview with reconciliation data.
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 10)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "expectedCashToday": 120000000,
+    "actualCashToday": 122000000,
+    "totalDiscrepancy": 2000000,
+    "reconciliationRate": 101.7,
+    "records": [
+      {
+        "_id": "reconciliation_id",
+        "date": "2024-04-17T00:00:00.000Z",
+        "attendant": "John Dave",
+        "pumpNo": "Pump 1",
+        "product": "Diesel",
+        "litresSold": 30,
+        "pricePerLtr": 150,
+        "amount": 123000000,
+        "cashReceived": 123000000,
+        "discrepancies": -3000,
+        "status": "Flagged"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 50,
+      "pages": 5
+    }
+  }
+}
+```
+
+### POST `/api/manager/reports/export`
+
+Export reports in various formats.
+
+**Request Body:**
+```json
+{
+  "reportType": "sales",
+  "startDate": "2024-01-01",
+  "endDate": "2024-01-31",
+  "filters": {
+    "pump": ["Pump 1", "Pump 2"],
+    "product": ["PMS", "Diesel"]
+  }
+}
+```
+
+**Report Types:**
+- `sales` - Sales report
+- `cash-reconciliation` - Cash reconciliation report
+- `shift-reports` - Shift reports
+- `fuel-inventory` - Fuel inventory
+- `staff-performance` - Staff performance
+- `lubricant-inventory` - Lubricant inventory
+- `activity-logs` - Activity logs
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Report exported successfully",
+  "data": [...],
+  "reportType": "sales",
+  "dateRange": {
+    "start": "2024-01-01T00:00:00.000Z",
+    "end": "2024-01-31T23:59:59.999Z"
+  }
+}
+```
+
+---
+
+## 6. Activity Logs
+
+### GET `/api/manager/activity-logs`
+
+Get activity logs with filtering options.
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 10)
+- `startDate` (optional): Filter start date
+- `endDate` (optional): Filter end date
+- `role` (optional): Filter by role
+- `status` (optional): Filter by status (Success, Failed, Critical)
+- `search` (optional): Search in user name, action, or description
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "totalActivities": 1000,
+      "activeUsers": 15,
+      "failedAttempts": 5,
+      "criticalActions": 10
+    },
+    "logs": [
+      {
+        "_id": "log_id",
+        "date": "2024-01-15T10:00:00.000Z",
+        "user": "John Doe",
+        "role": "manager",
+        "action": "Staff Created",
+        "description": "Created new staff member",
+        "ipAddress": "192.168.1.1",
+        "status": "Success"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 1000,
+      "pages": 100
+    }
+  }
+}
+```
+
+---
+
+## 7. Tank Management
 
 ### POST `/api/tank/add-tank`
 
@@ -690,7 +880,7 @@ Delete a tank.
 
 ---
 
-## 6. Pump Management
+## 8. Pump Management
 
 ### POST `/api/pump/add-pump`
 
@@ -808,7 +998,7 @@ Delete a pump.
 
 ---
 
-## 7. Delivery/Supply Management
+## 9. Delivery/Supply Management
 
 ### POST `/api/delivery/add-supply`
 
@@ -920,7 +1110,7 @@ Delete a delivery/supply.
 
 ---
 
-## 8. Lubricant Management
+## 10. Lubricant Management
 
 Most lubricant endpoints are accessible to both `manager` and `cashier` roles.
 

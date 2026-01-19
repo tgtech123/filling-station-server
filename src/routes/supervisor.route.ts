@@ -9,10 +9,6 @@ import {
   getAttendantDirectory,
   getScheduledAttendants,
   scheduleAttendant,
-  getSalesOverview,
-  getCashOverview,
-  exportReport,
-  getActivityLogs,
   getDipReadings,
   submitDipReading,
   getDipReadingHistory,
@@ -41,14 +37,6 @@ router.get("/schedule/attendant-directory", getAttendantDirectory);
 router.get("/schedule/scheduled-attendants", getScheduledAttendants);
 router.get("/schedule/scheduled-attendants-by-type", getScheduledAttendantsByType);
 router.post("/schedule/attendant", scheduleAttendant);
-
-// Reports
-router.get("/reports/sales-overview", getSalesOverview);
-router.get("/reports/cash-overview", getCashOverview);
-router.post("/reports/export", exportReport);
-
-// Activity Logs
-router.get("/activity-logs", getActivityLogs);
 
 // Dip Reading
 router.get("/dip-reading", getDipReadings);
