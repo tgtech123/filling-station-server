@@ -17,6 +17,9 @@ import shift from "./routes/shift.route"
 import reconciliation from "./routes/reconciliation.route"
 import supervisor from "./routes/supervisor.route"
 import manager from "./routes/manager.route"
+import accountant from "./routes/accountant.route"
+import trends from "./routes/trends.route"
+import commissions from "./routes/commissions.route"
 
 
 import cors from 'cors'
@@ -54,6 +57,9 @@ app.use("/api/shifts", shift)
 app.use("/api/reconcile", reconciliation)
 app.use("/api/supervisor", supervisor)
 app.use("/api/manager", manager)
+app.use("/api/accountant", accountant)
+app.use("/api/trends", trends)
+app.use("/api/commissions", commissions)
 
 
 
