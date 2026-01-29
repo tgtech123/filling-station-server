@@ -803,7 +803,7 @@ export const calculateCommissions = async (req: AuthenticatedRequest, res: Respo
       }
 
       // Get commission rate
-      const commissionRate = await getCommissionRate(stationId, staffMember.role);
+      const commissionRate = await getCommissionRate(stationId.toString(), staffMember.role);
 
       // Calculate commission
       const commissionAmount = (totalSales * commissionRate) / 100;
@@ -818,7 +818,7 @@ export const calculateCommissions = async (req: AuthenticatedRequest, res: Respo
 
       // Calculate bonus
       const bonus = await calculateBonus(
-        stationId,
+        stationId.toString(),
         staffMember._id.toString(),
         totalSales,
         monthNum,
