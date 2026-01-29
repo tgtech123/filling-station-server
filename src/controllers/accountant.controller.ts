@@ -364,6 +364,23 @@ export const getAuditedReconciledSales = async (req: AuthenticatedRequest, res: 
     }
 
     // Format response
+    // const formattedReconciliations = filteredReconciliations.map((recon: any) => ({
+    //   _id: recon._id,
+    //   date: recon.shiftDate,
+    //   attendant: isPopulated(recon.attendant)
+    //     ? `${recon.attendant.firstName} ${recon.attendant.lastName}`
+    //     : "Unknown",
+    //   shiftType: (recon.shift as any)?.shiftType || "Unknown",
+    //   pumpNo: recon.pumpTitle,
+    //   litresSold: recon.litresSold,
+    //   amount: recon.expectedAmount,
+    //   cashReceived: recon.cashReceived,
+    //   discrepancies: recon.discrepancy,
+    //   status: recon.status,
+    //   shiftId: recon.shift?._id || recon.shift,
+    //   reconciliationId: recon._id,
+    // }));
+
     const formattedReconciliations = filteredReconciliations.map((recon: any) => ({
       _id: recon._id,
       date: recon.shiftDate,
@@ -379,6 +396,11 @@ export const getAuditedReconciledSales = async (req: AuthenticatedRequest, res: 
       status: recon.status,
       shiftId: recon.shift?._id || recon.shift,
       reconciliationId: recon._id,
+      // Add these 4 lines:
+      openingMeterReading: (recon.shift as any)?.openingMeterReading || 0,
+      closingMeterReading: (recon.shift as   any)?.closingMeterReading || 0,
+      product: (recon.shift as any)?.product || "N/A",
+      pricePerLtr: (recon.shift as any)?.pricePerLtr || 0,
     }));
 
     // Get total count
