@@ -5,8 +5,9 @@ import {
   getSalesOverview,
   getCashOverview,
   exportReport,
-  getActivityLogs,
-} from "../controllers/supervisor.controller";
+  getSalesAndCashReport,
+} from "../controllers/managerReports.controller";
+import { getActivityLogs } from "../controllers/supervisor.controller";
 
 const router = express.Router();
 
@@ -17,6 +18,7 @@ router.use(checkRole("manager"));
 // Reports
 router.get("/reports/sales-overview", getSalesOverview);
 router.get("/reports/cash-overview", getCashOverview);
+router.get("/reports/sales-and-cash", getSalesAndCashReport);
 router.post("/reports/export", exportReport);
 
 // Activity Logs

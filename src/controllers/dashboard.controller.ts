@@ -149,11 +149,11 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
     /***********************
      * 4) Lubricants & low-stock counts (below 15)
      ***********************/
-    const lubricants = await Lubricant.find({ fillingStation: stationObjectId }).select("qtyInStock sellingPrice").lean();
+    const lubricants = await Lubricant.find({ fillingStation: stationObjectId }).select("qtyInStock unitPrice").lean();
     const totalLubricantsAvailable = lubricants.length;
     const totalInventoryValue = lubricants.reduce((sum, l) => {
       const qty = Number(l.qtyInStock) || 0;
-      const price = Number(l.sellingPrice) || 0;
+      const price = Number(l.unitPrice) || 0;
       return sum + qty * price;
     }, 0);
     const lowStockThreshold = 15;
