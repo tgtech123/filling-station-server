@@ -3,6 +3,8 @@ import Tank from "../models/tanks.model";
 import { AuthenticatedRequest } from "../interfaces";
 import Pump from "../models/pump.model";
 import { Types } from "mongoose";
+import Activity from "../models/activity.model";
+import Notification from "../models/notification.model";
 
 export const addTank = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -190,6 +192,29 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
 
     // 6️⃣ Save updated station record
     await station.save();
+
+    // Log alert if tank drops below 20% capacity (fire-and-forget)
+    const percentFull = tank.limit > 0 ? (tank.currentQuantity / tank.limit) * 100 : 0;
+    if (percentFull < 20) {
+      Activity.create({
+        fillingStation: fillingStationId,
+        type: "alert",
+        title: "Inventory Alert",
+        description: `${tank.fuelType} (${tank.title}) below 20% — ${tank.currentQuantity} Ltrs remaining`,
+        timestamp: new Date(),
+        severity: "warning",
+      }).catch((err) => console.error("Activity log error (updateTankDetails):", err));
+
+      Notification.create({
+        fillingStation: fillingStationId,
+        type: "alert",
+        category: "tank_alert",
+        title: "Low Tank Alert",
+        body: `${tank.fuelType} tank ${tank.title} is below 20% — ${tank.currentQuantity} Ltrs remaining`,
+        severity: "warning",
+        timestamp: new Date(),
+      }).catch((err) => console.error("Notification error (tank alert):", err));
+    }
 
     return res.status(200).json({
       message: "Tank updated successfully",

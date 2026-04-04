@@ -3,6 +3,8 @@ import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Lubricant from "../models/lubricant.model";
 import LubricantPurchase, { ILubricantPurchaseItem } from "../models/lubricant-purchase.model";
+import Activity from "../models/activity.model";
+import Notification from "../models/notification.model";
 
 // 🆕 Create a new lubricant purchase
 export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Response) => {
@@ -108,6 +110,29 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
     );
 
     await session.commitTransaction();
+
+    // Log stock activity (fire-and-forget)
+    const itemSummary = processedItems
+      .map((i) => `${i.productName} ×${i.quantity}`)
+      .join(", ");
+    Activity.create({
+      fillingStation,
+      type: "stock",
+      title: "Stock Added",
+      description: `${itemSummary} added to stock`,
+      timestamp: new Date(),
+      severity: null,
+    }).catch((err) => console.error("Activity log error (addLubricantPurchase):", err));
+
+    Notification.create({
+      fillingStation,
+      type: "alert",
+      category: "low_stock",
+      title: "Stock Updated",
+      body: `${itemSummary} added to stock`,
+      severity: "info",
+      timestamp: new Date(),
+    }).catch((err) => console.error("Notification error (addLubricantPurchase):", err));
 
     return res.status(201).json({
       message: "Lubricant purchase recorded successfully",

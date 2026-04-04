@@ -5,6 +5,7 @@ import lubricantModel from "../models/lubricant.model";
 import lubricantSaleModels from "../models/lubricant-sale.models";
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import mongoose from "mongoose";
+import Activity from "../models/activity.model";
 
 export const addLubricant = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -354,6 +355,16 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
       qtySold,
       ...(paymentMethod === "mixed" && { paymentBreakdown }), // ⭐ Only add breakdown if mixed
     });
+
+    // Log sale activity (fire-and-forget)
+    Activity.create({
+      fillingStation,
+      type: "sale",
+      title: `Sale completed — ${lubricant.productName}`,
+      description: `${lubricant.productName} – ${qtySold} units sold`,
+      timestamp: new Date(),
+      severity: null,
+    }).catch((err) => console.error("Activity log error (addLubricantSale):", err));
 
     return res.status(201).json({
       message: "Lubricant sale recorded successfully",
@@ -976,6 +987,22 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
     );
 
     await session.commitTransaction();
+
+    // Log sale activity (fire-and-forget)
+    console.log("🔔 About to create activity for lubricant sale");
+    const itemSummary = processedItems
+      .map((i) => `${i.productName} ×${i.qtySold}`)
+      .join(", ");
+    Activity.create({
+      fillingStation: stationObjectId,
+      type: "sale",
+      title: `Sale completed — ${processedItems.length > 1 ? `${processedItems.length} items` : processedItems[0].productName}`,
+      description: `${itemSummary} sold`,
+      timestamp: new Date(),
+      severity: null,
+    })
+      .then(() => console.log("✅ Activity created successfully"))
+      .catch((err) => console.error("Activity log error (addLubricantTransaction):", err));
 
     return res.status(201).json({
       success: true,

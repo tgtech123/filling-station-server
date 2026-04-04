@@ -3,6 +3,7 @@ import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import CashReconciliation from "../models/cashReconciliation.model";
 import Shift from "../models/shift.model";
+import Notification from "../models/notification.model";
 
 // Helper function to check if populated field is an object
 const isPopulated = (field: any): field is { _id: any; firstName?: string; lastName?: string; email?: string } => {
@@ -66,7 +67,32 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
 
       // The pre-save hook will calculate discrepancy and status
       await reconciliation.save();
-      
+
+      if (reconciliation.status === "Flagged") {
+        const discAbs = Math.abs(reconciliation.discrepancy ?? 0);
+        Notification.create({
+          fillingStation: new Types.ObjectId(fillingStation),
+          type: "alert",
+          category: "cash_reconciliation",
+          title: "Cash Discrepancy Flagged",
+          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of ₦${discAbs.toLocaleString()}`,
+          severity: "critical",
+          timestamp: new Date(),
+          targetRole: "accountant",
+        }).catch((err) => console.error("Notification error (reconciliation flagged - accountant):", err));
+
+        Notification.create({
+          fillingStation: new Types.ObjectId(fillingStation),
+          type: "alert",
+          category: "cash_reconciliation",
+          title: "Cash Discrepancy on Your Shift",
+          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
+          severity: "critical",
+          timestamp: new Date(),
+          targetRole: "attendant",
+        }).catch((err) => console.error("Notification error (reconciliation flagged - attendant):", err));
+      }
+
       return res.status(200).json({
         message: "Cash reconciliation updated successfully",
         data: {
@@ -108,7 +134,32 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
 
       // The pre-save hook will calculate discrepancy and status
       await reconciliation.save();
-      
+
+      if (reconciliation.status === "Flagged") {
+        const discAbs = Math.abs(reconciliation.discrepancy ?? 0);
+        Notification.create({
+          fillingStation: new Types.ObjectId(fillingStation),
+          type: "alert",
+          category: "cash_reconciliation",
+          title: "Cash Discrepancy Flagged",
+          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of ₦${discAbs.toLocaleString()}`,
+          severity: "critical",
+          timestamp: new Date(),
+          targetRole: "accountant",
+        }).catch((err) => console.error("Notification error (reconciliation flagged - accountant):", err));
+
+        Notification.create({
+          fillingStation: new Types.ObjectId(fillingStation),
+          type: "alert",
+          category: "cash_reconciliation",
+          title: "Cash Discrepancy on Your Shift",
+          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
+          severity: "critical",
+          timestamp: new Date(),
+          targetRole: "attendant",
+        }).catch((err) => console.error("Notification error (reconciliation flagged - attendant):", err));
+      }
+
       return res.status(201).json({
         message: "Cash reconciled successfully",
         data: {

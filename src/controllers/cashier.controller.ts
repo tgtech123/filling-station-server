@@ -764,50 +764,20 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
     const limitNum = Number(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Build date filter
-    let dateFilter: any = {};
-    if (startDate && endDate) {
-      const start = new Date(startDate as string);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(endDate as string);
-      end.setHours(23, 59, 59, 999);
-      dateFilter.shiftDate = { $gte: start, $lte: end };
-    } else {
-      // Default to today
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayEnd = new Date();
-      todayEnd.setHours(23, 59, 59, 999);
-      dateFilter.shiftDate = { $gte: today, $lte: todayEnd };
-    }
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // Build match filter
+    // Build match filter — all completed shifts from the last 24 hours
     const matchFilter: any = {
       fillingStation: stationObjectId,
-      status: "Completed", // Only completed shifts
-      ...dateFilter,
+      status: "Completed",
+      $or: [
+        { createdAt: { $gte: twentyFourHoursAgo } },
+        { shiftDate: { $gte: twentyFourHoursAgo } },
+      ],
     };
 
     if (attendantId) {
       matchFilter.attendant = new Types.ObjectId(attendantId as string);
-    }
-
-    // FIRST: Let's see what raw shift data looks like
-    console.log("🔍 DEBUG: Match Filter:", JSON.stringify(matchFilter));
-    
-    const rawShifts = await Shift.find(matchFilter).limit(1).lean();
-    console.log("🔍 DEBUG: Raw Shift Sample:", JSON.stringify(rawShifts[0], null, 2));
-    
-    if (rawShifts.length > 0) {
-      const shift = rawShifts[0];
-      console.log("🔍 DEBUG: Attendant ID from shift:", shift.attendant);
-      console.log("🔍 DEBUG: Pump ID from shift:", shift.pump);
-      
-      // Check if attendant exists
-      if (shift.attendant) {
-        const attendantExists = await Staff.findById(shift.attendant).lean();
-        console.log("🔍 DEBUG: Attendant found:", attendantExists);
-      }
     }
 
     // Get shifts with lookup to get product type from tank
@@ -822,14 +792,6 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
           foreignField: "_id",
           as: "attendantDoc",
         },
-      },
-      
-      // Debug: Add a field to see if lookup worked
-      {
-        $addFields: {
-          attendantLookupCount: { $size: "$attendantDoc" },
-          originalAttendantId: "$attendant",
-        }
       },
       
       { $unwind: { path: "$attendantDoc", preserveNullAndEmptyArrays: true } },
@@ -857,16 +819,7 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
         $project: {
           shiftId: "$_id",
           shiftDate: 1,
-          
-          // Debug fields
-          debug: {
-            attendantLookupCount: "$attendantLookupCount",
-            originalAttendantId: "$originalAttendantId",
-            attendantDocFirstName: "$attendantDoc.firstName",
-            attendantDocLastName: "$attendantDoc.lastName",
-            productFromShift: "$product",
-          },
-          
+          createdAt: 1,
           attendantName: {
             $cond: {
               if: { $and: ["$attendantDoc.firstName", "$attendantDoc.lastName"] },
@@ -920,28 +873,17 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
           reconciled: { $gt: [{ $size: "$reconciliation" }, 0] },
         },
       },
-      
-      { $sort: { shiftDate: -1 } },
+
+      { $sort: { createdAt: -1 } },
       { $skip: skip },
       { $limit: limitNum },
     ]).exec();
-
-    // Log the aggregation results for debugging
-    console.log("🔍 DEBUG: Aggregation Results:", JSON.stringify(shifts[0], null, 2));
-
-    // Filter by status if provided (for reconciliation status)
-    let filteredShifts = shifts;
-    if (status) {
-      filteredShifts = shifts.filter(
-        (shift) => shift.reconciliationStatus.toLowerCase() === (status as string).toLowerCase()
-      );
-    }
 
     // Get total count for pagination
     const totalShifts = await Shift.countDocuments(matchFilter);
 
     // Format response
-    const formattedSales = filteredShifts.map((shift) => ({
+    const formattedSales = shifts.map((shift) => ({
       _id: shift.shiftId,
       date: shift.shiftDate.toISOString().split("T")[0],
       formattedDate: shift.shiftDate.toLocaleDateString("en-US", {
@@ -960,12 +902,11 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
       discrepancies: shift.discrepancies !== null ? Number(shift.discrepancies) : null,
       reconciled: shift.reconciled,
       status: shift.reconciliationStatus,
-      // Include debug info temporarily
-      debug: shift.debug,
     }));
 
     return res.status(200).json({
-      message: "Daily attendant sales retrieved successfully",
+      message: "Daily shifts retrieved successfully",
+      total: totalShifts,
       data: formattedSales,
       pagination: {
         page: pageNum,

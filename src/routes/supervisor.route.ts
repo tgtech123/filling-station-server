@@ -6,6 +6,7 @@ import {
   getPendingShifts,
   getApprovedShifts,
   approveShift,
+  clearStaleShifts,
   getAttendantDirectory,
   getScheduledAttendants,
   scheduleAttendant,
@@ -31,6 +32,7 @@ router.get("/dashboard", getSupervisorDashboard);
 router.get("/shift-approval/pending", getPendingShifts);
 router.get("/shift-approval/approved", getApprovedShifts);
 router.post("/shift-approval/:shiftId/approve", approveShift);
+router.delete("/shift-approval/clear-stale", clearStaleShifts);
 
 // Schedule Shift
 router.get("/schedule/attendant-directory", getAttendantDirectory);

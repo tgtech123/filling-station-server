@@ -5,6 +5,9 @@ import Shift from "../models/shift.model";
 import Pump from "../models/pump.model";
 import Tank from "../models/tanks.model";
 import Staff from "../models/staff.model";
+import Activity from "../models/activity.model";
+import SalesTarget from "../models/salesTarget.model";
+import Notification from "../models/notification.model";
 
 // Get all active pumps for a station
 const getActivePumps = async (stationId: Types.ObjectId) => {
@@ -182,6 +185,21 @@ export const startShift = async (req: AuthenticatedRequest, res: Response) => {
     // Update staff onDuty status
     await Staff.findByIdAndUpdate(attendantId, { onDuty: true });
 
+    // Log shift started activity (fire-and-forget)
+    Staff.findById(attendantId).lean()
+      .then((attendant: any) => {
+        const name = attendant ? `${attendant.firstName} ${attendant.lastName}` : "Attendant";
+        return Activity.create({
+          fillingStation: new Types.ObjectId(fillingStation),
+          type: "sale",
+          title: `Shift started — ${newShift.pumpTitle}`,
+          description: `${name} started shift`,
+          timestamp: new Date(),
+          severity: null,
+        });
+      })
+      .catch((err) => console.error("Activity log error (startShift):", err));
+
     return res.status(201).json({
       message: "Shift started successfully",
       data: {
@@ -257,6 +275,91 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
 
     // Update staff onDuty status
     await Staff.findByIdAndUpdate(attendantId, { onDuty: false });
+
+    // Log shift ended activity (fire-and-forget)
+    Staff.findById(attendantId).lean()
+      .then((attendant: any) => {
+        const name = attendant ? `${attendant.firstName} ${attendant.lastName}` : "Attendant";
+        return Activity.create({
+          fillingStation: new Types.ObjectId(fillingStation),
+          type: "sale",
+          title: `Shift ended — ${shift.pumpTitle}`,
+          description: `${name} — ${shift.litresSold ?? 0} Ltrs sold`,
+          timestamp: new Date(),
+          severity: null,
+        });
+      })
+      .catch((err) => console.error("Activity log error (endShift):", err));
+
+    // Notify accountant of completed shift (fire-and-forget)
+    Notification.create({
+      fillingStation: new Types.ObjectId(fillingStation),
+      type: "message",
+      category: "shift_completed",
+      title: `Shift Completed — ${shift.pumpTitle}`,
+      body: `Shift ended on ${shift.pumpTitle}. ${shift.litresSold ?? 0} Ltrs sold, revenue: ₦${(shift.totalAmount ?? 0).toLocaleString()}`,
+      severity: "info",
+      timestamp: new Date(),
+      targetRole: "accountant",
+    }).catch((err) => console.error("Notification error (endShift accountant):", err));
+
+    // Update sales target progress (fire-and-forget)
+    if (shift.totalAmount && shift.totalAmount > 0) {
+      SalesTarget.findOne({
+        staff: new Types.ObjectId(attendantId),
+        status: "Active",
+        endDate: { $gt: new Date() },
+      })
+        .then(async (target) => {
+          if (!target) return;
+
+          target.currentProgress += shift.totalAmount!;
+
+          if (target.currentProgress >= target.targetAmount) {
+            target.status =
+              target.currentProgress > target.targetAmount * 1.1 ? "Exceeded" : "Met";
+            target.metAt = new Date();
+
+            if (!target.notificationSent) {
+              const staffDoc = await Staff.findById(attendantId).lean();
+              const staffName = staffDoc
+                ? `${(staffDoc as any).firstName} ${(staffDoc as any).lastName}`
+                : "Staff member";
+
+              await Promise.all([
+                // Notification for the manager
+                Notification.create({
+                  fillingStation: shift.fillingStation,
+                  type: "message",
+                  category: "system_update",
+                  title: "Target Met!",
+                  body: `${staffName} has met their ${target.duration} sales target of ₦${target.targetAmount.toLocaleString()}. Current: ₦${target.currentProgress.toLocaleString()}`,
+                  severity: "info",
+                  timestamp: new Date(),
+                  targetRole: "manager",
+                }),
+                // Notification for the attendant
+                Notification.create({
+                  fillingStation: shift.fillingStation,
+                  staff: new Types.ObjectId(attendantId),
+                  type: "message",
+                  category: "system_update",
+                  title: "You met your target!",
+                  body: `Congratulations! You have met your ${target.duration} sales target of ₦${target.targetAmount.toLocaleString()}. Great work!`,
+                  severity: "info",
+                  timestamp: new Date(),
+                  targetRole: "attendant",
+                }),
+              ]);
+
+              target.notificationSent = true;
+            }
+          }
+
+          await target.save();
+        })
+        .catch((err) => console.error("Target progress error (endShift):", err));
+    }
 
     return res.status(200).json({
       message: "Shift ended successfully",
