@@ -9,6 +9,8 @@ import ResetPassword from "../models/resetPassword.model";
 import crypto from "crypto";
 import { transporter } from "../middlewares/transporter.middleware";
 import mongoose from "mongoose";
+import Activity from "../models/activity.model";
+import Notification from "../models/notification.model";
 
 
 
@@ -111,6 +113,17 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     station.staff.push(newStaff._id as Types.ObjectId);
     await station.save();
 
+    Notification.create({
+      fillingStation: new Types.ObjectId(stationId as string),
+      type: "message",
+      category: "new_staff",
+      title: "New Staff Added",
+      body: `${firstName} ${lastName} was added as ${role}`,
+      severity: "info",
+      timestamp: new Date(),
+      targetRole: "manager",
+    }).catch((err) => console.error("Notification error (createStaff):", err));
+
     res.status(201).json({
       message: "Staff created successfully",
       staff: newStaff,
@@ -139,12 +152,36 @@ export const loginStaff = async (
     // 1. Find staff by email
     const staff = await Staff.findOne({ email });
     if (!staff) {
+      // No station available — skip activity log
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
     // 2. Compare passwords
     const isMatch = await bcrypt.compare(password, staff.password);
     if (!isMatch) {
+      // Staff was found so we have a station — log the failed attempt
+      if (staff.station) {
+        Activity.create({
+          fillingStation: staff.station,
+          type: "alert",
+          title: "Failed login attempt",
+          description: `Failed login attempt for email: ${email}`,
+          timestamp: new Date(),
+          severity: "critical",
+        }).catch((err) => console.error("Activity log error (failed login):", err));
+
+        Notification.create({
+          fillingStation: staff.station,
+          staff: staff._id,
+          type: "alert",
+          category: "failed_login",
+          title: "Failed Login Attempt",
+          body: `Failed login attempt for email: ${email} from IP: ${req.ip}`,
+          severity: "critical",
+          timestamp: new Date(),
+          targetRole: staff.role ?? "manager",
+        }).catch((err) => console.error("Notification error (failed login):", err));
+      }
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -162,6 +199,22 @@ export const loginStaff = async (
       process.env.JWT_SECRET!,
       { expiresIn: "1d" }
     );
+
+    // Mark staff as on duty (available) on login
+    await Staff.findByIdAndUpdate(staff._id, { onDuty: true });
+
+    // Log successful login
+    if (staff.station) {
+      Activity.create({
+        fillingStation: staff.station,
+        type: "alert",
+        title: "User logged in",
+        description: `${staff.firstName} ${staff.lastName} (${staff.role}) logged in`,
+        timestamp: new Date(),
+        severity: "info",
+      }).catch((err) => console.error("Activity log error (login):", err));
+
+    }
 
     // 5. Return token + staff info + station
     return res.status(200).json({
@@ -257,6 +310,19 @@ export const forgotPassword = async (req: Request, res: Response) => {
   </div>
       `,
     });
+
+    if (staff.station) {
+      Notification.create({
+        fillingStation: staff.station,
+        type: "message",
+        category: "password_reset",
+        title: "Password Reset Requested",
+        body: `A password reset was requested for ${email}`,
+        severity: "warning",
+        timestamp: new Date(),
+        targetRole: staff.role ?? "manager",
+      }).catch((err) => console.error("Notification error (password reset):", err));
+    }
 
     return res.json({ message: "Password reset email sent" });
   } catch (error: any) {

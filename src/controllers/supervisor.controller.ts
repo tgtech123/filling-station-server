@@ -270,13 +270,23 @@ export const getPendingShifts = async (req: AuthenticatedRequest, res: Response)
     const { page = 1, limit = 10, startDate, endDate } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
+    // Exclude shifts that have already been approved (reconciliation status Matched or Flagged)
+    const approvedShiftIds = await CashReconciliation.find({
+      fillingStation: stationId,
+      status: { $in: ["Matched", "Flagged"] },
+    }).distinct("shift");
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
     const query: any = {
       fillingStation: stationId,
       status: "Completed",
+      _id: { $nin: approvedShiftIds },
+      shiftDate: { $gte: sevenDaysAgo },
     };
 
     if (startDate || endDate) {
-      query.shiftDate = {};
       if (startDate) query.shiftDate.$gte = new Date(startDate as string);
       if (endDate) query.shiftDate.$lte = new Date(endDate as string);
     }
@@ -458,19 +468,14 @@ export const approveShift = async (req: AuthenticatedRequest, res: Response) => 
   return res.status(403).json({ message: "Unauthorized" });
 }
 
-    // Check if reconciliation exists
-    let reconciliation = await CashReconciliation.findOne({ shift: shiftId });
+    // Update reconciliation if one exists (not required for approval)
+    const reconciliation = await CashReconciliation.findOne({ shift: shiftId });
 
-    if (!reconciliation) {
-      return res.status(400).json({ message: "Shift must be reconciled before approval" });
+    if (reconciliation) {
+      reconciliation.status = reconciliation.discrepancy === 0 ? "Matched" : "Flagged";
+      if (comment) reconciliation.notes = comment;
+      await reconciliation.save();
     }
-
-    // Update reconciliation with approval info
-    reconciliation.status = reconciliation.discrepancy === 0 ? "Matched" : "Flagged";
-    if (comment) {
-      reconciliation.notes = comment;
-    }
-    await reconciliation.save();
 
     // Log activity
     await ActivityLog.create({
@@ -491,6 +496,46 @@ export const approveShift = async (req: AuthenticatedRequest, res: Response) => 
     });
   } catch (error: any) {
     console.error("Error approving shift:", error);
+    res.status(500).json({ message: error.message || "Internal server error" });
+  }
+};
+
+// ============================================
+// CLEAR STALE SHIFTS
+// ============================================
+
+export const clearStaleShifts = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    if (!stationId) {
+      return res.status(400).json({ message: "Station ID is required" });
+    }
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // Find shift IDs that already have an approved reconciliation — don't touch those
+    const approvedShiftIds = await CashReconciliation.find({
+      fillingStation: stationId,
+      status: { $in: ["Matched", "Flagged"] },
+    }).distinct("shift");
+
+    const result = await Shift.updateMany(
+      {
+        fillingStation: stationId,
+        status: "Completed",
+        shiftDate: { $lt: sevenDaysAgo },
+        _id: { $nin: approvedShiftIds },
+      },
+      { status: "Cancelled" }
+    );
+
+    res.json({
+      success: true,
+      message: `Cleared ${result.modifiedCount} stale shift(s)`,
+    });
+  } catch (error: any) {
+    console.error("Error clearing stale shifts:", error);
     res.status(500).json({ message: error.message || "Internal server error" });
   }
 };
@@ -555,7 +600,7 @@ export const getAttendantDirectory = async (req: AuthenticatedRequest, res: Resp
           email: s.email,
         },
         image: s.image,
-        status: shift ? "On Duty" : "Off Duty",
+        status: shift ? "On Duty" : s.onDuty ? "Active" : "Off Duty",
         shiftType: shift?.shiftType || s.shiftType || "Not Scheduled",
         responsibility: s.responsibility || [],
         salesTarget: {
@@ -568,7 +613,7 @@ export const getAttendantDirectory = async (req: AuthenticatedRequest, res: Resp
 
     // Calculate metrics
     const totalStaff = attendantDirectory.length;
-    const onDutyToday = attendantDirectory.filter((a) => a.status === "On Duty").length;
+    const onDutyToday = attendantDirectory.filter((a) => a.status === "On Duty" || a.status === "Active").length;
     const overallPerformance = 98.8; // Would need calculation based on actual metrics
 
     res.json({
@@ -664,6 +709,10 @@ export const getScheduledAttendants = async (req: AuthenticatedRequest, res: Res
  */
 export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    console.log("📋 Schedule request body:", JSON.stringify(req.body));
+    console.log("🏪 Station ID:", req.user?.station);
+    console.log("🔍 pumpId received:", req.body.pumpId);
+
     const { attendantId, shiftType, startDate, endDate, pumpId } = req.body;
     const stationId = req.user?.station;
     const userId = req.user?.id;
@@ -681,36 +730,34 @@ export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response
     if (!attendant || attendant.station.toString() !== stationId.toString()) {
       return res.status(404).json({ message: "Attendant not found" });
     }
-    // Get pump info
-    const stationTanks = await Tank.findOne({ fillingStation: stationId }).lean();
-    if (!stationTanks) {
-      return res.status(404).json({ message: "Station tanks not found" });
-    }
 
-    const pumpDocs = await Pump.find({
-      tank: stationTanks._id,
-    }).lean();
+    // Find the pump parent document by subdocument _id
+    const pumpParent = await Pump.findOne({
+      "pumps._id": new Types.ObjectId(pumpId),
+    });
 
-    let pumpInfo: any = null;
-    let product = "PMS";
+    console.log("🚗 Pump parent found:", JSON.stringify(pumpParent?.pumps?.length));
 
-    for (const pumpDoc of pumpDocs) {
-      if (pumpDoc.pumps && Array.isArray(pumpDoc.pumps)) {
-        const pump = pumpDoc.pumps.find((p: any) => p._id.toString() === pumpId);
-        if (pump) {
-          pumpInfo = pump;
-          // Get product from tank
-          const tank = stationTanks.tanks.find((t: any) => t._id.toString() === pumpDoc.tank.toString());
-          if (tank) {
-            product = tank.fuelType;
-          }
-          break;
-        }
-      }
-    }
-
-    if (!pumpInfo) {
+    if (!pumpParent) {
       return res.status(404).json({ message: "Pump not found" });
+    }
+
+    const pump = pumpParent.pumps.find(
+      (p: any) => p._id.toString() === pumpId
+    );
+
+    if (!pump) {
+      return res.status(404).json({ message: "Pump not found" });
+    }
+
+    // Get product/fuelType from the associated tank
+    let product = "PMS";
+    const stationTanks = await Tank.findOne({ fillingStation: stationId }).lean();
+    if (stationTanks) {
+      const tank = stationTanks.tanks.find(
+        (t: any) => t._id.toString() === pumpParent.tank.toString()
+      );
+      if (tank) product = tank.fuelType;
     }
 
     // Create shift schedule
@@ -725,13 +772,13 @@ export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response
         fillingStation: stationId,
         attendant: attendantId,
         pump: pumpId,
-        pumpTitle: pumpInfo.title,
+        pumpTitle: pump.title,
         product,
         shiftType,
         shiftDate: new Date(currentDate),
         startTime: new Date(currentDate),
         openingMeterReading: 0, // Will be set when shift starts
-        pricePerLtr: pumpInfo.pricePerLtr,
+        pricePerLtr: pump.pricePerLtr,
         status: "Active",
       });
       shifts.push(shift);

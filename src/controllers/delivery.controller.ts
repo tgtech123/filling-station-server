@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from "../interfaces";
 import Delivery from "../models/delivery.model";
 import Tank from "../models/tanks.model";
 import mongoose from "mongoose";
+import Notification from "../models/notification.model";
 
 export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -189,6 +190,16 @@ export const updateSupply = async (req: AuthenticatedRequest, res: Response) => 
       // ✅ Tell Mongoose we modified a subdocument
       tankRecord.markModified("tanks");
       await tankRecord.save();
+
+      Notification.create({
+        fillingStation: new mongoose.Types.ObjectId(fillingStation),
+        type: "message",
+        category: "delivery_arrived",
+        title: "Delivery Arrived",
+        body: `${delivery.quantity} litres of ${tank.fuelType} delivered successfully`,
+        severity: "info",
+        timestamp: new Date(),
+      }).catch((err) => console.error("Notification error (delivery completed):", err));
     }
 
     // 6️⃣ Save updated delivery

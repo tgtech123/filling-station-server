@@ -20,12 +20,14 @@ import manager from "./routes/manager.route"
 import accountant from "./routes/accountant.route"
 import trends from "./routes/trends.route"
 import commissions from "./routes/commissions.route"
+import activity from "./routes/activity.route"
+import productLevels from "./routes/productLevels.route"
+import notifications from "./routes/notification.route"
+import staff from "./routes/staff.route"
 
 
 import cors from 'cors'
 import contactus from "./routes/contact.route"
-
-import fillinStationRoutes from "./routes/fillinStation.route";
 
 const app = express();
 const allowedOrigins = ["http://localhost:3000"]
@@ -60,6 +62,10 @@ app.use("/api/manager", manager)
 app.use("/api/accountant", accountant)
 app.use("/api/trends", trends)
 app.use("/api/commissions", commissions)
+app.use("/api/activity", activity)
+app.use("/api/product-levels", productLevels)
+app.use("/api/notifications", notifications)
+app.use("/api/staff", staff)
 
 
 

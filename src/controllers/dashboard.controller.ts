@@ -2,14 +2,11 @@ import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 
-// Adjust these import paths to your actual model files
 import Pump from "../models/pump.model";
 import Staff from "../models/staff.model";
-import LubricantSale from "../models/lubricant-sale.models";
-import Lubricant from "../models/lubricant.model";
 import Tank from "../models/tanks.model";
-// If you have a Tank model, you can import it; not strictly required for this aggregation
-// import Tank from "../models/tank.model";
+import Shift from "../models/shift.model";
+import LubricantTransaction from "../models/lubricant-transaction.model";
 
 export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -26,105 +23,59 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
     endOfDay.setHours(23, 59, 59, 999);
 
     /***********************
-     * 1) Fuel metrics from Pump.dailyLtrSales
-     *
-     * We:
-     *  - match Pump documents whose tank belongs to this fillingStation
-     *    by looking up tanks collection and matching fillingStation on it.
-     *  - unwind pumps[] then unwind dailyLtrSales[]
-     *  - filter dailyLtrSales entries to today's window
-     *  - sum liters and sum liters * pricePerLtr for revenue
-     *  - also compute pump head counts and statuses across pumps[] for the station
+     * 1) Fuel metrics from Shift collection
+     *    Pump.dailyLtrSales is never populated — endShift writes to Shift.
+     *    Query completed shifts for today and sum litresSold + totalAmount.
      ***********************/
-    const pumpPipeline: any[] = [
-      // lookup tank to check fillingStation (assumes tanks collection name is "tanks")
+    const shiftAgg = await Shift.aggregate([
       {
-        $lookup: {
-          from: "tanks",
-          localField: "tank",
-          foreignField: "_id",
-          as: "tankDoc",
+        $match: {
+          fillingStation: stationObjectId,
+          shiftDate: { $gte: startOfDay, $lte: endOfDay },
+          status: "Completed",
         },
       },
-      { $unwind: { path: "$tankDoc", preserveNullAndEmptyArrays: false } },
-
-      // only pumps whose tank belongs to this station
-      { $match: { "tankDoc.fillingStation": stationObjectId } },
-
-      // unwind pump heads
-      { $unwind: { path: "$pumps", preserveNullAndEmptyArrays: true } },
-
-      // collect pump-level aggregates and daily sales
       {
-        $facet: {
-          // Aggregate liters/revenue from dailyLtrSales entries for today
-          fuelSales: [
-            { $unwind: { path: "$pumps.dailyLtrSales", preserveNullAndEmptyArrays: true } },
-            {
-              $match: {
-                "pumps.dailyLtrSales.date": { $gte: startOfDay, $lte: endOfDay },
-              },
-            },
-            {
-              $group: {
-                _id: null,
-                totalLitres: { $sum: "$pumps.dailyLtrSales.ltrSale" },
-                fuelRevenue: { $sum: { $multiply: ["$pumps.dailyLtrSales.ltrSale", "$pumps.dailyLtrSales.pricePerLtr"] } },
-              },
-            },
-          ],
-
-          // Count pump heads and statuses across the station
-          pumpCounts: [
-            {
-              $group: {
-                _id: null,
-                totalPumps: { $sum: 1 },
-                activePumps: {
-                  $sum: {
-                    $cond: [{ $eq: ["$pumps.status", "Active"] }, 1, 0],
-                  },
-                },
-                maintenancePumps: {
-                  $sum: {
-                    $cond: [{ $eq: ["$pumps.status", "Maintenance"] }, 1, 0],
-                  },
-                },
-              },
-            },
-          ],
+        $group: {
+          _id: null,
+          totalLitres: { $sum: "$litresSold" },
+          fuelRevenue: { $sum: "$totalAmount" },
         },
       },
-    ];
+    ]).exec();
 
-    const pumpAgg = await Pump.aggregate(pumpPipeline).exec();
+    const totalFuelDispensedToday = Number(shiftAgg[0]?.totalLitres || 0);
+    const fuelRevenueToday = Number(shiftAgg[0]?.fuelRevenue || 0);
 
-    // default values
-    let totalFuelDispensedToday = 0;
-    let fuelRevenueToday = 0;
+    /***********************
+     * 2) Pump head counts — Pump.tank stores a tank subdocument _id
+     *    (Tank.tanks[]._id), not the outer Tank document _id.
+     *    Must resolve via Tank.findOne first, then query Pump by those ids.
+     ***********************/
     let totalPumps = 0;
     let activePumps = 0;
     let pumpsUnderMaintenance = 0;
 
-    if (pumpAgg && pumpAgg.length > 0) {
-      const facet = pumpAgg[0];
+    const tankDoc = await Tank.findOne({ fillingStation: stationObjectId }).lean();
+    if (tankDoc && tankDoc.tanks.length > 0) {
+      const tankSubIds = tankDoc.tanks.map((t: any) => t._id);
+      const pumpDocs = await Pump.find({ tank: { $in: tankSubIds } }).lean();
 
-      if (Array.isArray(facet.fuelSales) && facet.fuelSales.length > 0) {
-        totalFuelDispensedToday = Number(facet.fuelSales[0].totalLitres || 0);
-        fuelRevenueToday = Number(facet.fuelSales[0].fuelRevenue || 0);
-      }
-
-      if (Array.isArray(facet.pumpCounts) && facet.pumpCounts.length > 0) {
-        totalPumps = Number(facet.pumpCounts[0].totalPumps || 0);
-        activePumps = Number(facet.pumpCounts[0].activePumps || 0);
-        pumpsUnderMaintenance = Number(facet.pumpCounts[0].maintenancePumps || 0);
+      for (const pumpDoc of pumpDocs) {
+        for (const pump of pumpDoc.pumps) {
+          totalPumps += 1;
+          if (pump.status === "Active") activePumps += 1;
+          if (pump.status === "Maintenance") pumpsUnderMaintenance += 1;
+        }
       }
     }
 
     /***********************
-     * 2) Lubricant revenue today (sales)
+     * 3) Lubricant revenue today
+     *    Active sale endpoint writes to LubricantTransaction, not LubricantSale.
+     *    LubricantTransaction has a totalAmount field per transaction.
      ***********************/
-    const lubricantSalesAgg = await LubricantSale.aggregate([
+    const lubricantSalesAgg = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: stationObjectId,
@@ -134,7 +85,7 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
       {
         $group: {
           _id: null,
-          totalLubricantRevenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          totalLubricantRevenue: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -147,20 +98,7 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
     const totalRevenueToday = Number(fuelRevenueToday || 0) + Number(lubricantRevenueToday || 0);
 
     /***********************
-     * 4) Lubricants & low-stock counts (below 15)
-     ***********************/
-    const lubricants = await Lubricant.find({ fillingStation: stationObjectId }).select("qtyInStock unitPrice").lean();
-    const totalLubricantsAvailable = lubricants.length;
-    const totalInventoryValue = lubricants.reduce((sum, l) => {
-      const qty = Number(l.qtyInStock) || 0;
-      const price = Number(l.unitPrice) || 0;
-      return sum + qty * price;
-    }, 0);
-    const lowStockThreshold = 15;
-    const lowStockCount = lubricants.filter(l => (Number(l.qtyInStock) || 0) < lowStockThreshold).length;
-
-    /***********************
-     * 5) Staff counts
+     * 4) Staff counts
      * - active staff excluding manager => onDuty === true && role != 'manager'
      * - total staff excluding manager => role != 'manager'
      ***********************/
@@ -176,22 +114,272 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
       message: "Dashboard metrics retrieved successfully",
       date: startOfDay.toISOString().split("T")[0],
       metrics: {
-        totalRevenueToday,                // currency numeric
-        lubricantRevenueToday,            // currency numeric
-        fuelRevenueToday,                 // currency numeric
-        totalFuelDispensedToday,          // litres numeric
-        totalLubricantsAvailable,         // count
-        totalInventoryValue,              // currency numeric
-        lowStockCount,                    // count (< 15)
-        totalStaffExcludingManager: totalStaffExclManager,
-        activeStaffExcludingManager: activeStaffCount,
-        totalPumps,
-        activePumps,
-        pumpsUnderMaintenance,
+        revenueGeneratedToday: totalRevenueToday,
+        activeStaff: {
+          active: activeStaffCount,
+          total: totalStaffExclManager,
+        },
+        activePumps: {
+          active: activePumps,
+          total: totalPumps,
+          underMaintenance: pumpsUnderMaintenance,
+        },
+        fuelDispensedToday: totalFuelDispensedToday,
       },
     });
   } catch (err: any) {
     console.error("Error in getDashboardMetrics:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+
+export const getFuelManagement = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+    const stationObjectId = new Types.ObjectId(fillingStation);
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const [dailyAgg, weeklyAgg, tankDoc] = await Promise.all([
+      // dailyConsumption — active or completed shifts today with litres recorded
+      Shift.aggregate([
+        {
+          $match: {
+            fillingStation: stationObjectId,
+            $or: [
+              { shiftDate: { $gte: startOfDay, $lte: endOfDay } },
+              { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+            ],
+            status: { $in: ["Active", "Completed"] },
+            litresSold: { $gt: 0 },
+          },
+        },
+        {
+          $group: { _id: null, totalLitres: { $sum: "$litresSold" } },
+        },
+      ]).exec(),
+
+      // weeklyAverageConsumption — active or completed shifts over last 7 days with litres recorded
+      Shift.aggregate([
+        {
+          $match: {
+            fillingStation: stationObjectId,
+            $or: [
+              { shiftDate: { $gte: sevenDaysAgo, $lte: endOfDay } },
+              { createdAt: { $gte: sevenDaysAgo, $lte: endOfDay } },
+            ],
+            status: { $in: ["Active", "Completed"] },
+            litresSold: { $gt: 0 },
+          },
+        },
+        {
+          $group: { _id: null, totalLitres: { $sum: "$litresSold" } },
+        },
+      ]).exec(),
+
+      // totalCapacityAvailable — sum of all tank currentQuantity for this station
+      Tank.findOne({ fillingStation: stationObjectId }).lean(),
+    ]);
+
+    console.log("Station ID:", stationObjectId);
+    console.log("Daily agg result:", JSON.stringify(dailyAgg));
+    console.log("Tank doc tanks:", JSON.stringify(tankDoc?.tanks?.length));
+
+    const dailyConsumption = Number(dailyAgg[0]?.totalLitres || 0);
+
+    const weeklyTotal = Number(weeklyAgg[0]?.totalLitres || 0);
+    const weeklyAverageConsumption = Math.round(weeklyTotal / 7);
+
+    const totalCapacityAvailable = tankDoc
+      ? tankDoc.tanks.reduce((sum: number, t: any) => sum + (Number(t.currentQuantity) || 0), 0)
+      : 0;
+
+    return res.status(200).json({
+      message: "Fuel management data retrieved successfully",
+      data: {
+        dailyConsumption,
+        weeklyAverageConsumption,
+        totalCapacityAvailable,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in getFuelManagement:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+
+export const getPumpControl = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+    const stationObjectId = new Types.ObjectId(fillingStation);
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Pump counts — resolve via Tank subdoc IDs (Pump.tank = Tank.tanks[]._id)
+    let totalPumps = 0;
+    let activePumpCount = 0;
+    let underMaintenance = 0;
+
+    const tankDoc = await Tank.findOne({ fillingStation: stationObjectId }).lean();
+    if (tankDoc && tankDoc.tanks.length > 0) {
+      const tankSubIds = tankDoc.tanks.map((t: any) => t._id);
+      const pumpDocs = await Pump.find({ tank: { $in: tankSubIds } }).lean();
+
+      for (const pumpDoc of pumpDocs) {
+        for (const pump of pumpDoc.pumps) {
+          totalPumps += 1;
+          if (pump.status === "Active") activePumpCount += 1;
+          if (pump.status === "Maintenance") underMaintenance += 1;
+        }
+      }
+    }
+
+    const [salesAgg, dispensedAgg] = await Promise.all([
+      // totalFuelSales — sum totalAmount from Completed shifts today
+      Shift.aggregate([
+        {
+          $match: {
+            fillingStation: stationObjectId,
+            $or: [
+              { shiftDate: { $gte: startOfDay, $lte: endOfDay } },
+              { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+            ],
+            status: { $in: ["Active", "Completed"] },
+            totalAmount: { $gt: 0 },
+          },
+        },
+        {
+          $group: { _id: null, total: { $sum: "$totalAmount" } },
+        },
+      ]).exec(),
+
+      // fuelDispensedAcross — sum litresSold from Active and Completed shifts today
+      Shift.aggregate([
+        {
+          $match: {
+            fillingStation: stationObjectId,
+            $or: [
+              { shiftDate: { $gte: startOfDay, $lte: endOfDay } },
+              { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+            ],
+            status: { $in: ["Active", "Completed"] },
+            litresSold: { $gt: 0 },
+          },
+        },
+        {
+          $group: { _id: null, total: { $sum: "$litresSold" } },
+        },
+      ]).exec(),
+    ]);
+
+    const totalFuelSales = Number(salesAgg[0]?.total || 0);
+    const fuelDispensedAcross = Number(dispensedAgg[0]?.total || 0);
+
+    return res.status(200).json({
+      message: "Pump control data retrieved successfully",
+      data: {
+        activePumps: {
+          active: activePumpCount,
+          total: totalPumps,
+        },
+        underMaintenance,
+        totalFuelSales,
+        fuelDispensedAcross,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in getPumpControl:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+
+export const getStaffManagement = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+    const stationObjectId = new Types.ObjectId(fillingStation);
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const [
+      totalStaff,
+      onDutyAttendants,
+      salaryAgg,
+      totalShifts,
+      completedShifts,
+    ] = await Promise.all([
+      // totalStaff — all non-manager staff for this station
+      // Staff model uses 'station' field, not 'fillingStation'
+      Staff.countDocuments({ station: stationObjectId, role: { $ne: "manager" } }).exec(),
+
+      // onDuty — distinct attendants with an Active shift today
+      Shift.distinct("attendant", {
+        fillingStation: stationObjectId,
+        status: "Active",
+        $or: [
+          { shiftDate: { $gte: startOfDay, $lte: endOfDay } },
+          { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+        ],
+      }).exec(),
+
+      // averageStaffSalary — average of 'amount' field on non-manager staff
+      // No separate salary model — Staff.amount stores each member's salary/wage
+      Staff.aggregate([
+        { $match: { station: stationObjectId, role: { $ne: "manager" } } },
+        { $group: { _id: null, avgSalary: { $avg: "$amount" } } },
+      ]).exec(),
+
+      // overallStaffPerformance denominator — all shifts ever for this station
+      Shift.countDocuments({ fillingStation: stationObjectId }).exec(),
+
+      // overallStaffPerformance numerator — completed shifts ever for this station
+      Shift.countDocuments({ fillingStation: stationObjectId, status: "Completed" }).exec(),
+    ]);
+
+    const onDuty = onDutyAttendants.length;
+    const averageStaffSalary = Math.round(salaryAgg[0]?.avgSalary || 0);
+    const overallStaffPerformance =
+      totalShifts > 0
+        ? Number(((completedShifts / totalShifts) * 100).toFixed(1))
+        : 0;
+
+    console.log("Staff metrics:", { totalStaff, onDuty, averageStaffSalary, overallStaffPerformance });
+
+    return res.status(200).json({
+      message: "Staff management data retrieved successfully",
+      data: {
+        totalStaff,
+        onDuty,
+        averageStaffSalary,
+        overallStaffPerformance,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in getStaffManagement:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
@@ -217,19 +405,28 @@ export const getStationTankStatus = async (req: AuthenticatedRequest, res: Respo
       });
     }
 
-    // Format the tanks
-    const tanks = stationTanks.tanks.map((tank) => {
-      const percentFilled = tank.limit > 0 ? (tank.currentQuantity / tank.limit) * 100 : 0;
+    // Group tanks by fuelType, summing currentQuantity and limit
+    const grouped = stationTanks.tanks.reduce<Record<string, { currentQuantity: number; limit: number }>>(
+      (acc, tank) => {
+        const key = tank.fuelType;
+        if (!acc[key]) {
+          acc[key] = { currentQuantity: 0, limit: 0 };
+        }
+        acc[key].currentQuantity += tank.currentQuantity;
+        acc[key].limit += tank.limit;
+        return acc;
+      },
+      {}
+    );
 
-      return {
-        _id: tank._id,
-        title: tank.title,
-        fuelType: tank.fuelType,
-        currentQuantity: tank.currentQuantity,
-        limit: tank.limit,
-        percentFilled: Number(percentFilled.toFixed(2)),
-      };
-    });
+    const tanks = Object.entries(grouped)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([fuelType, { currentQuantity, limit }]) => ({
+        fuelType,
+        currentQuantity,
+        limit,
+        percentFilled: limit > 0 ? Number(((currentQuantity / limit) * 100).toFixed(2)) : 0,
+      }));
 
     return res.status(200).json({
       message: "Tank status retrieved successfully",

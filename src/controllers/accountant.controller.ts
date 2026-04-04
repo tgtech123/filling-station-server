@@ -1577,7 +1577,7 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
 
     return res.status(200).json({
       success: true,
-      data: {
+      data: {   
         summary: {
           totalRevenueGenerated: totalRevenue,
           totalFuelSales: totalFuelSales,

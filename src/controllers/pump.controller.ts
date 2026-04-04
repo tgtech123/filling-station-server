@@ -3,6 +3,8 @@ import { AuthenticatedRequest } from "../interfaces";
 import Pump from "../models/pump.model";
 import mongoose from "mongoose";
 import Tank from "../models/tanks.model";
+import Activity from "../models/activity.model";
+import Notification from "../models/notification.model";
 
 export const addPump = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -369,6 +371,29 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
     (pumpDoc as any).markModified("pumps");
     await pumpDoc.save();
 
+    // Log maintenance activity + notify supervisor when pump is set to Maintenance (fire-and-forget)
+    if (status === "Maintenance") {
+      Activity.create({
+        fillingStation,
+        type: "maintenance",
+        title: "Maintenance Scheduled",
+        description: `${pumpSubdoc.title} — scheduled for maintenance`,
+        timestamp: new Date(),
+        severity: null,
+      }).catch((err) => console.error("Activity log error (updatePump):", err));
+
+      Notification.create({
+        fillingStation,
+        type: "alert",
+        category: "pump_maintenance",
+        title: "Pump Scheduled for Maintenance",
+        body: `${pumpSubdoc.title} has been scheduled for maintenance`,
+        severity: "warning",
+        timestamp: new Date(),
+        targetRole: "supervisor",
+      }).catch((err) => console.error("Notification error (pump maintenance):", err));
+    }
+
     // 7️⃣ Find the tank subdocument inside the stationTankDoc to get fuelType
     const tankIdStr = String(pumpDoc.tank);
     const tankSub = (stationTankDoc.tanks as any[]).find((t) => String(t._id) === tankIdStr);
@@ -536,6 +561,19 @@ export const updatePricesByFuelTypes = async (req: AuthenticatedRequest, res: Re
         pumpDocsMatched: Number(matched),
         pumpDocsModified: Number(modified),
       };
+
+      if (Number(modified) > 0) {
+        Notification.create({
+          fillingStation,
+          type: "message",
+          category: "price_update",
+          title: "Fuel Price Updated",
+          body: `${fuelType} price has been updated to ₦${newPrice.toLocaleString()} per litre`,
+          severity: "info",
+          timestamp: new Date(),
+          targetRole: "all",
+        }).catch((err) => console.error(`Notification error (price update ${fuelType}):`, err));
+      }
     }
 
     return res.status(200).json({
