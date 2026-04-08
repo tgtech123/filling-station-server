@@ -380,6 +380,7 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
         description: `${pumpSubdoc.title} — scheduled for maintenance`,
         timestamp: new Date(),
         severity: null,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       }).catch((err) => console.error("Activity log error (updatePump):", err));
 
       Notification.create({
@@ -583,5 +584,92 @@ export const updatePricesByFuelTypes = async (req: AuthenticatedRequest, res: Re
   } catch (err: any) {
     console.error("updatePricesByFuelTypes error:", err);
     return res.status(500).json({ error: err?.message ?? String(err) });
+  }
+};
+
+export const scheduleMaintenance = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const { pumpId, reason, startDate, endDate } = req.body as {
+      pumpId?: string;
+      reason?: string;
+      startDate?: string;
+      endDate?: string;
+    };
+
+    if (!pumpId || !startDate || !endDate) {
+      return res.status(400).json({ error: "Please provide pumpId, startDate, and endDate" });
+    }
+
+    if (!mongoose.isValidObjectId(pumpId)) {
+      return res.status(400).json({ error: "Invalid pumpId" });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ error: "startDate and endDate must be valid dates" });
+    }
+
+    // Resolve tank subdoc IDs for this station (Pump.tank = Tank.tanks[]._id)
+    const stationTankDoc = await Tank.findOne({ fillingStation }).lean();
+    if (!stationTankDoc) {
+      return res.status(404).json({ error: "No tank record found for this filling station" });
+    }
+
+    const tankSubIds = (stationTankDoc.tanks as any[]).map((t) => t._id);
+
+    const pumpDoc = await Pump.findOne({ tank: { $in: tankSubIds }, "pumps._id": pumpId });
+    if (!pumpDoc) {
+      return res.status(404).json({ error: "Pump not found for your filling station" });
+    }
+
+    const pumpsArray = (pumpDoc as any).pumps as any[];
+    const idx = pumpsArray.findIndex((p: any) => String(p._id) === String(pumpId));
+    if (idx === -1) {
+      return res.status(404).json({ error: "Pump not found" });
+    }
+
+    const pumpSubdoc = pumpsArray[idx];
+    pumpSubdoc.status = "Maintenance";
+    pumpSubdoc.lastMaintenance = start;
+
+    (pumpDoc as any).markModified("pumps");
+    await pumpDoc.save();
+
+    const dateRange = `${start.toLocaleDateString()} to ${end.toLocaleDateString()}`;
+
+    Activity.create({
+      fillingStation,
+      type: "maintenance",
+      title: "Maintenance Scheduled",
+      description: `${pumpSubdoc.title} scheduled for maintenance from ${dateRange}`,
+      timestamp: new Date(),
+      severity: null,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    }).catch((err) => console.error("Activity log error (scheduleMaintenance):", err));
+
+    Notification.create({
+      fillingStation,
+      type: "alert",
+      category: "pump_maintenance",
+      title: "Pump Scheduled for Maintenance",
+      body: `${pumpSubdoc.title}${reason ? ` — ${reason}` : ""}. Duration: ${dateRange}`,
+      severity: "warning",
+      timestamp: new Date(),
+      targetRole: "supervisor",
+    }).catch((err) => console.error("Notification error (scheduleMaintenance):", err));
+
+    return res.status(200).json({
+      message: "Maintenance scheduled successfully",
+      data: { pump: pumpSubdoc },
+    });
+  } catch (err: any) {
+    console.error("Error in scheduleMaintenance:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };

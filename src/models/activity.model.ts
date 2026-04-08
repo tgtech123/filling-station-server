@@ -7,6 +7,7 @@ export interface IActivity extends Document {
   description: string;
   timestamp: Date;
   severity: "warning" | "critical" | "info" | null;
+  expiresAt: Date;
 }
 
 const ActivitySchema = new Schema<IActivity>(
@@ -41,11 +42,16 @@ const ActivitySchema = new Schema<IActivity>(
       enum: ["warning", "critical", "info", null],
       default: null,
     },
+    expiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + 24 * 60 * 60 * 1000),
+    },
   },
   { timestamps: true }
 );
 
 ActivitySchema.index({ fillingStation: 1, timestamp: -1 });
+ActivitySchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const Activity = mongoose.model<IActivity>("Activity", ActivitySchema);
 export default Activity;

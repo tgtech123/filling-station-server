@@ -20,6 +20,10 @@ export interface IFillingStation extends Document {
   fuelTypesOffered: string[];
   additionalServices: string[];
   staff: mongoose.Types.ObjectId[]; // references to Staff
+  isActive: boolean;
+  isDeleted: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const FillingStationSchema = new Schema<IFillingStation>(
@@ -43,6 +47,10 @@ const FillingStationSchema = new Schema<IFillingStation>(
     fuelTypesOffered: { type: [String], default: [] },
     additionalServices: { type: [String], default: [] },
     staff: [{ type: Schema.Types.ObjectId, ref: "Staff" }],
+    isActive: { type: Boolean, default: true },
+    isDeleted: { type: Boolean, default: false },
+    createdAt: { type: Date },
+    updatedAt: { type: Date },
   },
   { timestamps: true }
 );

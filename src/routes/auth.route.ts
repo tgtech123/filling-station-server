@@ -1,5 +1,5 @@
 import express from "express";
-import { createStaff, deleteStaff, forgotPassword, getAllStaff, loginStaff, resetPassword, updateStaff } from "../controllers/auth.controller";
+import { createStaff, changePassword, deleteStaff, forgotPassword, getAllStaff, loginStaff, resetPassword, updateStaff } from "../controllers/auth.controller";
 import { setStaffTarget, getStaffTarget } from "../controllers/salesTarget.controller";
 import { checkRole } from "../middlewares/checkRole";
 import { requireAuth } from "../middlewares/auth.middleware";
@@ -12,6 +12,7 @@ router.get("/", requireAuth, checkRole("manager"), getAllStaff);
 router.post("/login", loginStaff);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
+router.patch("/change-password", requireAuth, changePassword);
 router.post("/update-staff/:id", requireAuth, checkRole("manager"), updateStaff);
 router.post("/delete-staff/:id", requireAuth, checkRole("manager"), deleteStaff);
 router.patch("/:id/target", requireAuth, checkRole("manager"), setStaffTarget);

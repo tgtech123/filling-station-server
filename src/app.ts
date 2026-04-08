@@ -24,6 +24,8 @@ import activity from "./routes/activity.route"
 import productLevels from "./routes/productLevels.route"
 import notifications from "./routes/notification.route"
 import staff from "./routes/staff.route"
+import emergency from "./routes/emergency.route"
+import admin from "./routes/admin.route"
 
 
 import cors from 'cors'
@@ -66,6 +68,8 @@ app.use("/api/activity", activity)
 app.use("/api/product-levels", productLevels)
 app.use("/api/notifications", notifications)
 app.use("/api/staff", staff)
+app.use("/api/emergency", emergency)
+app.use("/api/admin", admin)
 
 
 

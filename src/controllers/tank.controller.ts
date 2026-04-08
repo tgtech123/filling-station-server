@@ -203,6 +203,7 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
         description: `${tank.fuelType} (${tank.title}) below 20% — ${tank.currentQuantity} Ltrs remaining`,
         timestamp: new Date(),
         severity: "warning",
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       }).catch((err) => console.error("Activity log error (updateTankDetails):", err));
 
       Notification.create({

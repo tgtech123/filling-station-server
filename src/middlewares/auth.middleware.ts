@@ -1,8 +1,10 @@
 import jwt from "jsonwebtoken";
 import { AuthenticatedRequest, IUserPayload } from "../interfaces";
 import { Response, NextFunction } from "express";
+import { Types } from "mongoose";
+import StationStatus from "../models/stationStatus.model";
 
-export const requireAuth = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const requireAuth = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {
@@ -14,6 +16,21 @@ export const requireAuth = (req: AuthenticatedRequest, res: Response, next: Next
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as IUserPayload;
     req.user = decoded;
+
+    // Block non-managers (and non-admins) if emergency mode is active
+    if (decoded.role !== "manager" && decoded.role !== "admin" && decoded.station) {
+      const status = await StationStatus.findOne({
+        fillingStation: new Types.ObjectId(decoded.station),
+      }).lean();
+
+      if (status?.emergencyMode) {
+        return res.status(403).json({
+          error: "System under emergency lockdown",
+          emergencyMode: true,
+        });
+      }
+    }
+
     next();
   } catch (err) {
     res.status(403).json({ message: "Invalid token" });

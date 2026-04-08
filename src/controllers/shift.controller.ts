@@ -196,6 +196,7 @@ export const startShift = async (req: AuthenticatedRequest, res: Response) => {
           description: `${name} started shift`,
           timestamp: new Date(),
           severity: null,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         });
       })
       .catch((err) => console.error("Activity log error (startShift):", err));
@@ -273,6 +274,56 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
     // The pre-save hook will calculate litresSold and totalAmount
     await shift.save();
 
+    // Deduct litresSold from the matching tank (fire-and-forget)
+    Tank.findOne({ fillingStation: shift.fillingStation })
+      .then(async (tankDoc) => {
+        if (!tankDoc) {
+          console.log("⚠️ No tank document found for station:", shift.fillingStation);
+          return;
+        }
+
+        const tankIndex = tankDoc.tanks.findIndex(
+          (t: any) =>
+            t.fuelType.toLowerCase() === shift.product.toLowerCase() ||
+            t.title.toLowerCase().includes(shift.product.toLowerCase())
+        );
+
+        if (tankIndex === -1) {
+          console.log(`⚠️ No tank found for product: ${shift.product}`);
+          return;
+        }
+
+        const tank = tankDoc.tanks[tankIndex];
+        const prevQty = tank.currentQuantity;
+        const litresSold = shift.litresSold || 0;
+        tankDoc.tanks[tankIndex].currentQuantity = Math.max(0, prevQty - litresSold);
+
+        await tankDoc.save();
+
+        console.log(
+          `✅ Tank updated: ${tank.fuelType} ${prevQty} → ${tankDoc.tanks[tankIndex].currentQuantity}L (sold: ${litresSold}L)`
+        );
+
+        // Alert if tank drops below 20%
+        const updatedTank = tankDoc.tanks[tankIndex];
+        const percentFilled = updatedTank.limit > 0
+          ? (updatedTank.currentQuantity / updatedTank.limit) * 100
+          : 0;
+
+        if (percentFilled < 20) {
+          Activity.create({
+            fillingStation: shift.fillingStation,
+            type: "alert",
+            title: "Low Tank Alert",
+            description: `${updatedTank.fuelType} tank is below 20% — ${updatedTank.currentQuantity}L remaining`,
+            timestamp: new Date(),
+            severity: "warning",
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          }).catch((err) => console.error("Tank alert activity error:", err));
+        }
+      })
+      .catch((err) => console.error("Tank deduction error (endShift):", err));
+
     // Update staff onDuty status
     await Staff.findByIdAndUpdate(attendantId, { onDuty: false });
 
@@ -287,6 +338,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
           description: `${name} — ${shift.litresSold ?? 0} Ltrs sold`,
           timestamp: new Date(),
           severity: null,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         });
       })
       .catch((err) => console.error("Activity log error (endShift):", err));

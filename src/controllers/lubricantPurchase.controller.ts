@@ -122,6 +122,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
       description: `${itemSummary} added to stock`,
       timestamp: new Date(),
       severity: null,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     }).catch((err) => console.error("Activity log error (addLubricantPurchase):", err));
 
     Notification.create({

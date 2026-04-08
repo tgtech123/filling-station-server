@@ -16,6 +16,7 @@ export const getRecentActivity = async (req: AuthenticatedRequest, res: Response
 
     const activities = await Activity.find({
       fillingStation: new Types.ObjectId(stationId),
+      expiresAt: { $gt: new Date() },
     })
       .sort({ timestamp: -1 })
       .limit(20)

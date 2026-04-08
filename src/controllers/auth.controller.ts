@@ -11,6 +11,7 @@ import { transporter } from "../middlewares/transporter.middleware";
 import mongoose from "mongoose";
 import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
+import StationStatus from "../models/stationStatus.model";
 
 
 
@@ -156,6 +157,17 @@ export const loginStaff = async (
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    // 1a. Block non-managers from logging in during emergency mode
+    if (staff.role !== "manager" && staff.station) {
+      const stationStatus = await StationStatus.findOne({ fillingStation: staff.station }).lean();
+      if (stationStatus?.emergencyMode) {
+        return res.status(403).json({
+          error: "System is under emergency lockdown. Contact your manager.",
+          emergencyMode: true,
+        });
+      }
+    }
+
     // 2. Compare passwords
     const isMatch = await bcrypt.compare(password, staff.password);
     if (!isMatch) {
@@ -168,6 +180,7 @@ export const loginStaff = async (
           description: `Failed login attempt for email: ${email}`,
           timestamp: new Date(),
           severity: "critical",
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         }).catch((err) => console.error("Activity log error (failed login):", err));
 
         Notification.create({
@@ -212,6 +225,7 @@ export const loginStaff = async (
         description: `${staff.firstName} ${staff.lastName} (${staff.role}) logged in`,
         timestamp: new Date(),
         severity: "info",
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       }).catch((err) => console.error("Activity log error (login):", err));
 
     }
@@ -522,6 +536,39 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
+
+export const changePassword = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user?._id || req.user?.id;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Current and new password required" });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
+    }
+
+    const user = await Staff.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: "Current password is incorrect" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await Staff.findByIdAndUpdate(userId, { password: hashedPassword });
+
+    return res.status(200).json({ message: "Password changed successfully" });
+  } catch (err: any) {
+    console.error("changePassword error:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
 
 export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
   const manager = req.user;
