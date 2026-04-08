@@ -497,40 +497,61 @@ import CashReconciliation from "../models/cashReconciliation.model";
 import Shift from "../models/shift.model";
 import Staff from "../models/staff.model";
 
-// Helper function to get date ranges
-const getDateRange = (period: "today" | "thisweek" | "thismonth" | "thisyear") => {
+// ─── Nigeria timezone date range helpers (WAT = UTC+1) ───────────────────────
+// Date.UTC with -1 as the hour rolls back to 23:00 the previous UTC day,
+// which is exactly 00:00 Nigeria midnight (UTC+1).
+
+const getNigeriaTodayRange = () => {
   const now = new Date();
-  let startDate: Date;
-  let endDate: Date = new Date(now);
-  endDate.setHours(23, 59, 59, 999);
-
-  switch (period) {
-    case "today":
-      startDate = new Date(now);
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    case "thisweek":
-      // US Calendar week: Sunday to Saturday
-      const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-      startDate = new Date(now);
-      startDate.setDate(now.getDate() - dayOfWeek); // Go back to Sunday
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    case "thismonth":
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    case "thisyear":
-      startDate = new Date(now.getFullYear(), 0, 1);
-      startDate.setHours(0, 0, 0, 0);
-      break;
-    default:
-      startDate = new Date(now);
-      startDate.setHours(0, 0, 0, 0);
-  }
-
+  const nigeriaDateStr = now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+  const [year, month, day] = nigeriaDateStr.split("-").map(Number);
+  // 00:00 Nigeria = 23:00 UTC previous day
+  const startDate = new Date(Date.UTC(year, month - 1, day, -1, 0, 0, 0));
+  // 23:59:59.999 Nigeria = 22:59:59.999 UTC same day
+  const endDate = new Date(Date.UTC(year, month - 1, day + 1, -1, 0, 0, -1));
   return { startDate, endDate };
 };
+
+const getNigeriaWeekRange = () => {
+  const now = new Date();
+  const nigeriaDateStr = now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+  const [year, month, day] = nigeriaDateStr.split("-").map(Number);
+  // Day-of-week in Nigeria local time
+  const nigeriaNow = new Date(now.toLocaleString("en-US", { timeZone: "Africa/Lagos" }));
+  const dayOfWeek = nigeriaNow.getDay(); // 0=Sun
+  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  // Monday 00:00 Nigeria
+  const startDate = new Date(Date.UTC(year, month - 1, day - daysFromMonday, -1, 0, 0, 0));
+  // Sunday 23:59:59.999 Nigeria
+  const endDate = new Date(Date.UTC(year, month - 1, day - daysFromMonday + 7, -1, 0, 0, -1));
+  return { startDate, endDate };
+};
+
+const getNigeriaLastWeekRange = () => {
+  const now = new Date();
+  const nigeriaDateStr = now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+  const [year, month, day] = nigeriaDateStr.split("-").map(Number);
+  const nigeriaNow = new Date(now.toLocaleString("en-US", { timeZone: "Africa/Lagos" }));
+  const dayOfWeek = nigeriaNow.getDay();
+  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  // Last Monday 00:00 Nigeria
+  const startDate = new Date(Date.UTC(year, month - 1, day - daysFromMonday - 7, -1, 0, 0, 0));
+  // Last Sunday 23:59:59.999 Nigeria
+  const endDate = new Date(Date.UTC(year, month - 1, day - daysFromMonday, -1, 0, 0, -1));
+  return { startDate, endDate };
+};
+
+const getNigeriaMonthRange = () => {
+  const now = new Date();
+  const nigeriaDateStr = now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+  const [year, month] = nigeriaDateStr.split("-").map(Number);
+  // 1st of month 00:00 Nigeria
+  const startDate = new Date(Date.UTC(year, month - 1, 1, -1, 0, 0, 0));
+  // Last ms before 1st of next month 00:00 Nigeria
+  const endDate = new Date(Date.UTC(year, month, 1, -1, 0, 0, -1));
+  return { startDate, endDate };
+};
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Get Cashier Dashboard Data
 export const getCashierDashboard = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
@@ -543,14 +564,14 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
     }
 
     const stationObjectId = new Types.ObjectId(fillingStation);
-    const { startDate, endDate } = getDateRange("thisweek");
+    const { startDate, endDate } = getNigeriaWeekRange();
 
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("📊 CASHIER DASHBOARD CALCULATION");
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("Station:", fillingStation);
     console.log("Cashier:", cashierId);
-    console.log("This Week Range:", { startDate, endDate });
+    console.log("This Week Range (Nigeria):", { startDate, endDate });
 
     // ═══════════════════════════════════════════════════════════════
     // 1. RECONCILED CASH (This Week)
@@ -576,13 +597,7 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
     console.log("💰 Reconciled Cash (This Week):", reconciledCash);
 
     // Calculate last week for growth comparison
-    const lastWeekRange = {
-      startDate: new Date(startDate),
-      endDate: new Date(startDate),
-    };
-    lastWeekRange.startDate.setDate(lastWeekRange.startDate.getDate() - 7);
-    lastWeekRange.endDate.setDate(lastWeekRange.endDate.getDate() - 1);
-    lastWeekRange.endDate.setHours(23, 59, 59, 999);
+    const lastWeekRange = getNigeriaLastWeekRange();
 
     const lastWeekReconciledResult = await CashReconciliation.aggregate([
       {
@@ -690,7 +705,7 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
     const salesTarget = cashier?.amount || 350000; // Default target
 
     // Calculate current month sales for target
-    const monthRange = getDateRange("thismonth");
+    const monthRange = getNigeriaMonthRange();
     
     const monthlySalesResult = await CashReconciliation.aggregate([
       {
@@ -779,6 +794,13 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
     if (attendantId) {
       matchFilter.attendant = new Types.ObjectId(attendantId as string);
     }
+
+    // Log current indexes on Shift collection (one-time diagnostic)
+    Shift.collection.indexes().then((indexes) => {
+      console.log("📋 Shift collection indexes:", JSON.stringify(indexes, null, 2));
+    });
+
+    const queryStart = Date.now();
 
     // Get shifts with lookup to get product type from tank
     const shifts = await Shift.aggregate([
@@ -879,30 +901,41 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
       { $limit: limitNum },
     ]).exec();
 
+    console.log(`⏱️ Daily sales aggregate took: ${Date.now() - queryStart}ms`);
+    console.log(`📊 Documents returned: ${shifts.length}`);
+
     // Get total count for pagination
+    const countStart = Date.now();
     const totalShifts = await Shift.countDocuments(matchFilter);
+    console.log(`⏱️ Count query took: ${Date.now() - countStart}ms — total: ${totalShifts}`);
+
+    const getNigeriaDate = (date: Date): string => {
+      return new Date(date).toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+    };
 
     // Format response
-    const formattedSales = shifts.map((shift) => ({
-      _id: shift.shiftId,
-      date: shift.shiftDate.toISOString().split("T")[0],
-      formattedDate: shift.shiftDate.toLocaleDateString("en-US", {
-        month: "2-digit",
-        day: "2-digit",
-        year: "2-digit",
-      }),
-      attendant: shift.attendantName || "Unknown Attendant",
-      pumpNo: shift.pumpTitle || "Unknown Pump",
-      product: shift.product || "Unknown",
-      shiftOpen: shift.shiftOpen || null,
-      shiftClose: shift.shiftClose || null,
-      litresSold: Number(shift.litresSold) || 0,
-      amount: Number(shift.amount) || 0,
-      cashReceived: shift.cashReceived !== null ? Number(shift.cashReceived) : null,
-      discrepancies: shift.discrepancies !== null ? Number(shift.discrepancies) : null,
-      reconciled: shift.reconciled,
-      status: shift.reconciliationStatus,
-    }));
+    const formattedSales = shifts.map((shift) => {
+      const rawDate = shift.shiftDate || shift.createdAt;
+      console.log("Shift UTC time:", shift.createdAt);
+      console.log("Shift Nigeria time:", getNigeriaDate(shift.createdAt));
+      return {
+        _id: shift.shiftId,
+        date: getNigeriaDate(rawDate),
+        displayDate: new Date(rawDate).toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" }),
+        createdAt: shift.createdAt,
+        attendant: shift.attendantName || "Unknown Attendant",
+        pumpNo: shift.pumpTitle || "Unknown Pump",
+        product: shift.product || "Unknown",
+        shiftOpen: shift.shiftOpen || null,
+        shiftClose: shift.shiftClose || null,
+        litresSold: Number(shift.litresSold) || 0,
+        amount: Number(shift.amount) || 0,
+        cashReceived: shift.cashReceived !== null ? Number(shift.cashReceived) : null,
+        discrepancies: shift.discrepancies !== null ? Number(shift.discrepancies) : null,
+        reconciled: shift.reconciled,
+        status: shift.reconciliationStatus,
+      };
+    });
 
     return res.status(200).json({
       message: "Daily shifts retrieved successfully",

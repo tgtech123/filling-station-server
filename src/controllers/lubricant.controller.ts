@@ -364,6 +364,7 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
       description: `${lubricant.productName} – ${qtySold} units sold`,
       timestamp: new Date(),
       severity: null,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     }).catch((err) => console.error("Activity log error (addLubricantSale):", err));
 
     return res.status(201).json({
@@ -1000,6 +1001,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       description: `${itemSummary} sold`,
       timestamp: new Date(),
       severity: null,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     })
       .then(() => console.log("✅ Activity created successfully"))
       .catch((err) => console.error("Activity log error (addLubricantTransaction):", err));
