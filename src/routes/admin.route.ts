@@ -3,6 +3,7 @@ import { requireAuth } from "../middlewares/auth.middleware";
 import { checkAdmin } from "../middlewares/checkAdmin";
 import {
   getOverview,
+  getNetworkGrowth,
   getAllStations,
   getStationById,
   getStationStaff,
@@ -18,6 +19,7 @@ import {
 const router = express.Router();
 
 router.get("/overview", requireAuth, checkAdmin, getOverview);
+router.get("/network-growth", requireAuth, checkAdmin, getNetworkGrowth);
 router.get("/stations", requireAuth, checkAdmin, getAllStations);
 router.get("/stations/:stationId", requireAuth, checkAdmin, getStationById);
 router.get("/stations/:stationId/staff", requireAuth, checkAdmin, getStationStaff);
