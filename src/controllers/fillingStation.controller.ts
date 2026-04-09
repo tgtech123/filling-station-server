@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
+import AdminLog from "../models/adminLog.model";
 import { Types } from "mongoose";
 
 
@@ -70,6 +71,15 @@ export const createFillingStation = async (req: Request, res: Response) => {
     // 4. Link Manager to Station (optional if not used for reverse)
     newStation.staff.push(manager._id as Types.ObjectId);
     await newStation.save();
+
+    AdminLog.create({
+      eventType: "station_registration",
+      description: `${stationName} registered`,
+      stationOrUser: stationName,
+      status: "info",
+      fillingStation: newStation._id,
+      performedBy: "System",
+    }).catch((err: any) => console.error("AdminLog error (registration):", err));
 
     res.status(201).json({
       message: "Filling station and manager created successfully",
