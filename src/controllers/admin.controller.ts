@@ -1,4 +1,4 @@
-import { Response } from "express";
+import { Request, Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import FillingStation from "../models/fillingStation.model";
@@ -10,6 +10,8 @@ import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
 import SubscriptionPayment from "../models/subscriptionPayment.model";
 import AdminLog from "../models/adminLog.model";
+import SubscriptionPlan from "../models/subscriptionPlan.model";
+import Payment from "../models/payment.model";
 
 // Nigeria timezone today/month ranges (WAT = UTC+1)
 const getNigeriaRanges = () => {
@@ -256,40 +258,110 @@ export const getStationById = async (req: AuthenticatedRequest, res: Response) =
 
     const stationObjectId = new Types.ObjectId(stationId);
 
-    const station = await FillingStation.findById(stationId).lean();
+    const [station, manager, totalStaff, totalShifts, revenueAgg, tankDoc, pumpDoc, lastActivity] =
+      await Promise.all([
+        FillingStation.findById(stationId).lean(),
+        Staff.findOne({ station: stationId, role: "manager" }).lean(),
+        Staff.countDocuments({ station: stationId }),
+        Shift.countDocuments({ fillingStation: stationObjectId }),
+        Shift.aggregate([
+          { $match: { fillingStation: stationObjectId, status: "Completed" } },
+          { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+        ]),
+        Tank.findOne({ fillingStation: stationObjectId }).lean(),
+        Pump.findOne({ fillingStation: stationObjectId }).lean(),
+        Activity.findOne({ fillingStation: stationObjectId }).sort({ timestamp: -1 }).lean(),
+      ]);
+
     if (!station) {
       return res.status(404).json({ error: "Station not found" });
     }
 
-    // Pump lookup must go through Tank subdoc IDs (Pump has no fillingStation field)
-    const tankDoc = await Tank.findOne({ fillingStation: stationObjectId }).lean();
-    let pumpCount = 0;
-    if (tankDoc && tankDoc.tanks.length > 0) {
-      const tankSubIds = tankDoc.tanks.map((t: any) => t._id);
-      const pumpDocs = await Pump.find({ tank: { $in: tankSubIds } }).lean();
-      pumpCount = pumpDocs.reduce((sum, pd) => sum + pd.pumps.length, 0);
-    }
+    const words = station.name.trim().split(/\s+/);
+    const initials = (
+      words.length >= 2 ? words[0][0] + words[1][0] : words[0].slice(0, 2)
+    ).toUpperCase();
 
-    const [totalStaff, totalShifts, revenueAgg, lastActivity] = await Promise.all([
-      Staff.countDocuments({ station: stationId }),
-      Shift.countDocuments({ fillingStation: stationObjectId }),
-      Shift.aggregate([
-        { $match: { fillingStation: stationObjectId, status: "Completed" } },
-        { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-      ]),
-      Activity.findOne({ fillingStation: stationObjectId }).sort({ timestamp: -1 }).lean(),
-    ]);
+    const registeredAt = new Date(station.createdAt).toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "Africa/Lagos",
+    });
+
+    const subscriptionStartDate = new Date(station.createdAt).toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
 
     return res.status(200).json({
       message: "Station detail retrieved",
-      station,
-      stats: {
-        totalStaff,
-        totalShifts,
-        totalRevenue: revenueAgg[0]?.total || 0,
-        totalTanks: tankDoc?.tanks?.length || 0,
-        totalPumps: pumpCount,
-        lastActivity: lastActivity?.timestamp || null,
+      data: {
+        station: {
+          id: station._id,
+          name: station.name,
+          initials,
+          address: station.address,
+          city: station.city,
+          country: station.country,
+          zipCode: station.zipCode,
+          email: station.email,
+          phone: station.phone,
+          licenseNumber: station.licenseNumber,
+          taxId: station.taxId,
+          establishmentDate: station.establishmentDate,
+          businessType: station.businessType,
+          numberOfPumps: station.numberOfPumps,
+          operationHours: station.operationHours,
+          tankCapacity: station.tankCapacity,
+          averageMonthlyRevenue: station.averageMonthlyRevenue,
+          fuelTypesOffered: station.fuelTypesOffered || [],
+          additionalServices: station.additionalServices || [],
+          image: station.image || null,
+          isActive: station.isActive,
+          status: station.isActive ? "Active" : "Suspended",
+          registeredAt,
+        },
+        owner: manager
+          ? {
+              id: (manager as any)._id,
+              firstName: (manager as any).firstName,
+              lastName: (manager as any).lastName,
+              email: (manager as any).email,
+              phone: (manager as any).phone,
+              image: (manager as any).image || null,
+              twoFactorAuthEnabled: (manager as any).twoFactorAuthEnabled,
+              joinedAt: new Date((manager as any).createdAt).toLocaleDateString("en-US", {
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+                timeZone: "Africa/Lagos",
+              }),
+            }
+          : null,
+        subscription: {
+          currentPlan: (station as any).plan || "Free",
+          status: station.isActive ? "Active" : "Suspended",
+          startDate: subscriptionStartDate,
+          expiryDate: "Not set",
+        },
+        operational: {
+          businessType: station.businessType,
+          numberOfPumps: station.numberOfPumps,
+          operationHours: station.operationHours,
+          tankCapacity: station.tankCapacity,
+          averageMonthlyRevenue: station.averageMonthlyRevenue,
+          fuelTypesOffered: station.fuelTypesOffered || [],
+          additionalServices: station.additionalServices || [],
+        },
+        stats: {
+          totalStaff,
+          totalShifts,
+          totalRevenue: revenueAgg[0]?.total || 0,
+          totalTanks: tankDoc?.tanks?.length || 0,
+          totalPumps: (pumpDoc as any)?.pumps?.length || 0,
+          lastActivity: lastActivity?.timestamp || null,
+        },
       },
     });
   } catch (err: any) {
@@ -549,6 +621,37 @@ export const getActivityLogs = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
+export const restoreStation = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { stationId } = req.params;
+
+    if (!Types.ObjectId.isValid(stationId)) {
+      return res.status(400).json({ error: "Invalid stationId" });
+    }
+
+    const station = await FillingStation.findOne({ _id: stationId, isDeleted: true });
+    if (!station) {
+      return res.status(404).json({ error: "Deleted station not found" });
+    }
+
+    await FillingStation.findByIdAndUpdate(stationId, { isDeleted: false, isActive: true });
+
+    AdminLog.create({
+      eventType: "station_reactivated",
+      description: "Station restored by admin",
+      stationOrUser: station.name,
+      status: "success",
+      fillingStation: station._id,
+      performedBy: "Admin",
+    }).catch((err: any) => console.error("AdminLog error (restore):", err));
+
+    return res.status(200).json({ message: "Station restored successfully" });
+  } catch (err: any) {
+    console.error("Error in restoreStation:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
 export const deleteStation = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { stationId } = req.params;
@@ -569,5 +672,466 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
   } catch (err: any) {
     console.error("Error in deleteStation:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+// ── Subscription Plans ─────────────────────────────────────────────────────
+
+export const seedDefaultPlans = async () => {
+  const existing = await SubscriptionPlan.countDocuments();
+  if (existing > 0) return;
+
+  const plans = [
+    {
+      name: "Free Plan",
+      slug: "free",
+      description: "Perfect for getting started. Try Flourish Station with limited access for 1 month.",
+      monthlyPrice: 0,
+      yearlyPrice: 0,
+      currency: "NGN",
+      billingCycles: ["free"],
+      duration: 1,
+      durationUnit: "months",
+      staffLimits: { attendants: 3, cashiers: 1, accountants: 1, supervisors: 1, managers: 1 },
+      features: [
+        "3 Attendants",
+        "1 Cashier",
+        "1 Accountant",
+        "1 Supervisor",
+        "1 Manager",
+        "Basic dashboard",
+        "Activity feed",
+        "1 month access",
+      ],
+      isActive: true,
+      isPopular: false,
+      order: 1,
+      allowMultipleBranches: false,
+      maxBranches: 1,
+    },
+    {
+      name: "Pro Plan",
+      slug: "pro",
+      description: "For growing stations that need more staff and advanced features.",
+      monthlyPrice: 15000,
+      yearlyPrice: 162000,
+      currency: "NGN",
+      billingCycles: ["monthly", "yearly"],
+      duration: 1,
+      durationUnit: "months",
+      staffLimits: { attendants: 10, cashiers: 3, accountants: 2, supervisors: 2, managers: 2 },
+      features: [
+        "10 Attendants",
+        "3 Cashiers",
+        "2 Accountants",
+        "2 Supervisors",
+        "2 Managers",
+        "Full dashboard access",
+        "Advanced analytics",
+        "Priority support",
+        "Monthly or yearly billing",
+      ],
+      isActive: true,
+      isPopular: true,
+      order: 2,
+      allowMultipleBranches: false,
+      maxBranches: 1,
+    },
+    {
+      name: "Pro Max",
+      slug: "pro-max",
+      description: "3x the Pro Plan. For large stations with high volume operations and multiple staff.",
+      monthlyPrice: 40000,
+      yearlyPrice: 432000,
+      currency: "NGN",
+      billingCycles: ["monthly", "yearly"],
+      duration: 1,
+      durationUnit: "months",
+      staffLimits: { attendants: 999, cashiers: 999, accountants: 6, supervisors: 6, managers: 3 },
+      features: [
+        "Unlimited Attendants",
+        "Unlimited Cashiers",
+        "6 Accountants",
+        "6 Supervisors",
+        "3 Managers",
+        "Everything in Pro Plan",
+        "Advanced reporting",
+        "Bulk operations",
+        "Priority support",
+      ],
+      isActive: true,
+      isPopular: false,
+      order: 3,
+      allowMultipleBranches: false,
+      maxBranches: 1,
+    },
+    {
+      name: "Enterprise",
+      slug: "enterprise",
+      description: "For multi-branch operations. Full control across all your stations with a super manager account.",
+      monthlyPrice: 100000,
+      yearlyPrice: 1080000,
+      currency: "NGN",
+      billingCycles: ["monthly", "yearly"],
+      duration: 1,
+      durationUnit: "months",
+      staffLimits: { attendants: 999, cashiers: 999, accountants: 999, supervisors: 999, managers: 999 },
+      features: [
+        "Unlimited all roles",
+        "Multiple branches",
+        "Super manager account",
+        "Switch between stations",
+        "View all branch activities",
+        "Everything in Pro Max",
+        "Dedicated support",
+        "Custom integrations",
+        "SLA guarantee",
+      ],
+      isActive: true,
+      isPopular: false,
+      order: 4,
+      allowMultipleBranches: true,
+      maxBranches: 999,
+    },
+  ];
+
+  await SubscriptionPlan.insertMany(plans);
+  console.log("✅ Default subscription plans seeded");
+};
+
+export const updateYearlyPrices = async () => {
+  await SubscriptionPlan.updateOne({ slug: "pro" }, { yearlyPrice: 162000 });
+  await SubscriptionPlan.updateOne({ slug: "pro-max" }, { yearlyPrice: 432000 });
+  await SubscriptionPlan.updateOne({ slug: "enterprise" }, { yearlyPrice: 1080000 });
+  console.log("✅ Yearly prices updated with 10% discount");
+};
+
+// GET /api/public/plans — no auth needed
+export const getPublicPlans = async (req: Request, res: Response) => {
+  try {
+    const plans = await SubscriptionPlan.find({ isActive: true }).sort({ order: 1 }).lean();
+
+    return res.status(200).json({
+      message: "Plans retrieved successfully",
+      total: plans.length,
+      plans: plans.map((plan) => ({
+        id: plan._id,
+        name: plan.name,
+        slug: plan.slug,
+        description: plan.description,
+        monthlyPrice: plan.monthlyPrice,
+        yearlyPrice: plan.yearlyPrice,
+        currency: plan.currency,
+        billingCycles: plan.billingCycles,
+        duration: plan.duration,
+        durationUnit: plan.durationUnit,
+        staffLimits: plan.staffLimits,
+        features: plan.features,
+        isPopular: plan.isPopular,
+        allowMultipleBranches: plan.allowMultipleBranches,
+        maxBranches: plan.maxBranches,
+        order: plan.order,
+      })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/admin/plans — all plans including inactive
+export const getAdminPlans = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const plans = await SubscriptionPlan.find().sort({ order: 1 }).lean();
+
+    return res.status(200).json({
+      message: "Plans retrieved",
+      total: plans.length,
+      plans,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/admin/plans
+export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const {
+      name, description, monthlyPrice, yearlyPrice, billingCycles,
+      duration, durationUnit, staffLimits, features,
+      isActive, isPopular, order, allowMultipleBranches, maxBranches,
+    } = req.body;
+
+    const slug = name
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "");
+
+    const existing = await SubscriptionPlan.findOne({ slug });
+    if (existing) {
+      return res.status(400).json({ error: "A plan with this name already exists" });
+    }
+
+    const plan = await SubscriptionPlan.create({
+      name,
+      slug,
+      description,
+      monthlyPrice: monthlyPrice || 0,
+      yearlyPrice: yearlyPrice || 0,
+      billingCycles: billingCycles || ["monthly"],
+      duration: duration || 1,
+      durationUnit: durationUnit || "months",
+      staffLimits: staffLimits || {},
+      features: features || [],
+      isActive: isActive ?? true,
+      isPopular: isPopular ?? false,
+      order: order || 0,
+      allowMultipleBranches: allowMultipleBranches ?? false,
+      maxBranches: maxBranches || 1,
+    });
+
+    AdminLog.create({
+      eventType: "subscription_updated",
+      description: `New plan created: ${plan.name}`,
+      stationOrUser: "General Admin",
+      status: "info",
+    }).catch(console.error);
+
+    return res.status(201).json({ message: "Plan created successfully", plan });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// PATCH /api/admin/plans/:planId
+export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { planId } = req.params;
+    const updates = { ...req.body };
+
+    if (updates.name) {
+      updates.slug = updates.name
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "");
+    }
+
+    const plan = await SubscriptionPlan.findByIdAndUpdate(planId, updates, { new: true });
+    if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+    return res.status(200).json({ message: "Plan updated successfully", plan });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// DELETE /api/admin/plans/:planId — soft delete
+export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { planId } = req.params;
+
+    const plan = await SubscriptionPlan.findByIdAndUpdate(
+      planId,
+      { isActive: false },
+      { new: true }
+    );
+    if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+    return res.status(200).json({ message: "Plan deactivated successfully" });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// ── Payments & Billing ────────────────────────────────────────────────────────
+
+// GET /api/admin/payments/stats
+export const getPaymentStats = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const now = new Date();
+    const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+    const [y, m] = todayStr.split("-").map(Number);
+    const startOfMonth = new Date(Date.UTC(y, m - 1, 1, -1, 0, 0, 0));
+
+    const [totalPayments, successfulPayments, failedPayments, revenueAgg] = await Promise.all([
+      Payment.countDocuments(),
+      Payment.countDocuments({ status: "success" }),
+      Payment.countDocuments({ status: "failed" }),
+      Payment.aggregate([
+        { $match: { status: "success", createdAt: { $gte: startOfMonth } } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
+    ]);
+
+    return res.status(200).json({
+      message: "Payment stats retrieved",
+      data: {
+        totalPayments,
+        successfulPayments,
+        failedPayments,
+        totalRevenue: revenueAgg[0]?.total || 0,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/admin/payments
+export const getPayments = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { page = 1, limit = 10, status, search, duration, startDate, endDate } = req.query;
+
+    const query: any = {};
+
+    if (status && status !== "all") {
+      query.status = status;
+    }
+
+    if (search) {
+      query.stationName = { $regex: search, $options: "i" };
+    }
+
+    if (duration && duration !== "all") {
+      const now = new Date();
+      const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+      const [y, m, d] = todayStr.split("-").map(Number);
+
+      if (duration === "Weekly") {
+        query.createdAt = { $gte: new Date(Date.UTC(y, m - 1, d - 7, -1, 0, 0, 0)) };
+      } else if (duration === "Monthly") {
+        query.createdAt = { $gte: new Date(Date.UTC(y, m - 1, 1, -1, 0, 0, 0)) };
+      } else if (duration === "Yearly") {
+        query.createdAt = { $gte: new Date(Date.UTC(y, 0, 1, -1, 0, 0, 0)) };
+      }
+    }
+
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate as string);
+      if (endDate) query.createdAt.$lte = new Date(endDate as string);
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const [payments, total] = await Promise.all([
+      Payment.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
+      Payment.countDocuments(query),
+    ]);
+
+    const rows = payments.map((p) => ({
+      id: p._id,
+      stationName: p.stationName,
+      plan: p.planName,
+      amount: `₦${p.amount.toLocaleString("en-NG")}`,
+      paymentMethod: p.paymentMethod,
+      status: p.status === "success" ? "Active" : p.status === "failed" ? "Failed" : "Pending",
+      date: new Date(p.paidAt || p.createdAt).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "Africa/Lagos",
+      }),
+      rawDate: p.createdAt,
+      rawAmount: p.amount,
+      billingCycle: p.billingCycle,
+      transactionRef: p.transactionRef,
+    }));
+
+    return res.status(200).json({
+      message: "Payments retrieved successfully",
+      data: {
+        rows,
+        pagination: {
+          currentPage: Number(page),
+          totalItems: total,
+          itemsPerPage: Number(limit),
+          totalPages: Math.ceil(total / Number(limit)),
+        },
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/admin/subscriptions
+export const getStationSubscriptions = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { page = 1, limit = 10, search, status } = req.query;
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const stationQuery: any = { isDeleted: { $ne: true } };
+    if (search) {
+      stationQuery.name = { $regex: search, $options: "i" };
+    }
+    if (status === "active") {
+      stationQuery.isActive = true;
+    } else if (status === "suspended") {
+      stationQuery.isActive = false;
+    }
+
+    const [stations, total] = await Promise.all([
+      FillingStation.find(stationQuery).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
+      FillingStation.countDocuments(stationQuery),
+    ]);
+
+    const stationIds = stations.map((s) => s._id);
+
+    const latestPayments = await Payment.aggregate([
+      { $match: { fillingStation: { $in: stationIds } } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: "$fillingStation",
+          planName: { $first: "$planName" },
+          status: { $first: "$status" },
+          amount: { $first: "$amount" },
+          billingCycle: { $first: "$billingCycle" },
+          paidAt: { $first: "$paidAt" },
+        },
+      },
+    ]);
+
+    const paymentMap: Record<string, any> = {};
+    latestPayments.forEach((p) => {
+      paymentMap[p._id.toString()] = p;
+    });
+
+    const rows = stations.map((station) => {
+      const payment = paymentMap[station._id.toString()];
+      return {
+        id: station._id,
+        stationName: station.name,
+        plan: payment?.planName || "Free",
+        amount: payment ? `₦${payment.amount.toLocaleString("en-NG")}` : "₦0",
+        billingCycle: payment?.billingCycle || "free",
+        status: station.isActive ? "Active" : "Suspended",
+        date: new Date(payment?.paidAt || station.createdAt).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          timeZone: "Africa/Lagos",
+        }),
+      };
+    });
+
+    return res.status(200).json({
+      message: "Station subscriptions retrieved",
+      data: {
+        rows,
+        pagination: {
+          currentPage: Number(page),
+          totalItems: total,
+          itemsPerPage: Number(limit),
+          totalPages: Math.ceil(total / Number(limit)),
+        },
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 };

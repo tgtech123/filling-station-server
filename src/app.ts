@@ -26,6 +26,7 @@ import notifications from "./routes/notification.route"
 import staff from "./routes/staff.route"
 import emergency from "./routes/emergency.route"
 import admin from "./routes/admin.route"
+import publicRoutes from "./routes/public.route"
 
 
 import cors from 'cors'
@@ -70,6 +71,7 @@ app.use("/api/notifications", notifications)
 app.use("/api/staff", staff)
 app.use("/api/emergency", emergency)
 app.use("/api/admin", admin)
+app.use("/api/public", publicRoutes)
 
 
 

@@ -14,6 +14,14 @@ import {
   updateStationStatus,
   getActivityLogs,
   deleteStation,
+  restoreStation,
+  getAdminPlans,
+  createPlan,
+  updatePlan,
+  deletePlan,
+  getPaymentStats,
+  getPayments,
+  getStationSubscriptions,
 } from "../controllers/admin.controller";
 
 const router = express.Router();
@@ -30,5 +38,15 @@ router.get("/stations/:stationId/errors", requireAuth, checkAdmin, getStationErr
 router.patch("/stations/:stationId/status", requireAuth, checkAdmin, updateStationStatus);
 router.get("/activity-logs", requireAuth, checkAdmin, getActivityLogs);
 router.delete("/stations/:stationId", requireAuth, checkAdmin, deleteStation);
+router.post("/stations/:stationId/restore", requireAuth, checkAdmin, restoreStation);
+
+router.get("/plans", requireAuth, checkAdmin, getAdminPlans);
+router.post("/plans", requireAuth, checkAdmin, createPlan);
+router.patch("/plans/:planId", requireAuth, checkAdmin, updatePlan);
+router.delete("/plans/:planId", requireAuth, checkAdmin, deletePlan);
+
+router.get("/payments/stats", requireAuth, checkAdmin, getPaymentStats);
+router.get("/payments", requireAuth, checkAdmin, getPayments);
+router.get("/subscriptions", requireAuth, checkAdmin, getStationSubscriptions);
 
 export default router;
