@@ -92,6 +92,7 @@ salesTargetSchema.pre("save", function (next) {
 
 salesTargetSchema.index({ staff: 1, status: 1 });
 salesTargetSchema.index({ fillingStation: 1, status: 1 });
+salesTargetSchema.index({ endDate: 1, status: 1 });
 
 const SalesTarget = mongoose.model<ISalesTarget>("SalesTarget", salesTargetSchema);
 export default SalesTarget;

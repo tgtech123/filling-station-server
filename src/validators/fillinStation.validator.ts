@@ -9,8 +9,8 @@ export const validateFillingStation = [
   body("address").notEmpty().withMessage("Address is required"),
   body("city").notEmpty().withMessage("City is required"),
   body("state").notEmpty().withMessage("State is required"),
-  body("zipCode").notEmpty().withMessage("Zip code is required"),
-  body("emergencyContact").notEmpty().withMessage("Emergency contact is required"),
+  body("zipCode").optional().trim(),
+  body("emergencyContact").optional().trim(),
 
   // Step 2 - Station Info
   body("stationName").notEmpty().withMessage("Station name is required"),
@@ -20,14 +20,11 @@ export const validateFillingStation = [
   body("stationCity").notEmpty().withMessage("Station city is required"),
   body("stationCountry").notEmpty().withMessage("Country is required"),
   body("licenseNumber").notEmpty().withMessage("License number is required"),
-  body("taxId").notEmpty().withMessage("Tax ID is required"),
+  body("taxId").optional().trim(),
   body("establishmentDate").notEmpty().withMessage("Establishment date is required"),
 
   // Step 4 - Auth
-body("password")
-  .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/)
-  .withMessage(
-    "Password must be at least 8 characters long and include uppercase, lowercase, number, and special character"
-  ),
-
+  body("password")
+    .isLength({ min: 8 })
+    .withMessage("Password must be at least 8 characters long"),
 ];

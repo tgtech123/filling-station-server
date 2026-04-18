@@ -104,8 +104,10 @@ const NotificationSchema = new Schema<INotification>(
   { timestamps: true }
 );
 
+NotificationSchema.index({ fillingStation: 1, targetRole: 1, createdAt: -1 });
 NotificationSchema.index({ fillingStation: 1, type: 1, timestamp: -1 });
 NotificationSchema.index({ fillingStation: 1, isRead: 1 });
+NotificationSchema.index({ staff: 1, isRead: 1 });
 NotificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const Notification = mongoose.model<INotification>("Notification", NotificationSchema);

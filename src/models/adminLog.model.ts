@@ -60,7 +60,8 @@ AdminLogSchema.index(
   { createdAt: 1 },
   { expireAfterSeconds: 90 * 24 * 60 * 60 }
 );
-AdminLogSchema.index({ eventType: 1, createdAt: -1 });
+AdminLogSchema.index({ createdAt: -1 });
 AdminLogSchema.index({ status: 1, createdAt: -1 });
+AdminLogSchema.index({ eventType: 1, createdAt: -1 });
 
 export default mongoose.model<IAdminLog>("AdminLog", AdminLogSchema);

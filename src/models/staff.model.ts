@@ -27,13 +27,15 @@ export interface IStaff extends Document {
     sales: boolean;
     staffs: boolean;
   };
+  managedStations: mongoose.Types.ObjectId[];
+  isSuperManager: boolean;
 }
 
 const StaffSchema = new Schema<IStaff>(
   {
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
+    email: { type: String, required: true },
     phone: {
       type: String,
       required: function (this: any) {
@@ -64,8 +66,14 @@ const StaffSchema = new Schema<IStaff>(
       sales: { type: Boolean, default: false },
       staffs: { type: Boolean, default: false },
     },
+    managedStations: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
+    isSuperManager: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
+
+StaffSchema.index({ station: 1, role: 1 });
+StaffSchema.index({ email: 1 }, { unique: true });
+StaffSchema.index({ station: 1, onDuty: 1 });
 
 export default mongoose.model<IStaff>("Staff", StaffSchema);

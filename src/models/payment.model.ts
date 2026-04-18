@@ -60,8 +60,6 @@ const PaymentSchema = new Schema<IPayment>(
     },
     transactionRef: {
       type: String,
-      unique: true,
-      sparse: true,
     },
     paidAt: {
       type: Date,
@@ -79,6 +77,7 @@ const PaymentSchema = new Schema<IPayment>(
 // Compound indexes for fast queries
 PaymentSchema.index({ fillingStation: 1, createdAt: -1 });
 PaymentSchema.index({ status: 1, createdAt: -1 });
+PaymentSchema.index({ transactionRef: 1 }, { unique: true, sparse: true });
 PaymentSchema.index({ createdAt: -1 });
 PaymentSchema.index({ stationName: "text" });
 

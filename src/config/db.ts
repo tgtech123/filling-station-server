@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { seedDefaultPlans, updateYearlyPrices } from "../controllers/admin.controller";
+import { seedDefaultPlans, updateYearlyPrices, seedAdminLogs, seedPlatformSettings } from "../controllers/admin.controller";
 
 export const connectDB = async () => {
   try {
@@ -8,6 +8,8 @@ export const connectDB = async () => {
     mongoose.connection.once("open", async () => {
       await seedDefaultPlans();
       await updateYearlyPrices();
+      await seedAdminLogs();
+      await seedPlatformSettings();
     });
   } catch (err) {
     console.error("❌ MongoDB connection error:", err);

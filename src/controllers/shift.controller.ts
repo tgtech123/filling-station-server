@@ -8,6 +8,7 @@ import Staff from "../models/staff.model";
 import Activity from "../models/activity.model";
 import SalesTarget from "../models/salesTarget.model";
 import Notification from "../models/notification.model";
+import { deleteCachePattern } from "../config/redis";
 
 // Get all active pumps for a station
 const getActivePumps = async (stationId: Types.ObjectId) => {
@@ -273,6 +274,8 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
 
     // The pre-save hook will calculate litresSold and totalAmount
     await shift.save();
+
+    await deleteCachePattern(`dashboard:*:${shift.fillingStation}`);
 
     // Deduct litresSold from the matching tank (fire-and-forget)
     Tank.findOne({ fillingStation: shift.fillingStation })

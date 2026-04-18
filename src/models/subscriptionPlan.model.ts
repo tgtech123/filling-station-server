@@ -43,7 +43,7 @@ const StaffLimitsSchema = new Schema<IStaffLimits>(
 const SubscriptionPlanSchema = new Schema<ISubscriptionPlan>(
   {
     name: { type: String, required: true, trim: true },
-    slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    slug: { type: String, required: true, lowercase: true, trim: true },
     description: { type: String, required: true },
     monthlyPrice: { type: Number, default: 0 },
     yearlyPrice: { type: Number, default: 0 },
@@ -67,6 +67,6 @@ const SubscriptionPlanSchema = new Schema<ISubscriptionPlan>(
 );
 
 SubscriptionPlanSchema.index({ isActive: 1, order: 1 });
-SubscriptionPlanSchema.index({ slug: 1 });
+SubscriptionPlanSchema.index({ slug: 1 }, { unique: true });
 
 export default mongoose.model<ISubscriptionPlan>("SubscriptionPlan", SubscriptionPlanSchema);

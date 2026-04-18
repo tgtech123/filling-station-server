@@ -51,6 +51,7 @@ const ActivitySchema = new Schema<IActivity>(
 );
 
 ActivitySchema.index({ fillingStation: 1, timestamp: -1 });
+ActivitySchema.index({ fillingStation: 1, type: 1, timestamp: -1 });
 ActivitySchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const Activity = mongoose.model<IActivity>("Activity", ActivitySchema);

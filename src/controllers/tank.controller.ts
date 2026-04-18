@@ -5,6 +5,7 @@ import Pump from "../models/pump.model";
 import { Types } from "mongoose";
 import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
+import { deleteCache } from "../config/redis";
 
 export const addTank = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -192,6 +193,9 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
 
     // 6️⃣ Save updated station record
     await station.save();
+
+    await deleteCache(`dashboard:tanks:${fillingStationId}`);
+    await deleteCache(`dashboard:fuel:${fillingStationId}`);
 
     // Log alert if tank drops below 20% capacity (fire-and-forget)
     const percentFull = tank.limit > 0 ? (tank.currentQuantity / tank.limit) * 100 : 0;

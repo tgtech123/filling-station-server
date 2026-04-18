@@ -72,6 +72,30 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(404).json({ message: "Associated station not found" });
     }
 
+    // Enforce staff limits based on plan
+    const limits = station.staffLimits as any;
+    const limitMap: Record<string, number> = {
+      attendant: limits?.attendants ?? 3,
+      cashier: limits?.cashiers ?? 1,
+      accountant: limits?.accountants ?? 1,
+      supervisor: limits?.supervisors ?? 1,
+      manager: limits?.managers ?? 1,
+    };
+    const roleLimit = limitMap[role];
+    if (roleLimit !== undefined) {
+      const existingCount = await Staff.countDocuments({ station: station._id, role });
+      if (existingCount >= roleLimit) {
+        return res.status(403).json({
+          error: `You have reached the ${role} limit for your current plan (${roleLimit} max). Upgrade your plan to add more.`,
+          limitReached: true,
+          currentCount: existingCount,
+          limit: roleLimit,
+          role,
+          upgradeRequired: true,
+        });
+      }
+    }
+
     // Check for duplicate email
     const existingStaff = await Staff.findOne({ email });
     if (existingStaff) {

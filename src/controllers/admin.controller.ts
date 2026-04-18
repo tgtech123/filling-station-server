@@ -12,6 +12,8 @@ import SubscriptionPayment from "../models/subscriptionPayment.model";
 import AdminLog from "../models/adminLog.model";
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Payment from "../models/payment.model";
+import PlatformSettings from "../models/platformSettings.model";
+import { getCache, setCache, deleteCache } from "../config/redis";
 
 // Nigeria timezone today/month ranges (WAT = UTC+1)
 const getNigeriaRanges = () => {
@@ -51,6 +53,15 @@ const EVENT_TYPE_REVERSE: Record<string, string> = Object.fromEntries(
 
 const formatEventType = (key: string): string => EVENT_TYPE_LABELS[key] ?? key;
 
+const STATUS_LABELS: Record<string, string> = {
+  info: "Info",
+  success: "Success",
+  warning: "Warning",
+  critical: "Critical",
+};
+
+const formatStatus = (status: string): string => STATUS_LABELS[status] ?? "Info";
+
 const formatDateTime = (date: Date): string => {
   const d = new Date(date);
   const dateStr = d.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
@@ -65,6 +76,10 @@ const formatDateTime = (date: Date): string => {
 
 export const getOverview = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const cacheKey = "admin:overview";
+    const cached = await getCache(cacheKey);
+    if (cached) return res.status(200).json(cached);
+
     const { startOfMonth, endOfMonth, lastMonthStart, lastMonthEnd } = getNigeriaRanges();
 
     const [
@@ -102,7 +117,7 @@ export const getOverview = async (req: AuthenticatedRequest, res: Response) => {
     const monthlyRevenue = thisMonthRevenueAgg[0]?.total ?? 0;
     const lastMonthRevenue = lastMonthRevenueAgg[0]?.total ?? 0;
 
-    return res.status(200).json({
+    const response = {
       message: "Overview retrieved",
       data: {
         totalRegisteredStations,
@@ -114,7 +129,9 @@ export const getOverview = async (req: AuthenticatedRequest, res: Response) => {
         monthlyRevenue,
         monthlyRevenueGrowth: calcGrowth(monthlyRevenue, lastMonthRevenue),
       },
-    });
+    };
+    await setCache(cacheKey, response, 120);
+    return res.status(200).json(response);
   } catch (err: any) {
     console.error("Error in getOverview:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
@@ -578,45 +595,68 @@ export const updateStationStatus = async (req: AuthenticatedRequest, res: Respon
 
 export const getActivityLogs = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { limit = 20, page = 1, search, status, eventType } = req.query;
-    const query: any = {};
-
-    if (search) {
-      query.$or = [
-        { description: { $regex: search, $options: "i" } },
-        { stationOrUser: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    if (status) {
-      query.status = status;
-    }
-
-    // Accept either display label ("Station registration") or enum key ("station_registration")
-    if (eventType) {
-      const enumKey = EVENT_TYPE_REVERSE[eventType as string] ?? eventType;
-      query.eventType = enumKey;
-    }
+    const { limit = 50, page = 1 } = req.query;
 
     const skip = (Number(page) - 1) * Number(limit);
 
-    const [rawLogs, total] = await Promise.all([
-      AdminLog.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
-      AdminLog.countDocuments(query),
-    ]);
+    const [totalActivities, successfulCount, warningsCount, criticalCount, rawLogs, total] =
+      await Promise.all([
+        AdminLog.countDocuments(),
+        AdminLog.countDocuments({ status: { $in: ["success", "info"] } }),
+        AdminLog.countDocuments({ status: "warning" }),
+        AdminLog.countDocuments({ status: "critical" }),
+        AdminLog.find().sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
+        AdminLog.countDocuments(),
+      ]);
 
     const logs = (rawLogs as any[]).map((doc) => ({
       id: doc._id,
       eventType: formatEventType(doc.eventType),
       description: doc.description,
-      stationOrUser: doc.stationOrUser || "System",
-      status: doc.status,
+      stationUser: doc.stationOrUser || "System",
+      status: formatStatus(doc.status),
       dateTime: formatDateTime(doc.createdAt),
+      _rawDate: doc.createdAt,
     }));
 
-    return res.status(200).json({ total, logs });
+    return res.status(200).json({
+      message: "Activity logs retrieved",
+      stats: {
+        totalActivities,
+        successful: successfulCount,
+        warnings: warningsCount,
+        critical: criticalCount,
+      },
+      total,
+      pagination: {
+        currentPage: Number(page),
+        totalItems: total,
+        itemsPerPage: Number(limit),
+        totalPages: Math.ceil(total / Number(limit)),
+      },
+      logs,
+    });
   } catch (err: any) {
     console.error("Error in getActivityLogs:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+export const getActivityStats = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [totalActivities, successful, warnings, critical] = await Promise.all([
+      AdminLog.countDocuments(),
+      AdminLog.countDocuments({ status: { $in: ["success", "info"] } }),
+      AdminLog.countDocuments({ status: "warning" }),
+      AdminLog.countDocuments({ status: "critical" }),
+    ]);
+
+    return res.status(200).json({
+      message: "Activity stats retrieved",
+      data: { totalActivities, successful, warnings, critical },
+    });
+  } catch (err: any) {
+    console.error("Error in getActivityStats:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
@@ -678,9 +718,6 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
 // ── Subscription Plans ─────────────────────────────────────────────────────
 
 export const seedDefaultPlans = async () => {
-  const existing = await SubscriptionPlan.countDocuments();
-  if (existing > 0) return;
-
   const plans = [
     {
       name: "Free Plan",
@@ -768,7 +805,7 @@ export const seedDefaultPlans = async () => {
     {
       name: "Enterprise",
       slug: "enterprise",
-      description: "For multi-branch operations. Full control across all your stations with a super manager account.",
+      description: "For multi-branch operations. Manage up to 3 branch stations with a super manager account.",
       monthlyPrice: 100000,
       yearlyPrice: 1080000,
       currency: "NGN",
@@ -778,7 +815,7 @@ export const seedDefaultPlans = async () => {
       staffLimits: { attendants: 999, cashiers: 999, accountants: 999, supervisors: 999, managers: 999 },
       features: [
         "Unlimited all roles",
-        "Multiple branches",
+        "Up to 3 branches",
         "Super manager account",
         "Switch between stations",
         "View all branch activities",
@@ -791,12 +828,86 @@ export const seedDefaultPlans = async () => {
       isPopular: false,
       order: 4,
       allowMultipleBranches: true,
-      maxBranches: 999,
+      maxBranches: 3,
+    },
+    {
+      name: "Enterprise Pro",
+      slug: "enterprise-pro",
+      description: "Scale your operations across 5 branch stations with full super manager control and advanced analytics.",
+      monthlyPrice: 200000,
+      yearlyPrice: 2160000,
+      currency: "NGN",
+      billingCycles: ["monthly", "yearly"],
+      duration: 1,
+      durationUnit: "months",
+      staffLimits: { attendants: 999, cashiers: 999, accountants: 999, supervisors: 999, managers: 999 },
+      features: [
+        "Unlimited all roles",
+        "Up to 5 branches",
+        "Super manager account",
+        "Switch between all stations",
+        "Consolidated revenue reports",
+        "Cross-branch staff management",
+        "Everything in Enterprise",
+        "Priority dedicated support",
+        "Advanced analytics dashboard",
+        "Custom integrations",
+      ],
+      isActive: true,
+      isPopular: false,
+      order: 5,
+      allowMultipleBranches: true,
+      maxBranches: 5,
+    },
+    {
+      name: "Enterprise Max",
+      slug: "enterprise-max",
+      description: "Unlimited branches. The ultimate plan for large scale filling station networks across Nigeria and beyond.",
+      monthlyPrice: 500000,
+      yearlyPrice: 5400000,
+      currency: "NGN",
+      billingCycles: ["monthly", "yearly"],
+      duration: 1,
+      durationUnit: "months",
+      staffLimits: { attendants: 999, cashiers: 999, accountants: 999, supervisors: 999, managers: 999 },
+      features: [
+        "Unlimited all roles",
+        "Unlimited branches",
+        "Super manager account",
+        "Switch between all stations",
+        "Consolidated revenue reports",
+        "Cross-branch staff management",
+        "Everything in Enterprise Pro",
+        "White-glove onboarding",
+        "Dedicated account manager",
+        "Custom SLA agreement",
+        "API access",
+        "Custom integrations",
+      ],
+      isActive: true,
+      isPopular: false,
+      order: 6,
+      allowMultipleBranches: true,
+      maxBranches: 999999,
     },
   ];
 
-  await SubscriptionPlan.insertMany(plans);
-  console.log("✅ Default subscription plans seeded");
+  for (const plan of plans) {
+    await SubscriptionPlan.findOneAndUpdate(
+      { slug: plan.slug },
+      plan,
+      { upsert: true, new: true }
+    );
+  }
+
+  const allPlans = await SubscriptionPlan
+    .find()
+    .select("name slug order isActive maxBranches")
+    .sort({ order: 1 })
+    .lean();
+
+  console.log("All plans in DB:", JSON.stringify(allPlans, null, 2));
+  console.log("✅ Subscription plans synced");
 };
 
 export const updateYearlyPrices = async () => {
@@ -806,12 +917,213 @@ export const updateYearlyPrices = async () => {
   console.log("✅ Yearly prices updated with 10% discount");
 };
 
+export const seedAdminLogs = async () => {
+  const existing = await AdminLog.countDocuments();
+  if (existing > 0) return;
+
+  const sampleLogs = [
+    {
+      eventType: "station_registration",
+      description: "Shell Downtown Hub registered in Austin, TX",
+      stationOrUser: "Shell Downtown Hub",
+      status: "info",
+      performedBy: "System",
+    },
+    {
+      eventType: "subscription_updated",
+      description: "Manual subscription plan adjustment",
+      stationOrUser: "General Admin",
+      status: "info",
+      performedBy: "Admin",
+    },
+    {
+      eventType: "system_alert",
+      description: "High volume of failed payment attempts detected",
+      stationOrUser: "System",
+      status: "critical",
+      performedBy: "System",
+    },
+    {
+      eventType: "subscription_payment",
+      description: "Monthly subscription payment processed",
+      stationOrUser: "BP Highway Express",
+      status: "success",
+      performedBy: "System",
+    },
+    {
+      eventType: "subscription_expired",
+      description: "Plus plan subscription expired — renewal required",
+      stationOrUser: "BP Highway Express",
+      status: "warning",
+      performedBy: "System",
+    },
+    {
+      eventType: "station_suspended",
+      description: "Station suspended due to non-payment",
+      stationOrUser: "BP Highway Express",
+      status: "critical",
+      performedBy: "Admin",
+    },
+    {
+      eventType: "payment_failed",
+      description: "Payment method declined",
+      stationOrUser: "BP Highway Express",
+      status: "critical",
+      performedBy: "System",
+    },
+    {
+      eventType: "station_reactivated",
+      description: "Station reactivated after payment verification",
+      stationOrUser: "BP Highway Express",
+      status: "success",
+      performedBy: "Admin",
+    },
+  ];
+
+  await AdminLog.insertMany(sampleLogs);
+  console.log("✅ Sample admin logs seeded");
+};
+
+export const seedPlatformSettings = async () => {
+  const existing = await PlatformSettings.countDocuments();
+  if (existing > 0) return;
+
+  await PlatformSettings.create({
+    platformName: "Flourish Station",
+    contactEmail: "support@flourishstation.com",
+    contactPhone: "+234 9030203547",
+    contactAddress: "Km 2 Airport Road, Rukpokwu, Port Harcourt, Rivers State",
+    currency: "Nigerian Naira (NGN)",
+    currencyCode: "NGN",
+    termsAndConditions: "By using Flourish Station, you agree to our terms of service...",
+    planStatus: true,
+    emailNotifications: true,
+    inAppNotifications: false,
+    newStationRegistration: true,
+    subscriptionPaymentReceived: true,
+    subscriptionExpired: true,
+    stationSuspended: true,
+    systemAlerts: true,
+  });
+  console.log("✅ Platform settings seeded");
+};
+
+// ── Platform Settings ─────────────────────────────────────────────────────────
+
+// GET /api/admin/settings
+export const getPlatformSettings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let settings = await PlatformSettings.findOne().lean();
+
+    if (!settings) {
+      settings = await PlatformSettings.create({ platformName: "Flourish Station" });
+    }
+
+    return res.status(200).json({
+      message: "Settings retrieved successfully",
+      data: settings,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// PATCH /api/admin/settings
+export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const {
+      platformName,
+      contactEmail,
+      contactPhone,
+      contactAddress,
+      currency,
+      currencyCode,
+      termsAndConditions,
+      planStatus,
+      emailNotifications,
+      inAppNotifications,
+      newStationRegistration,
+      subscriptionPaymentReceived,
+      subscriptionExpired,
+      stationSuspended,
+      systemAlerts,
+    } = req.body;
+
+    const adminId = req.user?._id || req.user?.id;
+
+    const updates: any = { updatedBy: adminId };
+
+    if (platformName !== undefined) updates.platformName = platformName;
+    if (contactEmail !== undefined) updates.contactEmail = contactEmail;
+    if (contactPhone !== undefined) updates.contactPhone = contactPhone;
+    if (contactAddress !== undefined) updates.contactAddress = contactAddress;
+    if (currency !== undefined) updates.currency = currency;
+    if (currencyCode !== undefined) updates.currencyCode = currencyCode;
+    if (termsAndConditions !== undefined) updates.termsAndConditions = termsAndConditions;
+    if (planStatus !== undefined) updates.planStatus = planStatus;
+    if (emailNotifications !== undefined) updates.emailNotifications = emailNotifications;
+    if (inAppNotifications !== undefined) updates.inAppNotifications = inAppNotifications;
+    if (newStationRegistration !== undefined) updates.newStationRegistration = newStationRegistration;
+    if (subscriptionPaymentReceived !== undefined) updates.subscriptionPaymentReceived = subscriptionPaymentReceived;
+    if (subscriptionExpired !== undefined) updates.subscriptionExpired = subscriptionExpired;
+    if (stationSuspended !== undefined) updates.stationSuspended = stationSuspended;
+    if (systemAlerts !== undefined) updates.systemAlerts = systemAlerts;
+
+    const settings = await PlatformSettings.findOneAndUpdate({}, updates, {
+      new: true,
+      upsert: true,
+    });
+
+    AdminLog.create({
+      eventType: "subscription_updated",
+      description: "Platform settings updated by admin",
+      stationOrUser: "General Admin",
+      status: "info",
+    }).catch(console.error);
+
+    return res.status(200).json({
+      message: "Settings updated successfully",
+      data: settings,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/admin/settings/public — no auth needed
+export const getPublicSettings = async (req: Request, res: Response) => {
+  try {
+    const settings = await PlatformSettings.findOne()
+      .select("platformName contactEmail contactPhone contactAddress currency currencyCode termsAndConditions")
+      .lean();
+
+    return res.status(200).json({
+      message: "Public settings retrieved",
+      data: {
+        platformName: settings?.platformName || "Flourish Station",
+        contactEmail: settings?.contactEmail || "",
+        contactPhone: settings?.contactPhone || "",
+        contactAddress: settings?.contactAddress || "",
+        currency: settings?.currency || "Nigerian Naira (NGN)",
+        currencyCode: settings?.currencyCode || "NGN",
+        termsAndConditions: settings?.termsAndConditions || "No terms available",
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 // GET /api/public/plans — no auth needed
 export const getPublicPlans = async (req: Request, res: Response) => {
   try {
+    const cacheKey = "public:plans";
+    const cached = await getCache(cacheKey);
+    if (cached) return res.status(200).json(cached);
+
     const plans = await SubscriptionPlan.find({ isActive: true }).sort({ order: 1 }).lean();
 
-    return res.status(200).json({
+    const response = {
       message: "Plans retrieved successfully",
       total: plans.length,
       plans: plans.map((plan) => ({
@@ -832,7 +1144,9 @@ export const getPublicPlans = async (req: Request, res: Response) => {
         maxBranches: plan.maxBranches,
         order: plan.order,
       })),
-    });
+    };
+    await setCache(cacheKey, response, 3600);
+    return res.status(200).json(response);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -898,6 +1212,7 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
       status: "info",
     }).catch(console.error);
 
+    await deleteCache("public:plans");
     return res.status(201).json({ message: "Plan created successfully", plan });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -921,6 +1236,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
     const plan = await SubscriptionPlan.findByIdAndUpdate(planId, updates, { new: true });
     if (!plan) return res.status(404).json({ error: "Plan not found" });
 
+    await deleteCache("public:plans");
     return res.status(200).json({ message: "Plan updated successfully", plan });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
