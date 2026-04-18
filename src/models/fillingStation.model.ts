@@ -19,9 +19,25 @@ export interface IFillingStation extends Document {
   averageMonthlyRevenue: string;
   fuelTypesOffered: string[];
   additionalServices: string[];
-  staff: mongoose.Types.ObjectId[]; // references to Staff
+  staff: mongoose.Types.ObjectId[];
   isActive: boolean;
   isDeleted: boolean;
+  plan: string;
+  planId: mongoose.Types.ObjectId | null;
+  planStatus: string;
+  planStartDate: Date;
+  planExpiryDate: Date | null;
+  staffLimits: {
+    attendants: number;
+    cashiers: number;
+    accountants: number;
+    supervisors: number;
+    managers: number;
+    maxBranches?: number;
+  };
+  parentStation: mongoose.Types.ObjectId | null;
+  branches: mongoose.Types.ObjectId[];
+  isSuperManager: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,24 +51,59 @@ const FillingStationSchema = new Schema<IFillingStation>(
     city: { type: String, required: true },
     country: { type: String, required: true },
     zipCode: { type: String, required: true },
-    licenseNumber: { type: String, required: true, unique: true },
-    taxId: { type: String, required: true },
-    establishmentDate: { type: Date, required: true },
+    licenseNumber: { type: String, required: false, unique: true, sparse: true, default: "" },
+    taxId: { type: String, required: false, default: "" },
+    establishmentDate: { type: Date, required: false, default: Date.now },
     image: { type: String },
-    businessType: { type: String, required: true },
-    numberOfPumps: { type: Number, required: true },
-    operationHours: { type: String, required: true },
-    tankCapacity: { type: String, required: true },
-    averageMonthlyRevenue: { type: String, required: true },
+    businessType: { type: String, required: false, default: "independent" },
+    numberOfPumps: { type: Number, required: false, default: 1 },
+    operationHours: { type: String, required: false, default: "24/7" },
+    tankCapacity: { type: String, required: false, default: "0" },
+    averageMonthlyRevenue: { type: String, required: false, default: "0" },
     fuelTypesOffered: { type: [String], default: [] },
     additionalServices: { type: [String], default: [] },
     staff: [{ type: Schema.Types.ObjectId, ref: "Staff" }],
     isActive: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },
+    plan: {
+      type: String,
+      enum: ["free", "pro", "pro-max", "enterprise", "enterprise-pro", "enterprise-max"],
+      default: "free",
+    },
+    planId: {
+      type: Schema.Types.ObjectId,
+      ref: "SubscriptionPlan",
+      default: null,
+    },
+    planStatus: {
+      type: String,
+      enum: ["active", "expired", "cancelled", "trial"],
+      default: "active",
+    },
+    planStartDate: { type: Date, default: Date.now },
+    planExpiryDate: { type: Date, default: null },
+    staffLimits: {
+      attendants: { type: Number, default: 3 },
+      cashiers: { type: Number, default: 1 },
+      accountants: { type: Number, default: 1 },
+      supervisors: { type: Number, default: 1 },
+      managers: { type: Number, default: 1 },
+      maxBranches: { type: Number, default: 1 },
+    },
+    parentStation: {
+      type: Schema.Types.ObjectId,
+      ref: "FillingStation",
+      default: null,
+    },
+    branches: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
+    isSuperManager: { type: Boolean, default: false },
     createdAt: { type: Date },
     updatedAt: { type: Date },
   },
   { timestamps: true }
 );
+
+FillingStationSchema.index({ isActive: 1, isDeleted: 1 });
+FillingStationSchema.index({ plan: 1, planStatus: 1 });
 
 export default mongoose.model<IFillingStation>("FillingStation", FillingStationSchema);

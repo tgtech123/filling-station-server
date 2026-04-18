@@ -1,9 +1,140 @@
 import { Response } from "express";
 import { Types } from "mongoose";
+import bcrypt from "bcrypt";
 import { AuthenticatedRequest } from "../interfaces";
 import SalesTarget from "../models/salesTarget.model";
 import Staff from "../models/staff.model";
 import Notification from "../models/notification.model";
+import FillingStation from "../models/fillingStation.model";
+import Activity from "../models/activity.model";
+
+export const bulkImportStaff = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    const { staffList } = req.body;
+
+    if (!Array.isArray(staffList) || staffList.length === 0) {
+      return res.status(400).json({ error: "staffList array is required" });
+    }
+
+    if (staffList.length > 50) {
+      return res.status(400).json({ error: "Maximum 50 staff per import" });
+    }
+
+    const station = await FillingStation.findById(stationId);
+
+    const results = {
+      success: [] as any[],
+      failed: [] as any[],
+      skipped: [] as any[],
+    };
+
+    for (const staffData of staffList) {
+      try {
+        const { firstName, lastName, email, phone, role, shiftType } = staffData;
+
+        if (!firstName || !lastName || !email || !role) {
+          results.failed.push({
+            email: email || "unknown",
+            reason: "Missing required fields (firstName, lastName, email, role)",
+          });
+          continue;
+        }
+
+        const existing = await Staff.findOne({ email: email.toLowerCase() });
+        if (existing) {
+          results.skipped.push({ email, reason: "Email already registered" });
+          continue;
+        }
+
+        const limitMap: Record<string, number> = {
+          attendant: station?.staffLimits?.attendants || 3,
+          cashier: station?.staffLimits?.cashiers || 1,
+          accountant: station?.staffLimits?.accountants || 1,
+          supervisor: station?.staffLimits?.supervisors || 1,
+          manager: station?.staffLimits?.managers || 1,
+        };
+
+        const currentCount = await Staff.countDocuments({
+          station: stationId,
+          role: role.toLowerCase(),
+        });
+
+        if (currentCount >= (limitMap[role.toLowerCase()] || 0)) {
+          results.failed.push({
+            email,
+            reason: `${role} limit reached for your plan`,
+          });
+          continue;
+        }
+
+        const tempPassword = `Flourish@${Math.random().toString(36).slice(2, 8)}`;
+        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+        const newStaff = await Staff.create({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.toLowerCase().trim(),
+          phone: phone || "",
+          role: role.toLowerCase(),
+          station: stationId,
+          password: hashedPassword,
+          shiftType: shiftType || "Day-Off",
+          twoFactorAuthEnabled: false,
+          notificationPreferences: {
+            email: true,
+            sms: false,
+            push: false,
+            lowStock: false,
+            mail: false,
+            sales: false,
+            staffs: false,
+          },
+        });
+
+        await FillingStation.findByIdAndUpdate(stationId, {
+          $push: { staff: newStaff._id },
+        });
+
+        results.success.push({
+          id: newStaff._id,
+          name: `${firstName} ${lastName}`,
+          email,
+          role,
+          tempPassword,
+        });
+      } catch (err: any) {
+        results.failed.push({
+          email: staffData.email || "unknown",
+          reason: err.message,
+        });
+      }
+    }
+
+    Activity.create({
+      fillingStation: stationId,
+      type: "stock",
+      title: "Bulk Staff Import",
+      description: `${results.success.length} staff imported successfully`,
+      timestamp: new Date(),
+      severity: null,
+    }).catch(console.error);
+
+    return res.status(200).json({
+      message: "Bulk import completed",
+      summary: {
+        total: staffList.length,
+        success: results.success.length,
+        failed: results.failed.length,
+        skipped: results.skipped.length,
+      },
+      results,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 
 export const setStaffTarget = async (
   req: AuthenticatedRequest,
@@ -72,6 +203,55 @@ export const setStaffTarget = async (
     return res.status(500).json({
       error: err?.message ?? "Server error",
     });
+  }
+};
+
+export const updateNotificationPreferences = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const { id } = req.params;
+    const requestingUser = req.user;
+
+    // Only the staff member themselves or a manager can update
+    if (
+      requestingUser?.role !== "manager" &&
+      requestingUser?.id !== id &&
+      requestingUser?._id?.toString() !== id
+    ) {
+      return res.status(403).json({ error: "Not authorized" });
+    }
+
+    const allowed = ["email", "sms", "push", "lowStock", "mail", "sales", "staffs"];
+    const updates: Record<string, boolean> = {};
+
+    for (const key of allowed) {
+      if (typeof req.body[key] === "boolean") {
+        updates[`notificationPreferences.${key}`] = req.body[key];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No valid preference fields provided" });
+    }
+
+    const staff = await Staff.findByIdAndUpdate(
+      id,
+      { $set: updates },
+      { new: true, select: "notificationPreferences" }
+    );
+
+    if (!staff) {
+      return res.status(404).json({ error: "Staff not found" });
+    }
+
+    return res.status(200).json({
+      message: "Notification preferences updated",
+      notificationPreferences: staff.notificationPreferences,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 };
 

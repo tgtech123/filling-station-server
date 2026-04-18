@@ -105,6 +105,11 @@ shiftSchema.pre("save", function (next) {
   next();
 });
 
+shiftSchema.index({ fillingStation: 1, createdAt: -1 });
+shiftSchema.index({ fillingStation: 1, status: 1, createdAt: -1 });
+shiftSchema.index({ fillingStation: 1, attendant: 1, status: 1 });
+shiftSchema.index({ attendant: 1, status: 1 });
+
 const Shift = mongoose.model<IShift>("Shift", shiftSchema);
 export default Shift;
 

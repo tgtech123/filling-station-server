@@ -13,6 +13,7 @@ import {
   getStationErrors,
   updateStationStatus,
   getActivityLogs,
+  getActivityStats,
   deleteStation,
   restoreStation,
   getAdminPlans,
@@ -22,6 +23,9 @@ import {
   getPaymentStats,
   getPayments,
   getStationSubscriptions,
+  getPlatformSettings,
+  updatePlatformSettings,
+  getPublicSettings,
 } from "../controllers/admin.controller";
 
 const router = express.Router();
@@ -36,6 +40,7 @@ router.get("/stations/:stationId/tanks", requireAuth, checkAdmin, getStationTank
 router.get("/stations/:stationId/activity", requireAuth, checkAdmin, getStationActivity);
 router.get("/stations/:stationId/errors", requireAuth, checkAdmin, getStationErrors);
 router.patch("/stations/:stationId/status", requireAuth, checkAdmin, updateStationStatus);
+router.get("/activity-stats", requireAuth, checkAdmin, getActivityStats);
 router.get("/activity-logs", requireAuth, checkAdmin, getActivityLogs);
 router.delete("/stations/:stationId", requireAuth, checkAdmin, deleteStation);
 router.post("/stations/:stationId/restore", requireAuth, checkAdmin, restoreStation);
@@ -48,5 +53,11 @@ router.delete("/plans/:planId", requireAuth, checkAdmin, deletePlan);
 router.get("/payments/stats", requireAuth, checkAdmin, getPaymentStats);
 router.get("/payments", requireAuth, checkAdmin, getPayments);
 router.get("/subscriptions", requireAuth, checkAdmin, getStationSubscriptions);
+
+// Public endpoint — no auth required
+router.get("/settings/public", getPublicSettings);
+
+router.get("/settings", requireAuth, checkAdmin, getPlatformSettings);
+router.patch("/settings", requireAuth, checkAdmin, updatePlatformSettings);
 
 export default router;

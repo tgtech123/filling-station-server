@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
 import AdminLog from "../models/adminLog.model";
+import SubscriptionPlan from "../models/subscriptionPlan.model";
 import { Types } from "mongoose";
 
 
@@ -21,8 +22,13 @@ export const createFillingStation = async (req: Request, res: Response) => {
       fuelTypesOffered, additionalServices,
 
       // Step 4 - Security & Preferences
-      password, twoFactorAuthEnabled, notificationPreferences
+      password, twoFactorAuthEnabled, notificationPreferences,
+
+      // Plan selection (optional, defaults to "free")
+      selectedPlan,
     } = req.body;
+
+    const chosenPlan: string = selectedPlan || "free";
 
     // 1. Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -68,9 +74,46 @@ export const createFillingStation = async (req: Request, res: Response) => {
       notificationPreferences,
     });
 
-    // 4. Link Manager to Station (optional if not used for reverse)
+    // 4. Link Manager to Station
     newStation.staff.push(manager._id as Types.ObjectId);
     await newStation.save();
+
+    // 5. Assign plan
+    const freePlan = await SubscriptionPlan.findOne({ slug: "free" });
+    const planExpiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    if (chosenPlan === "free") {
+      await FillingStation.findByIdAndUpdate(newStation._id, {
+        plan: "free",
+        planId: freePlan?._id || null,
+        planStatus: "active",
+        planStartDate: new Date(),
+        planExpiryDate,
+        staffLimits: {
+          attendants: freePlan?.staffLimits?.attendants || 3,
+          cashiers: freePlan?.staffLimits?.cashiers || 1,
+          accountants: freePlan?.staffLimits?.accountants || 1,
+          supervisors: freePlan?.staffLimits?.supervisors || 1,
+          managers: freePlan?.staffLimits?.managers || 1,
+        },
+      });
+    } else {
+      // Non-free plan selected — mark as trial pending payment
+      await FillingStation.findByIdAndUpdate(newStation._id, {
+        plan: chosenPlan,
+        planStatus: "trial",
+        planStartDate: new Date(),
+        staffLimits: {
+          attendants: freePlan?.staffLimits?.attendants || 3,
+          cashiers: freePlan?.staffLimits?.cashiers || 1,
+          accountants: freePlan?.staffLimits?.accountants || 1,
+          supervisors: freePlan?.staffLimits?.supervisors || 1,
+          managers: freePlan?.staffLimits?.managers || 1,
+        },
+      });
+    }
+
+    const updatedStation = await FillingStation.findById(newStation._id);
 
     AdminLog.create({
       eventType: "station_registration",
@@ -83,7 +126,13 @@ export const createFillingStation = async (req: Request, res: Response) => {
 
     res.status(201).json({
       message: "Filling station and manager created successfully",
-      station: newStation,
+      selectedPlan: chosenPlan,
+      requiresPayment: chosenPlan !== "free",
+      station: {
+        ...updatedStation?.toObject(),
+        plan: chosenPlan,
+        planStatus: chosenPlan === "free" ? "active" : "trial",
+      },
       manager,
     });
   } catch (error: any) {

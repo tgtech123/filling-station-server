@@ -7,6 +7,7 @@ import Staff from "../models/staff.model";
 import Tank from "../models/tanks.model";
 import Shift from "../models/shift.model";
 import LubricantTransaction from "../models/lubricant-transaction.model";
+import { getCache, setCache } from "../config/redis";
 
 export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -15,6 +16,10 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
     const stationObjectId = new Types.ObjectId(fillingStation);
+
+    const cacheKey = `dashboard:metrics:${fillingStation}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return res.status(200).json(cached);
 
     // Today's date window (server local)
     const startOfDay = new Date();
@@ -110,7 +115,7 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
     /***********************
      * Final response
      ***********************/
-    return res.status(200).json({
+    const response = {
       message: "Dashboard metrics retrieved successfully",
       date: startOfDay.toISOString().split("T")[0],
       metrics: {
@@ -126,7 +131,9 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
         },
         fuelDispensedToday: totalFuelDispensedToday,
       },
-    });
+    };
+    await setCache(cacheKey, response, 60);
+    return res.status(200).json(response);
   } catch (err: any) {
     console.error("Error in getDashboardMetrics:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
@@ -141,6 +148,10 @@ export const getFuelManagement = async (req: AuthenticatedRequest, res: Response
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
     const stationObjectId = new Types.ObjectId(fillingStation);
+
+    const cacheKey = `dashboard:fuel:${fillingStation}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return res.status(200).json(cached);
 
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
@@ -205,14 +216,16 @@ export const getFuelManagement = async (req: AuthenticatedRequest, res: Response
       ? tankDoc.tanks.reduce((sum: number, t: any) => sum + (Number(t.currentQuantity) || 0), 0)
       : 0;
 
-    return res.status(200).json({
+    const response = {
       message: "Fuel management data retrieved successfully",
       data: {
         dailyConsumption,
         weeklyAverageConsumption,
         totalCapacityAvailable,
       },
-    });
+    };
+    await setCache(cacheKey, response, 300);
+    return res.status(200).json(response);
   } catch (err: any) {
     console.error("Error in getFuelManagement:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
@@ -385,6 +398,312 @@ export const getStaffManagement = async (req: AuthenticatedRequest, res: Respons
 };
 
 
+export const getRevenueTrend = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    const stationObjectId = new Types.ObjectId(stationId);
+    const { period = "monthly" } = req.query;
+
+    const now = new Date();
+    const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+    const [y, m] = todayStr.split("-").map(Number);
+
+    let groupBy: any;
+    let matchFrom: Date;
+
+    if (period === "daily") {
+      matchFrom = new Date(Date.UTC(y, m - 1, new Date().getDate() - 29, -1, 0, 0, 0));
+      groupBy = {
+        year: { $year: "$createdAt" },
+        month: { $month: "$createdAt" },
+        day: { $dayOfMonth: "$createdAt" },
+      };
+    } else if (period === "weekly") {
+      matchFrom = new Date(Date.UTC(y, m - 1, new Date().getDate() - 83, -1, 0, 0, 0));
+      groupBy = {
+        year: { $year: "$createdAt" },
+        week: { $week: "$createdAt" },
+      };
+    } else {
+      matchFrom = new Date(Date.UTC(y - 1, m - 1, 1, -1, 0, 0, 0));
+      groupBy = {
+        year: { $year: "$createdAt" },
+        month: { $month: "$createdAt" },
+      };
+    }
+
+    const [fuelRevenue, lubricantRevenue] = await Promise.all([
+      Shift.aggregate([
+        {
+          $match: {
+            fillingStation: stationObjectId,
+            status: "Completed",
+            createdAt: { $gte: matchFrom },
+          },
+        },
+        {
+          $group: {
+            _id: groupBy,
+            revenue: { $sum: "$totalAmount" },
+            litresSold: { $sum: "$litresSold" },
+            shifts: { $sum: 1 },
+          },
+        },
+        { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
+      ]),
+      LubricantTransaction.aggregate([
+        {
+          $match: {
+            fillingStation: stationObjectId,
+            createdAt: { $gte: matchFrom },
+          },
+        },
+        {
+          $group: {
+            _id: groupBy,
+            revenue: { $sum: "$totalAmount" },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
+      ]),
+    ]);
+
+    return res.status(200).json({
+      message: "Revenue trend retrieved",
+      data: {
+        period,
+        fuelRevenue,
+        lubricantRevenue,
+        summary: {
+          totalPeriodRevenue: fuelRevenue.reduce((s: number, r: any) => s + r.revenue, 0),
+          totalShifts: fuelRevenue.reduce((s: number, r: any) => s + r.shifts, 0),
+          totalLitres: fuelRevenue.reduce((s: number, r: any) => s + (r.litresSold || 0), 0),
+          avgRevenuePerShift:
+            fuelRevenue.length > 0
+              ? Math.round(
+                  fuelRevenue.reduce((s: number, r: any) => s + r.revenue, 0) /
+                    fuelRevenue.reduce((s: number, r: any) => s + r.shifts, 0)
+                )
+              : 0,
+        },
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+
+export const getStaffPerformance = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    const stationObjectId = new Types.ObjectId(stationId);
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const attendants = await Staff.find({
+      station: stationId,
+      role: "attendant",
+    })
+      .select("firstName lastName")
+      .lean();
+
+    const performanceData = await Promise.all(
+      attendants.map(async (staff: any) => {
+        const shifts = await Shift.aggregate([
+          {
+            $match: {
+              fillingStation: stationObjectId,
+              attendant: staff._id,
+              status: "Completed",
+              createdAt: { $gte: startOfMonth },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalShifts: { $sum: 1 },
+              totalRevenue: { $sum: "$totalAmount" },
+              totalLitres: { $sum: "$litresSold" },
+              avgLitresPerShift: { $avg: "$litresSold" },
+            },
+          },
+        ]);
+
+        const stats = shifts[0] || {
+          totalShifts: 0,
+          totalRevenue: 0,
+          totalLitres: 0,
+          avgLitresPerShift: 0,
+        };
+
+        return {
+          id: staff._id,
+          name: `${staff.firstName} ${staff.lastName}`,
+          totalShifts: stats.totalShifts,
+          totalRevenue: stats.totalRevenue,
+          totalLitres: Math.round(stats.totalLitres || 0),
+          avgLitresPerShift: Math.round(stats.avgLitresPerShift || 0),
+        };
+      })
+    );
+
+    performanceData.sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    return res.status(200).json({
+      message: "Staff performance retrieved",
+      data: {
+        month: now.toLocaleDateString("en-US", { month: "long", year: "numeric" }),
+        staff: performanceData,
+        topPerformer: performanceData[0] || null,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+
+export const getFuelBreakdown = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    const stationObjectId = new Types.ObjectId(stationId);
+    const { period = "month" } = req.query;
+
+    const now = new Date();
+    let matchFrom: Date;
+
+    if (period === "week") {
+      matchFrom = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    } else if (period === "year") {
+      matchFrom = new Date(now.getFullYear(), 0, 1);
+    } else {
+      matchFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+
+    const breakdown = await Shift.aggregate([
+      {
+        $match: {
+          fillingStation: stationObjectId,
+          status: "Completed",
+          createdAt: { $gte: matchFrom },
+        },
+      },
+      {
+        $group: {
+          _id: "$product",
+          totalRevenue: { $sum: "$totalAmount" },
+          totalLitres: { $sum: "$litresSold" },
+          totalShifts: { $sum: 1 },
+        },
+      },
+      { $sort: { totalRevenue: -1 } },
+    ]);
+
+    const totalRevenue = breakdown.reduce((s: number, b: any) => s + b.totalRevenue, 0);
+
+    return res.status(200).json({
+      message: "Fuel breakdown retrieved",
+      data: {
+        period,
+        breakdown: breakdown.map((b: any) => ({
+          fuelType: b._id || "Unknown",
+          totalRevenue: b.totalRevenue,
+          totalLitres: Math.round(b.totalLitres || 0),
+          totalShifts: b.totalShifts,
+          percentage:
+            totalRevenue > 0 ? Math.round((b.totalRevenue / totalRevenue) * 100) : 0,
+        })),
+        totalRevenue,
+        totalLitres: Math.round(
+          breakdown.reduce((s: number, b: any) => s + (b.totalLitres || 0), 0)
+        ),
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+
+export const getComparison = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    const stationObjectId = new Types.ObjectId(stationId);
+
+    const now = new Date();
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+    const calc = async (from: Date, to: Date) => {
+      const [revenue, shifts, staff] = await Promise.all([
+        Shift.aggregate([
+          {
+            $match: {
+              fillingStation: stationObjectId,
+              status: "Completed",
+              createdAt: { $gte: from, $lte: to },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$totalAmount" },
+              litres: { $sum: "$litresSold" },
+            },
+          },
+        ]),
+        Shift.countDocuments({
+          fillingStation: stationObjectId,
+          status: "Completed",
+          createdAt: { $gte: from, $lte: to },
+        }),
+        Staff.countDocuments({
+          station: stationId,
+          createdAt: { $gte: from, $lte: to },
+        }),
+      ]);
+      return {
+        revenue: revenue[0]?.total || 0,
+        litres: Math.round(revenue[0]?.litres || 0),
+        shifts,
+        newStaff: staff,
+      };
+    };
+
+    const growth = (curr: number, prev: number) =>
+      prev > 0
+        ? parseFloat((((curr - prev) / prev) * 100).toFixed(1))
+        : curr > 0
+        ? 100
+        : 0;
+
+    const [thisMonth, lastMonth] = await Promise.all([
+      calc(thisMonthStart, now),
+      calc(lastMonthStart, lastMonthEnd),
+    ]);
+
+    return res.status(200).json({
+      message: "Comparison data retrieved",
+      data: {
+        thisMonth,
+        lastMonth,
+        growth: {
+          revenue: growth(thisMonth.revenue, lastMonth.revenue),
+          litres: growth(thisMonth.litres, lastMonth.litres),
+          shifts: growth(thisMonth.shifts, lastMonth.shifts),
+        },
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+
 export const getStationTankStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -392,6 +711,10 @@ export const getStationTankStatus = async (req: AuthenticatedRequest, res: Respo
     if (!fillingStation) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
+
+    const cacheKey = `dashboard:tanks:${fillingStation}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return res.status(200).json(cached);
 
     // Find all tanks belonging to this station
     const stationTanks = await Tank.findOne({ fillingStation })
@@ -428,10 +751,12 @@ export const getStationTankStatus = async (req: AuthenticatedRequest, res: Respo
         percentFilled: limit > 0 ? Number(((currentQuantity / limit) * 100).toFixed(2)) : 0,
       }));
 
-    return res.status(200).json({
+    const response = {
       message: "Tank status retrieved successfully",
       tanks,
-    });
+    };
+    await setCache(cacheKey, response, 120);
+    return res.status(200).json(response);
   } catch (err: any) {
     console.error("Error in getStationTankStatus:", err);
     return res.status(500).json({
