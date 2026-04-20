@@ -1016,7 +1016,7 @@ export const getPlatformSettings = async (req: AuthenticatedRequest, res: Respon
     let settings = await PlatformSettings.findOne().lean();
 
     if (!settings) {
-      settings = await PlatformSettings.create({ platformName: "Flourish Station" });
+      settings = await PlatformSettings.create({ platformName: "Flourish Station" }) as any;
     }
 
     return res.status(200).json({

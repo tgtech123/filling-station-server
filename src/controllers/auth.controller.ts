@@ -139,7 +139,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     await station.save();
 
     Notification.create({
-      fillingStation: new Types.ObjectId(stationId as string),
+      fillingStation: new Types.ObjectId(stationId as any),
       type: "message",
       category: "new_staff",
       title: "New Staff Added",
