@@ -34,9 +34,13 @@ import branchRoutes from "./routes/branch.route";
 import contactus from "./routes/contact.route";
 
 const app = express();
-const allowedOrigins = ["http://localhost:3000"];
+app.set("trust proxy", 1);
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://frostbite-scrimmage-ship.ngrok-free.dev",
+];
 
-// ── Security headers (first) ─────────────────────────────────────────────────
+// ── Security headers (first) 
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -69,10 +73,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── CORS ──────────────────────────────────────────────────────────────────────
+// ── CORS 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
-// ── Webhook — raw body BEFORE express.json() ─────────────────────────────────
+// ── Webhook — raw body BEFORE express.json() 
 app.use(
   "/api/payments/webhook",
   express.raw({ type: "*/*" }),
@@ -86,15 +90,49 @@ app.use(
   }
 );
 
-// ── Body parsers ─────────────────────────────────────────────────────────────
+// ── Body parsers 
 app.use(express.json());
 app.use(cookieParser());
 
-// ── Rate limiters ─────────────────────────────────────────────────────────────
+// ── Rate limiters 
+const isAuthenticatedPollingPath = (req: any) => {
+  const authed =
+    typeof req.headers.authorization === "string" &&
+    req.headers.authorization.startsWith("Bearer ");
+  return (
+    authed &&
+    (req.path.startsWith("/activity") || req.path.startsWith("/dashboard"))
+  );
+};
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: { error: "Too many requests. Please try again later.", retryAfter: "15 minutes" },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: isAuthenticatedPollingPath,
+});
+
+// Dedicated limiter for the activity feed (polled every 30 s per user).
+// Keyed by Authorization token so each user gets their own 240-request bucket
+// (16/min — well above the 2/min poll rate) instead of sharing an IP bucket.
+const activityLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 240,
+  keyGenerator: (req) => req.headers.authorization || req.ip || "unknown",
+  message: { error: "Too many activity requests. Please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Dedicated limiter for dashboard polling endpoints.
+// Same token-keyed approach — each authenticated user gets their own bucket.
+const dashboardLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  keyGenerator: (req) => req.headers.authorization || req.ip || "unknown",
+  message: { error: "Too many dashboard requests. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -121,10 +159,11 @@ const registerLimiter = rateLimit({
 
 const paymentLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20,
+  max: 100,
   message: { error: "Too many payment attempts. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === "development",
 });
 
 const resetLimiter = rateLimit({
@@ -135,6 +174,8 @@ const resetLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+app.use("/api/activity", activityLimiter);
+app.use("/api/dashboard", dashboardLimiter);
 app.use("/api", generalLimiter);
 app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/signin", authLimiter);

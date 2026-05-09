@@ -6,7 +6,9 @@ export interface IFillingStation extends Document {
   email: string;
   phone: string;
   city: string;
+  state: string;
   country: string;
+  ownerName: string;
   zipCode: string;
   licenseNumber: string;
   taxId: string;
@@ -49,7 +51,9 @@ const FillingStationSchema = new Schema<IFillingStation>(
     email: { type: String, required: true },
     phone: { type: String, required: true },
     city: { type: String, required: true },
+    state: { type: String, default: "" },
     country: { type: String, required: true },
+    ownerName: { type: String, default: "" },
     zipCode: { type: String, required: true },
     licenseNumber: { type: String, required: false, unique: true, sparse: true, default: "" },
     taxId: { type: String, required: false, default: "" },

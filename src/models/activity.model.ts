@@ -2,7 +2,8 @@ import mongoose, { Document, Schema } from "mongoose";
 
 export interface IActivity extends Document {
   fillingStation: mongoose.Types.ObjectId;
-  type: "alert" | "sale" | "maintenance" | "stock";
+  type: "alert" | "sale" | "maintenance" | "stock" | "login";
+  status: "success" | "failed" | null;
   title: string;
   description: string;
   timestamp: Date;
@@ -19,8 +20,13 @@ const ActivitySchema = new Schema<IActivity>(
     },
     type: {
       type: String,
-      enum: ["alert", "sale", "maintenance", "stock"],
+      enum: ["alert", "sale", "maintenance", "stock", "login"],
       required: true,
+    },
+    status: {
+      type: String,
+      enum: ["success", "failed", null],
+      default: null,
     },
     title: {
       type: String,

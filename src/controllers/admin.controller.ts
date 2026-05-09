@@ -234,18 +234,36 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
           Staff.findOne({ station: station._id, role: "manager" }).lean(),
           Staff.countDocuments({ station: station._id }),
         ]);
+
+        const managerName = manager
+          ? `${(manager as any).firstName} ${(manager as any).lastName}`.trim()
+          : null;
+
+        const ownerName =
+          (station as any).ownerName ||
+          managerName ||
+          null;
+
         return {
           id: station._id,
           name: station.name,
           address: station.address,
+          city: station.city,
+          state: (station as any).state || "",
+          country: station.country,
           phone: station.phone,
           isActive: station.isActive ?? true,
           createdAt: station.createdAt,
           staffCount,
+          ownerName,
+          plan: station.plan || "free",
+          planStatus: station.planStatus || "active",
+          planStartDate: station.planStartDate || null,
+          planExpiryDate: station.planExpiryDate || null,
           manager: manager
             ? {
                 id: manager._id,
-                name: `${(manager as any).firstName} ${(manager as any).lastName}`,
+                name: managerName,
                 email: (manager as any).email,
                 phone: (manager as any).phone,
               }
@@ -253,6 +271,10 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
         };
       })
     );
+
+    if (stationsWithDetails.length > 0) {
+      console.log("[getAllStations] sample:", JSON.stringify(stationsWithDetails[0], null, 2));
+    }
 
     return res.status(200).json({
       message: "Stations retrieved",
@@ -320,6 +342,7 @@ export const getStationById = async (req: AuthenticatedRequest, res: Response) =
           initials,
           address: station.address,
           city: station.city,
+          state: (station as any).state || "",
           country: station.country,
           zipCode: station.zipCode,
           email: station.email,
@@ -895,10 +918,17 @@ export const seedDefaultPlans = async () => {
   for (const plan of plans) {
     await SubscriptionPlan.findOneAndUpdate(
       { slug: plan.slug },
-      plan,
-      { upsert: true, new: true }
+      { $setOnInsert: plan },
+      { upsert: true }
     );
   }
+
+  // Remove stale duplicates: same plan name but slug was mutated by old updatePlan bug
+  for (const plan of plans) {
+    await SubscriptionPlan.deleteMany({ name: plan.name, slug: { $ne: plan.slug } });
+  }
+
+  await deleteCache("public:plans");
 
   const allPlans = await SubscriptionPlan
     .find()
@@ -1121,7 +1151,16 @@ export const getPublicPlans = async (req: Request, res: Response) => {
     const cached = await getCache(cacheKey);
     if (cached) return res.status(200).json(cached);
 
-    const plans = await SubscriptionPlan.find({ isActive: true }).sort({ order: 1 }).lean();
+    const rawPlans = await SubscriptionPlan.find({ isActive: true }).sort({ order: 1 }).lean();
+
+    // Deduplicate by name — keep the first occurrence (lowest order = canonical)
+    const seenNames = new Set<string>();
+    const plans = rawPlans.filter((p) => {
+      const key = p.name.toLowerCase().trim();
+      if (seenNames.has(key)) return false;
+      seenNames.add(key);
+      return true;
+    });
 
     const response = {
       message: "Plans retrieved successfully",
@@ -1145,7 +1184,9 @@ export const getPublicPlans = async (req: Request, res: Response) => {
         order: plan.order,
       })),
     };
-    await setCache(cacheKey, response, 3600);
+    if (plans.length > 0) {
+      await setCache(cacheKey, response, 3600);
+    }
     return res.status(200).json(response);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1160,7 +1201,7 @@ export const getAdminPlans = async (req: AuthenticatedRequest, res: Response) =>
     return res.status(200).json({
       message: "Plans retrieved",
       total: plans.length,
-      plans,
+      plans: plans.map((p) => ({ ...p, _id: p._id.toString() })),
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1182,17 +1223,25 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
       .replace(/\s+/g, "-")
       .replace(/[^a-z0-9-]/g, "");
 
-    const existing = await SubscriptionPlan.findOne({ slug });
+    const existing = await SubscriptionPlan.findOne({
+      $or: [
+        { slug },
+        { name: { $regex: new RegExp(`^${name.trim()}$`, "i") } },
+      ],
+    });
     if (existing) {
-      return res.status(400).json({ error: "A plan with this name already exists" });
+      return res.status(400).json({ error: `A plan named "${existing.name}" already exists` });
     }
+
+    const baseMonthly = monthlyPrice || 0;
+    const computedYearly = Math.round(baseMonthly * 12 * 0.9);
 
     const plan = await SubscriptionPlan.create({
       name,
       slug,
       description,
-      monthlyPrice: monthlyPrice || 0,
-      yearlyPrice: yearlyPrice || 0,
+      monthlyPrice: baseMonthly,
+      yearlyPrice: computedYearly,
       billingCycles: billingCycles || ["monthly"],
       duration: duration || 1,
       durationUnit: durationUnit || "months",
@@ -1223,14 +1272,16 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
 export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { planId } = req.params;
-    const updates = { ...req.body };
 
-    if (updates.name) {
-      updates.slug = updates.name
-        .toLowerCase()
-        .trim()
-        .replace(/\s+/g, "-")
-        .replace(/[^a-z0-9-]/g, "");
+    if (!planId) {
+      return res.status(400).json({ error: "Plan ID is required" });
+    }
+
+    const updates = { ...req.body };
+    delete updates.slug; // slug is immutable — never change it after creation
+
+    if (updates.monthlyPrice !== undefined) {
+      updates.yearlyPrice = Math.round(updates.monthlyPrice * 12 * 0.9);
     }
 
     const plan = await SubscriptionPlan.findByIdAndUpdate(planId, updates, { new: true });
@@ -1239,6 +1290,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
     await deleteCache("public:plans");
     return res.status(200).json({ message: "Plan updated successfully", plan });
   } catch (err: any) {
+    if (err.name === "CastError") return res.status(400).json({ error: "Invalid plan ID" });
     return res.status(500).json({ error: err.message });
   }
 };
@@ -1248,6 +1300,10 @@ export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { planId } = req.params;
 
+    if (!planId) {
+      return res.status(400).json({ error: "Plan ID is required" });
+    }
+
     const plan = await SubscriptionPlan.findByIdAndUpdate(
       planId,
       { isActive: false },
@@ -1255,8 +1311,10 @@ export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
     );
     if (!plan) return res.status(404).json({ error: "Plan not found" });
 
+    await deleteCache("public:plans");
     return res.status(200).json({ message: "Plan deactivated successfully" });
   } catch (err: any) {
+    if (err.name === "CastError") return res.status(400).json({ error: "Invalid plan ID" });
     return res.status(500).json({ error: err.message });
   }
 };
