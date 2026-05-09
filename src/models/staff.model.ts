@@ -6,7 +6,11 @@ export interface IStaff extends Document {
   lastName: string;
   email: string;
   phone: string;
-
+  address?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  emergencyContact?: string;
   image?: string;
   role: "manager" | "supervisor" | "accountant" | "cashier" | "attendant" | "admin";
   station: mongoose.Types.ObjectId;
@@ -29,6 +33,8 @@ export interface IStaff extends Document {
   };
   managedStations: mongoose.Types.ObjectId[];
   isSuperManager: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const StaffSchema = new Schema<IStaff>(
@@ -42,6 +48,11 @@ const StaffSchema = new Schema<IStaff>(
         return this.role !== "admin";
       },
     },
+    address: { type: String, default: "" },
+    city: { type: String, default: "" },
+    state: { type: String, default: "" },
+    zipCode: { type: String, default: "" },
+    emergencyContact: { type: String, default: "" },
     image: { type: String, default: "" },
     role: {
       type: String,
