@@ -14,8 +14,15 @@ export const getRecentActivity = async (req: AuthenticatedRequest, res: Response
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
+    let stationObjectId: Types.ObjectId;
+    try {
+      stationObjectId = new Types.ObjectId(stationId.toString());
+    } catch {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
     const activities = await Activity.find({
-      fillingStation: new Types.ObjectId(stationId),
+      fillingStation: stationObjectId,
       expiresAt: { $gt: new Date() },
     })
       .sort({ timestamp: -1 })
@@ -28,6 +35,8 @@ export const getRecentActivity = async (req: AuthenticatedRequest, res: Response
       activities: activities.map((a) => ({
         id: a._id,
         type: a.type,
+        action: a.type,
+        status: (a as any).status ?? null,
         title: a.title,
         description: a.description,
         timestamp: a.timestamp,

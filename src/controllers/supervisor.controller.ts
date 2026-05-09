@@ -142,23 +142,22 @@ export const getSupervisorDashboard = async (req: AuthenticatedRequest, res: Res
     });
 
     // Calculate fuel stock value (using average price from pumps)
-    const pumpDocs = await Pump.find({
-      tank: stationTanks?._id,
-    }).lean();
-
     let totalFuelValue = 0;
-    pumpDocs.forEach((pumpDoc: any) => {
-      if (pumpDoc.pumps && Array.isArray(pumpDoc.pumps)) {
-        pumpDoc.pumps.forEach((pump: any) => {
-          // Get fuel type from tank
-          const tank = stationTanks?.tanks.find((t: any) => t._id.toString() === pumpDoc.tank.toString());
-          if (tank) {
-            const fuelQty = tank.currentQuantity || 0;
-            totalFuelValue += fuelQty * (pump.pricePerLtr || 0);
-          }
-        });
-      }
-    });
+    if (stationTanks && stationTanks.tanks && stationTanks.tanks.length > 0) {
+      const tankSubIds = stationTanks.tanks.map((t: any) => t._id);
+      const fuelPumpDocs = await Pump.find({ tank: { $in: tankSubIds } }).lean();
+      fuelPumpDocs.forEach((pumpDoc: any) => {
+        if (pumpDoc.pumps && Array.isArray(pumpDoc.pumps)) {
+          pumpDoc.pumps.forEach((pump: any) => {
+            const tank = stationTanks.tanks.find((t: any) => t._id.toString() === pumpDoc.tank.toString());
+            if (tank) {
+              const fuelQty = tank.currentQuantity || 0;
+              totalFuelValue += fuelQty * (pump.pricePerLtr || 0);
+            }
+          });
+        }
+      });
+    }
 
     stockValue += totalFuelValue;
 

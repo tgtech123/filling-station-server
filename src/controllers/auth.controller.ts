@@ -59,6 +59,13 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
+    // Only the super manager (owner of the parent station) may create branch managers
+    if (role === "manager" && !manager.isSuperManager) {
+      return res.status(403).json({
+        error: "Only the station owner can create branch managers",
+      });
+    }
+
     // Ensure the manager has an assigned station
     const stationId = manager.station;
     if (!stationId) {
@@ -199,8 +206,9 @@ export const loginStaff = async (
       if (staff.station) {
         Activity.create({
           fillingStation: staff.station,
-          type: "alert",
-          title: "Failed login attempt",
+          type: "login",
+          status: "failed",
+          title: "Failed Login Attempt",
           description: `Failed login attempt for email: ${email}`,
           timestamp: new Date(),
           severity: "critical",
@@ -225,6 +233,9 @@ export const loginStaff = async (
     // 3. Get associated station
     const station = await FillingStation.findById(staff.station);
 
+    // Super manager = manager whose station has no parentStation (i.e. owns the root station)
+    const isSuperManager = staff.role === "manager" && !(station as any)?.parentStation;
+
     // 4. Create JWT token
     const token = jwt.sign(
       {
@@ -232,6 +243,7 @@ export const loginStaff = async (
         email: staff.email,
         role: staff.role,
         station: staff.station?.toString(),
+        isSuperManager,
       },
       process.env.JWT_SECRET!,
       { expiresIn: "1d" }
@@ -244,9 +256,10 @@ export const loginStaff = async (
     if (staff.station) {
       Activity.create({
         fillingStation: staff.station,
-        type: "alert",
-        title: "User logged in",
-        description: `${staff.firstName} ${staff.lastName} (${staff.role}) logged in`,
+        type: "login",
+        status: "success",
+        title: "Staff Login",
+        description: `${staff.firstName} ${staff.lastName} (${staff.role}) logged in successfully`,
         timestamp: new Date(),
         severity: "info",
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -260,12 +273,27 @@ export const loginStaff = async (
       token,
       user: {
         id: staff._id,
+        _id: staff._id,
         firstName: staff.firstName,
         lastName: staff.lastName,
         email: staff.email,
         phone: staff.phone,
+        address: staff.address,
+        city: staff.city,
+        state: staff.state,
+        zipCode: staff.zipCode,
+        emergencyContact: staff.emergencyContact,
+        image: staff.image,
+        createdAt: staff.createdAt,
         role: staff.role,
-        station,
+        station: station
+          ? {
+              ...station.toObject(),
+              logoUrl: station.image || null,
+              logo: station.image || null,
+            }
+          : null,
+        isSuperManager,
       },
     });
   } catch (error: any) {

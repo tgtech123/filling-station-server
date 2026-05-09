@@ -145,6 +145,20 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
       });
     }
 
+    // Block payment before Paystack is opened — if the email already belongs to a
+    // registered manager, the payer must log in and upgrade from their dashboard.
+    const existingManager = await Staff.findOne({
+      email: email.toLowerCase().trim(),
+      role: "manager",
+    }).lean();
+
+    if (existingManager) {
+      return res.status(409).json({
+        error: "account_exists",
+        message: "An account with this email already exists. Please log in to upgrade your plan from your dashboard.",
+      });
+    }
+
     const plan = await SubscriptionPlan.findOne({ slug: planSlug, isActive: true });
     if (!plan) {
       return res.status(404).json({ error: "Plan not found" });
@@ -229,9 +243,14 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
   try {
     const { reference } = req.params;
 
-    // Early exit if webhook already processed this payment
+    // For guest payments (reference starts with "FS_GUEST_") the webhook marks the payment
+    // "success" but deliberately skips the plan upgrade — that logic lives here so we can
+    // determine isExistingUser and handle the two guest sub-cases correctly.
+    // Only use the early exit for authenticated (non-guest) payments where the webhook has
+    // already done the full plan upgrade.
     const existingPayment = await Payment.findOne({ transactionRef: reference });
-    if (existingPayment?.status === "success") {
+    const isGuestRef = reference.startsWith("FS_GUEST_");
+    if (existingPayment?.status === "success" && !isGuestRef) {
       return res.status(200).json({
         message: "Payment already verified",
         data: {
@@ -268,10 +287,74 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
         { status: "success", paidAt: new Date() }
       );
 
+      // Check if this email already has a manager account
+      const existingManager = await Staff.findOne({
+        email: guestEmail?.toLowerCase().trim(),
+        role: "manager",
+      }).lean();
+
+      if (existingManager) {
+        // Upgrade their existing station's plan
+        const plan = await SubscriptionPlan.findOne({ slug: planSlug });
+        const now = new Date();
+        const expiryDate = new Date(now);
+        if (billingCycle === "yearly") {
+          expiryDate.setMonth(expiryDate.getMonth() + 12);
+        } else {
+          expiryDate.setMonth(expiryDate.getMonth() + 1);
+        }
+
+        const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
+
+        const station = await FillingStation.findByIdAndUpdate(
+          existingManager.station,
+          {
+            plan: planSlug,
+            planId: plan?._id,
+            planStatus: "active",
+            planStartDate: now,
+            planExpiryDate: expiryDate,
+            staffLimits: {
+              attendants: mapLimit(plan?.staffLimits?.attendants),
+              cashiers: mapLimit(plan?.staffLimits?.cashiers),
+              accountants: mapLimit(plan?.staffLimits?.accountants),
+              supervisors: mapLimit(plan?.staffLimits?.supervisors),
+              managers: mapLimit(plan?.staffLimits?.managers),
+            },
+          },
+          { new: true }
+        ).select("name").lean();
+
+        await deleteCachePattern(`dashboard:*:${existingManager.station}`);
+
+        AdminLog.create({
+          eventType: "subscription_payment",
+          description: `${(station as any)?.name} upgraded to ${planName} (${billingCycle})`,
+          stationOrUser: (station as any)?.name || guestEmail,
+          status: "success",
+        }).catch(console.error);
+
+        return res.status(200).json({
+          message: "Payment successful! Your plan has been upgraded.",
+          data: {
+            isGuest: true,
+            isExistingUser: true,
+            planSlug,
+            planName,
+            billingCycle,
+            amount: amountNaira,
+            reference,
+            guestEmail,
+            guestName,
+          },
+        });
+      }
+
       return res.status(200).json({
         message: "Payment successful! Please complete your registration.",
         data: {
           isGuest: true,
+          isExistingUser: false,
           planSlug,
           planName,
           billingCycle,
