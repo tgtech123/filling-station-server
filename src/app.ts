@@ -36,9 +36,10 @@ import contactus from "./routes/contact.route";
 const app = express();
 app.set("trust proxy", 1);
 const allowedOrigins = [
+  "https://filling-station-system.vercel.app",
   "http://localhost:3000",
-  "https://frostbite-scrimmage-ship.ngrok-free.dev",
 ];
+
 
 // ── Security headers (first) 
 app.use(
@@ -73,8 +74,20 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── CORS 
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+// ── CORS
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (origin.endsWith(".vercel.app")) return callback(null, true);
+      callback(new Error(`Not allowed by CORS: ${origin}`));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+  })
+);
 
 // ── Webhook — raw body BEFORE express.json() 
 app.use(
@@ -218,6 +231,24 @@ app.use("/api/branches", branchRoutes);
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_, res) => {
   res.json({ status: "OK", message: "Server is healthy" });
+});
+
+app.get("/", (_, res) => {
+  res.status(200).json({
+    name: "FuelDesk Station Server",
+    status: "running",
+    version: "1.0.0",
+    timestamp: new Date().toISOString(),
+    docs: "/api",
+  });
+});
+
+app.get("/healthz", (_, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: Date.now(),
+  });
 });
 
 export default app;
