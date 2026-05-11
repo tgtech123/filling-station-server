@@ -12,6 +12,12 @@ import { deleteCachePattern } from "../config/redis";
 
 const PAYSTACK_API = "https://api.paystack.co";
 
+const FRONTEND_URL =
+  process.env.FRONTEND_URL ||
+  (process.env.NODE_ENV === "production"
+    ? "https://filling-station-system.vercel.app"
+    : "http://localhost:3000");
+
 const paystackHeaders = {
   Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
   "Content-Type": "application/json",
@@ -91,7 +97,7 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
           totalAmount,
           taxPercentage: (TAX_RATES[country] || 0) * 100,
         },
-        callback_url: `${process.env.FRONTEND_URL}/payment/verify?reference=${reference}`,
+        callback_url: `${FRONTEND_URL}/payment/verify?reference=${reference}`,
       },
       { headers: paystackHeaders }
     );
@@ -195,7 +201,7 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
           totalAmount,
           taxPercentage: (TAX_RATES[country] || 0) * 100,
         },
-        callback_url: `${process.env.FRONTEND_URL}/payment/verify?reference=${reference}&guest=true`,
+        callback_url: `${FRONTEND_URL}/payment/verify?reference=${reference}&guest=true`,
       },
       { headers: paystackHeaders }
     );
