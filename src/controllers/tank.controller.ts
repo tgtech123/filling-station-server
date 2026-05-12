@@ -37,6 +37,22 @@ export const addTank = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
+    // Normalize fuelType to exact enum casing
+    const FUEL_TYPE_MAP: Record<string, string> = {
+      pms: "PMS", ago: "AGO",
+      petrol: "Petrol", diesel: "Diesel",
+      kerosene: "Kerosene", gas: "Gas",
+    };
+    const normalizedFuelType =
+      FUEL_TYPE_MAP[fuelType.toLowerCase().trim()] || fuelType.trim();
+
+    const VALID_FUEL_TYPES = ["Petrol", "Diesel", "Kerosene", "Gas", "PMS", "AGO"];
+    if (!VALID_FUEL_TYPES.includes(normalizedFuelType)) {
+      return res.status(400).json({
+        error: `Invalid fuel type. Must be one of: ${VALID_FUEL_TYPES.join(", ")}`,
+      });
+    }
+
     // 3️⃣ Check if station exists
     let station = await Tank.findOne({ fillingStation: fillingStationId });
 
@@ -47,7 +63,7 @@ export const addTank = async (req: AuthenticatedRequest, res: Response) => {
         tanks: [
           {
             title: title.trim(),
-            fuelType,
+            fuelType: normalizedFuelType,
             limit,
             threshold,
             currentQuantity: 0,
@@ -75,7 +91,7 @@ export const addTank = async (req: AuthenticatedRequest, res: Response) => {
     // 6️⃣ Add tank properly with casting to satisfy TypeScript
     station.tanks.push({
       title: title.trim(),
-      fuelType,
+      fuelType: normalizedFuelType,
       limit,
       threshold,
       currentQuantity: 0,
