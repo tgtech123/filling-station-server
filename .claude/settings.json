@@ -4,7 +4,8 @@
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\src\\\\app\\\\pricing\" -Recurse -File)",
       "Bash(Select-Object FullName)",
       "Bash(npm run *)",
-      "Bash(findstr /r \"PAYSTACK_PUBLIC_KEY\" \"C:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\.env\" \"C:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\.env.local\")"
+      "Bash(findstr /r \"PAYSTACK_PUBLIC_KEY\" \"C:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\.env\" \"C:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\.env.local\")",
+      "Bash(dir \"C:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\src\\\\app\\\\dashboard\\\\lubricantManagement\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\fuelManagement",
