@@ -1077,6 +1077,7 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
       subscriptionExpired,
       stationSuspended,
       systemAlerts,
+      supportWhatsApp,
     } = req.body;
 
     const adminId = req.user?._id || req.user?.id;
@@ -1098,6 +1099,7 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
     if (subscriptionExpired !== undefined) updates.subscriptionExpired = subscriptionExpired;
     if (stationSuspended !== undefined) updates.stationSuspended = stationSuspended;
     if (systemAlerts !== undefined) updates.systemAlerts = systemAlerts;
+    if (supportWhatsApp !== undefined) updates.supportWhatsApp = supportWhatsApp;
 
     const settings = await PlatformSettings.findOneAndUpdate({}, updates, {
       new: true,
@@ -1124,7 +1126,7 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
 export const getPublicSettings = async (req: Request, res: Response) => {
   try {
     const settings = await PlatformSettings.findOne()
-      .select("platformName contactEmail contactPhone contactAddress currency currencyCode termsAndConditions")
+      .select("platformName contactEmail contactPhone contactAddress currency currencyCode termsAndConditions supportWhatsApp")
       .lean();
 
     return res.status(200).json({
@@ -1137,6 +1139,7 @@ export const getPublicSettings = async (req: Request, res: Response) => {
         currency: settings?.currency || "Nigerian Naira (NGN)",
         currencyCode: settings?.currencyCode || "NGN",
         termsAndConditions: settings?.termsAndConditions || "No terms available",
+        supportWhatsApp: settings?.supportWhatsApp || "",
       },
     });
   } catch (err: any) {

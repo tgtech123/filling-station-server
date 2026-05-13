@@ -16,6 +16,7 @@ export interface IPlatformSettings extends Document {
   subscriptionExpired: boolean;
   stationSuspended: boolean;
   systemAlerts: boolean;
+  supportWhatsApp: string;
   updatedBy: mongoose.Types.ObjectId | null;
   updatedAt: Date;
 }
@@ -87,6 +88,11 @@ const PlatformSettingsSchema = new Schema<IPlatformSettings>(
     systemAlerts: {
       type: Boolean,
       default: true,
+    },
+    supportWhatsApp: {
+      type: String,
+      default: "",
+      trim: true,
     },
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,

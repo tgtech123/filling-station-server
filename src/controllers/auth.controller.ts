@@ -12,6 +12,7 @@ import mongoose from "mongoose";
 import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
 import StationStatus from "../models/stationStatus.model";
+import redis from "../config/redis";
 
 
 
@@ -228,6 +229,30 @@ export const loginStaff = async (
         }).catch((err) => console.error("Notification error (failed login):", err));
       }
       return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    // 2b. If 2FA is enabled, send OTP instead of issuing JWT
+    if (staff.twoFactorAuthEnabled) {
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      await redis.setex(`otp:${staff._id}`, 300, otp);
+
+      await transporter.sendMail({
+        to: staff.email,
+        subject: "Your Login Verification Code",
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;">
+            <h2 style="color:#0080ff;">Login Verification Code</h2>
+            <p>Hi ${staff.firstName},</p>
+            <p>Use the code below to complete your login. It expires in <strong>5 minutes</strong>.</p>
+            <div style="background:#f4f4f4;border-radius:8px;padding:20px;text-align:center;margin:20px 0;">
+              <span style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#0080ff;">${otp}</span>
+            </div>
+            <p style="color:#888;font-size:13px;">If you did not request this, please ignore this email.</p>
+          </div>
+        `,
+      });
+
+      return res.status(200).json({ requiresOtp: true, userId: staff._id.toString() });
     }
 
     // 3. Get associated station
@@ -588,6 +613,95 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
+
+export const verifyOtp = async (req: Request, res: Response) => {
+  try {
+    const { userId, otp } = req.body;
+
+    if (!userId || !otp) {
+      return res.status(400).json({ message: "userId and otp are required" });
+    }
+
+    const storedOtp = await redis.get(`otp:${userId}`);
+
+    if (!storedOtp) {
+      return res.status(400).json({ message: "OTP expired. Please log in again." });
+    }
+
+    if (storedOtp !== otp.toString().trim()) {
+      return res.status(400).json({ message: "Invalid OTP. Please try again." });
+    }
+
+    await redis.del(`otp:${userId}`);
+
+    const staff = await Staff.findById(userId);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    const station = await FillingStation.findById(staff.station);
+    const isSuperManager = staff.role === "manager" && !(station as any)?.parentStation;
+
+    const token = jwt.sign(
+      {
+        id: staff._id,
+        email: staff.email,
+        role: staff.role,
+        station: staff.station?.toString(),
+        isSuperManager,
+      },
+      process.env.JWT_SECRET!,
+      { expiresIn: "1d" }
+    );
+
+    await Staff.findByIdAndUpdate(staff._id, { onDuty: true });
+
+    if (staff.station) {
+      Activity.create({
+        fillingStation: staff.station,
+        type: "login",
+        status: "success",
+        title: "Staff Login (2FA)",
+        description: `${staff.firstName} ${staff.lastName} (${staff.role}) logged in via 2FA`,
+        timestamp: new Date(),
+        severity: "info",
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      }).catch((err) => console.error("Activity log error (2FA login):", err));
+    }
+
+    return res.status(200).json({
+      message: "Login successful",
+      token,
+      user: {
+        id: staff._id,
+        _id: staff._id,
+        firstName: staff.firstName,
+        lastName: staff.lastName,
+        email: staff.email,
+        phone: staff.phone,
+        address: staff.address,
+        city: staff.city,
+        state: staff.state,
+        zipCode: staff.zipCode,
+        emergencyContact: staff.emergencyContact,
+        image: staff.image,
+        createdAt: staff.createdAt,
+        role: staff.role,
+        station: station
+          ? {
+              ...station.toObject(),
+              logoUrl: station.image || null,
+              logo: station.image || null,
+            }
+          : null,
+        isSuperManager,
+      },
+    });
+  } catch (error: any) {
+    console.error("OTP verify error:", error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 export const changePassword = async (req: AuthenticatedRequest, res: Response) => {
   try {

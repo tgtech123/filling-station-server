@@ -27,6 +27,16 @@ import {
   updatePlatformSettings,
   getPublicSettings,
 } from "../controllers/admin.controller";
+import {
+  getAllTickets,
+  getTicketById,
+  respondToTicket,
+  updateTicketStatus,
+  createFaq,
+  getAllFaqs,
+  updateFaq,
+  deleteFaq,
+} from "../controllers/support.controller";
 
 const router = express.Router();
 
@@ -59,5 +69,17 @@ router.get("/settings/public", getPublicSettings);
 
 router.get("/settings", requireAuth, checkAdmin, getPlatformSettings);
 router.patch("/settings", requireAuth, checkAdmin, updatePlatformSettings);
+
+// Support — tickets
+router.get("/support/tickets", requireAuth, checkAdmin, getAllTickets);
+router.get("/support/tickets/:id", requireAuth, checkAdmin, getTicketById);
+router.patch("/support/tickets/:id/respond", requireAuth, checkAdmin, respondToTicket);
+router.patch("/support/tickets/:id/status", requireAuth, checkAdmin, updateTicketStatus);
+
+// Support — FAQs
+router.get("/support/faqs", requireAuth, checkAdmin, getAllFaqs);
+router.post("/support/faqs", requireAuth, checkAdmin, createFaq);
+router.patch("/support/faqs/:id", requireAuth, checkAdmin, updateFaq);
+router.delete("/support/faqs/:id", requireAuth, checkAdmin, deleteFaq);
 
 export default router;

@@ -1,5 +1,5 @@
 import express from "express";
-import { createStaff, changePassword, deleteStaff, forgotPassword, getAllStaff, loginStaff, resetPassword, updateStaff } from "../controllers/auth.controller";
+import { createStaff, changePassword, deleteStaff, forgotPassword, getAllStaff, loginStaff, resetPassword, updateStaff, verifyOtp } from "../controllers/auth.controller";
 import { setStaffTarget, getStaffTarget } from "../controllers/salesTarget.controller";
 import { checkRole } from "../middlewares/checkRole";
 import { requireAuth } from "../middlewares/auth.middleware";
@@ -10,6 +10,7 @@ const router = express.Router();
 router.post("/", requireAuth, checkRole("manager"), createStaff);
 router.get("/", requireAuth, checkRole("manager"), getAllStaff);
 router.post("/login", loginStaff);
+router.post("/verify-otp", verifyOtp);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.patch("/change-password", requireAuth, changePassword);
