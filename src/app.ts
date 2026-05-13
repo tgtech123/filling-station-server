@@ -32,6 +32,8 @@ import publicRoutes from "./routes/public.route";
 import paymentRoutes from "./routes/payment.route";
 import branchRoutes from "./routes/branch.route";
 import contactus from "./routes/contact.route";
+import supportRoutes from "./routes/support.route";
+import procurementRoutes from "./routes/procurement.route";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -227,6 +229,8 @@ app.use("/api/admin", admin);
 app.use("/api/public", publicRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/branches", branchRoutes);
+app.use("/api/support", supportRoutes);
+app.use("/api/procurement", procurementRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_, res) => {
