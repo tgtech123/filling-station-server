@@ -12,6 +12,7 @@ export interface IProcurementItem {
 }
 
 export interface ILubricantProcurement extends Document {
+  _id: mongoose.Types.ObjectId;
   procurementNumber: string;
   fillingStation: mongoose.Types.ObjectId;
   procuredBy: mongoose.Types.ObjectId;

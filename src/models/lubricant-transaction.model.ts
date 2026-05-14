@@ -12,6 +12,7 @@ interface ITransactionItem {
 
 // 🔹 Main transaction document
 export interface ILubricantTransaction extends Document {
+  _id: mongoose.Types.ObjectId;
   txnId: string;
   fillingStation: mongoose.Types.ObjectId;
   staff: mongoose.Types.ObjectId;
