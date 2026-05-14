@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface ICashReconciliation extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   shift: mongoose.Types.ObjectId; // Reference to Shift
   attendant: mongoose.Types.ObjectId;

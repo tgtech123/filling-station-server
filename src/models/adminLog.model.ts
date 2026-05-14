@@ -11,6 +11,7 @@ export type AdminLogEventType =
   | "station_reactivated";
 
 export interface IAdminLog extends Document {
+  _id: mongoose.Types.ObjectId;
   eventType: AdminLogEventType;
   description: string;
   stationOrUser: string;

@@ -10,6 +10,7 @@ export interface ITankProps extends Document {
 }
 
 export interface ITank extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   tanks: ITankProps[];
 }

@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface ICommissionStructure extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   role: "attendant" | "cashier" | "accountant" | "supervisor";
   baseRate: number; // Base commission percentage

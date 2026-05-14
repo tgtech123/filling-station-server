@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface IPlatformSettings extends Document {
+  _id: mongoose.Types.ObjectId;
   platformName: string;
   contactEmail: string;
   contactPhone: string;

@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IExpense extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   expId: string; // e.g., "#exp1232"
   category: "Product purchase" | "Maintenance & Repair" | "Salaries" | "Operational" | "Utilities" | "Administrative" | "Depreciation" | "Other Expenses";

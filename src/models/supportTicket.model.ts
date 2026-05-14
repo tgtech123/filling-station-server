@@ -8,6 +8,7 @@ export interface ISupportReply {
 }
 
 export interface ISupportTicket extends Document {
+  _id: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
   userName: string;
   userEmail: string;

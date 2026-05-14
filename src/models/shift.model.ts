@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface IShift extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   attendant: mongoose.Types.ObjectId;
   pump: mongoose.Types.ObjectId; // Reference to pump._id
