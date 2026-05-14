@@ -879,7 +879,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
   try {
     const staffId = req.user?.id;
     const fillingStation = req.user?.station;
-    const { items, paymentMethod } = req.body;
+    const { items, paymentMethod, paymentBreakdown } = req.body;
 
     // 🔒 Check authorization
     if (!fillingStation) {
@@ -982,6 +982,9 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
           items: processedItems,
           totalAmount,
           paymentMethod,
+          ...(paymentMethod === "mixed" && paymentBreakdown
+            ? { paymentBreakdown }
+            : {}),
         },
       ],
       { session }
@@ -1074,6 +1077,7 @@ export const getAllLubricantTransactions = async (req: AuthenticatedRequest, res
           items: 1,
           totalAmount: 1,
           paymentMethod: 1,
+          paymentBreakdown: 1,
           itemCount: { $size: "$items" },
         },
       },

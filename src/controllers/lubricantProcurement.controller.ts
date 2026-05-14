@@ -20,19 +20,29 @@ export const getReorderItems = async (req: AuthenticatedRequest, res: Response) 
     const stationId = req.user?.station;
     if (!stationId) return res.status(400).json({ message: "Station not found" });
 
-    const items = await Lubricant.find({
-      fillingStation: stationId,
-      $expr: { $lte: ["$qtyInStock", "$reOrderLevel"] },
-      reOrderLevel: { $gt: 0 },
-    }).lean();
+    const items = await Lubricant.find({ fillingStation: stationId }).lean();
+
+    const URGENCY_ORDER: Record<string, number> = { out_of_stock: 0, critical: 1, low: 2, healthy: 3 };
 
     const enriched = items.map((item) => {
-      const ratio = item.reOrderLevel > 0 ? item.qtyInStock / item.reOrderLevel : 1;
-      const urgency = ratio === 0 ? "out_of_stock" : ratio < 0.5 ? "critical" : "low";
-      return { ...item, urgency, stockRatio: ratio };
+      let urgency: string;
+      let stockRatio: number;
+
+      if (item.qtyInStock <= 0) {
+        urgency = "out_of_stock";
+        stockRatio = 0;
+      } else if (item.reOrderLevel > 0 && item.qtyInStock <= item.reOrderLevel) {
+        stockRatio = item.qtyInStock / item.reOrderLevel;
+        urgency = stockRatio < 0.5 ? "critical" : "low";
+      } else {
+        stockRatio = item.reOrderLevel > 0 ? item.qtyInStock / item.reOrderLevel : 1;
+        urgency = "healthy";
+      }
+
+      return { ...item, urgency, stockRatio };
     });
 
-    enriched.sort((a, b) => a.stockRatio - b.stockRatio);
+    enriched.sort((a, b) => (URGENCY_ORDER[a.urgency] ?? 3) - (URGENCY_ORDER[b.urgency] ?? 3));
 
     return res.status(200).json({ data: enriched });
   } catch (err: any) {
@@ -86,8 +96,8 @@ export const getProcurements = async (req: AuthenticatedRequest, res: Response) 
 
     const filter: any = { fillingStation: stationId };
 
-    // Cashiers and supervisors can only see submitted/ordered/received (not drafts)
-    if (role === "cashier" || role === "supervisor") {
+    // Cashiers can only see non-draft orders; managers and supervisors see everything
+    if (role === "cashier") {
       filter.status = { $in: ["submitted", "ordered", "received"] };
     } else if (status) {
       filter.status = status;
@@ -131,8 +141,8 @@ export const updateProcurement = async (req: AuthenticatedRequest, res: Response
     });
 
     if (!procurement) return res.status(404).json({ message: "Procurement not found" });
-    if (procurement.status !== "draft") {
-      return res.status(400).json({ message: "Only draft procurements can be edited" });
+    if (!["draft", "submitted"].includes(procurement.status)) {
+      return res.status(400).json({ message: "Only draft or submitted orders can be edited" });
     }
 
     if (vendorName !== undefined) procurement.vendorName = vendorName;
@@ -219,6 +229,7 @@ export const markOrdered = async (req: AuthenticatedRequest, res: Response) => {
 export const markReceived = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
+    const role = req.user?.role;
     const procurement = await LubricantProcurement.findOne({
       _id: req.params.id,
       fillingStation: stationId,
@@ -229,34 +240,41 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(400).json({ message: "Only submitted or ordered procurements can be marked as received" });
     }
 
-    // Auto-update stock levels for each item
-    const bulkOps = procurement.items.map((item) => ({
-      updateOne: {
-        filter: { _id: item.lubricantId, fillingStation: stationId },
-        update: { $inc: { qtyInStock: item.quantityToProcure } },
-      },
-    }));
-
-    if (bulkOps.length > 0) {
-      await Lubricant.bulkWrite(bulkOps);
+    // Only manager auto-updates stock; supervisor marks received without touching inventory
+    if (role === "manager") {
+      const bulkOps = procurement.items.map((item) => ({
+        updateOne: {
+          filter: { _id: item.lubricantId, fillingStation: stationId },
+          update: { $inc: { qtyInStock: item.quantityToProcure } },
+        },
+      }));
+      if (bulkOps.length > 0) await Lubricant.bulkWrite(bulkOps);
     }
 
     procurement.status = "received";
     procurement.receivedAt = new Date();
     await procurement.save();
 
+    const isManager = role === "manager";
+
     Activity.create({
       fillingStation: stationId,
       type: "procurement",
       status: "success",
       title: "Procurement Received",
-      description: `Procurement ${procurement.procurementNumber} — ${procurement.items.length} product(s) stock levels updated automatically`,
+      description: isManager
+        ? `Procurement ${procurement.procurementNumber} — ${procurement.items.length} product(s) stock levels updated automatically`
+        : `Procurement ${procurement.procurementNumber} received by supervisor — manager must update stock manually`,
       timestamp: new Date(),
       severity: "info",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     }).catch(console.error);
 
-    return res.status(200).json({ message: "Marked as received. Stock levels updated.", data: procurement });
+    const message = isManager
+      ? "Marked as received. Stock levels updated."
+      : "Marked as received. Ask the manager to update stock levels.";
+
+    return res.status(200).json({ message, data: procurement, stockUpdated: isManager });
   } catch (err: any) {
     return res.status(500).json({ message: "Server error", error: err.message });
   }

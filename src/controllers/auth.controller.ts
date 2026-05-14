@@ -231,28 +231,36 @@ export const loginStaff = async (
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // 2b. If 2FA is enabled, send OTP instead of issuing JWT
+    // 2b. If 2FA is enabled, attempt OTP flow — fall back to normal login if Redis is down
     if (staff.twoFactorAuthEnabled) {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      await redis.setex(`otp:${staff._id}`, 300, otp);
+      let redisAvailable = false;
+      try {
+        await redis.setex(`otp:${staff._id}`, 300, otp);
+        redisAvailable = true;
+      } catch (redisErr: any) {
+        console.warn("Redis unavailable — skipping 2FA and issuing JWT directly:", redisErr.message);
+      }
 
-      await transporter.sendMail({
-        to: staff.email,
-        subject: "Your Login Verification Code",
-        html: `
-          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;">
-            <h2 style="color:#0080ff;">Login Verification Code</h2>
-            <p>Hi ${staff.firstName},</p>
-            <p>Use the code below to complete your login. It expires in <strong>5 minutes</strong>.</p>
-            <div style="background:#f4f4f4;border-radius:8px;padding:20px;text-align:center;margin:20px 0;">
-              <span style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#0080ff;">${otp}</span>
+      if (redisAvailable) {
+        await transporter.sendMail({
+          to: staff.email,
+          subject: "Your Login Verification Code",
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;">
+              <h2 style="color:#0080ff;">Login Verification Code</h2>
+              <p>Hi ${staff.firstName},</p>
+              <p>Use the code below to complete your login. It expires in <strong>5 minutes</strong>.</p>
+              <div style="background:#f4f4f4;border-radius:8px;padding:20px;text-align:center;margin:20px 0;">
+                <span style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#0080ff;">${otp}</span>
+              </div>
+              <p style="color:#888;font-size:13px;">If you did not request this, please ignore this email.</p>
             </div>
-            <p style="color:#888;font-size:13px;">If you did not request this, please ignore this email.</p>
-          </div>
-        `,
-      });
-
-      return res.status(200).json({ requiresOtp: true, userId: staff._id.toString() });
+          `,
+        });
+        return res.status(200).json({ requiresOtp: true, userId: staff._id.toString() });
+      }
+      // Redis unavailable — fall through to normal JWT login below
     }
 
     // 3. Get associated station
@@ -323,7 +331,18 @@ export const loginStaff = async (
     });
   } catch (error: any) {
     console.error("Login error:", error);
-    return res.status(500).json({ message: "Server error", error: error.message });
+    const msg = error.message ?? "";
+    if (
+      msg.includes("Connection is closed") ||
+      msg.includes("Topology is closed") ||
+      msg.includes("connection timed out") ||
+      msg.includes("ECONNREFUSED")
+    ) {
+      return res.status(503).json({
+        message: "Database temporarily unavailable. Please try again in a few seconds.",
+      });
+    }
+    return res.status(500).json({ message: "Server error", error: msg });
   }
 };
 
@@ -622,7 +641,15 @@ export const verifyOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "userId and otp are required" });
     }
 
-    const storedOtp = await redis.get(`otp:${userId}`);
+    let storedOtp: string | null;
+    try {
+      storedOtp = await redis.get(`otp:${userId}`);
+    } catch (redisErr: any) {
+      console.error("Redis error during OTP fetch:", redisErr.message);
+      return res.status(503).json({
+        message: "OTP service is temporarily unavailable. Please try logging in again.",
+      });
+    }
 
     if (!storedOtp) {
       return res.status(400).json({ message: "OTP expired. Please log in again." });
@@ -632,7 +659,11 @@ export const verifyOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Invalid OTP. Please try again." });
     }
 
-    await redis.del(`otp:${userId}`);
+    try {
+      await redis.del(`otp:${userId}`);
+    } catch {
+      // Non-critical — OTP will expire on its own via the 5-min TTL
+    }
 
     const staff = await Staff.findById(userId);
     if (!staff) {
