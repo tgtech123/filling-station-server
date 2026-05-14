@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IFillingStation extends Document {
+  _id: mongoose.Types.ObjectId;
   name: string;
   address: string;
   email: string;

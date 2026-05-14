@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from "mongoose";
 
 
 export interface IStaff extends Document {
+  _id: mongoose.Types.ObjectId;
   firstName: string;
   lastName: string;
   email: string;
