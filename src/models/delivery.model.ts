@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model, Document } from "mongoose";
 
 export interface IDelivery extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   tank: mongoose.Types.ObjectId;
   pricePerLtr: number;

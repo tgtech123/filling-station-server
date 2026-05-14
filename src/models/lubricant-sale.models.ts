@@ -55,6 +55,7 @@ import mongoose, { Document, Schema } from "mongoose";
 
 
 export interface ILubricantSale extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   lubricant: mongoose.Types.ObjectId;
   staff: mongoose.Types.ObjectId;

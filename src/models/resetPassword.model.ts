@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IResetPassword extends Document {
+  _id: mongoose.Types.ObjectId;
   staffId: mongoose.Types.ObjectId;
   token: string;  // hashed
   expiresAt: Date;

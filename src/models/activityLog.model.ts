@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface IActivityLog extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   user: mongoose.Types.ObjectId; // Staff who performed the action
   role: string; // User's role at time of action

@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model, Document } from "mongoose";
 
 export interface IReport extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   reportType: "sales" | "cash_reconciliation" | "shift" | "fuel_inventory" | "staff_performance" | "activity_logs" | "lubricant_inventory";
   generatedBy: mongoose.Types.ObjectId;

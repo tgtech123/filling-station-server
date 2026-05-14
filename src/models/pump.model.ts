@@ -12,6 +12,7 @@ export interface IPumpProps extends Document {
 }
 
 export interface IPump extends Document {
+  _id: mongoose.Types.ObjectId;
   tank: mongoose.Types.ObjectId; // required reference to Tank
   pumps: IPumpProps[];
   createdAt?: Date;

@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface ISalesTarget extends Document {
+  _id: mongoose.Types.ObjectId;
   staff: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   targetAmount: number;

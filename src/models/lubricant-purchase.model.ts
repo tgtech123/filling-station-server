@@ -15,6 +15,7 @@ export interface ILubricantPurchaseItem {
 
 // Interface for the purchase transaction document
 export interface ILubricantPurchase extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   supplier: string;
   invoiceNo: string;

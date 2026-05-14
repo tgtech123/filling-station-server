@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface IActivity extends Document {
+  _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   type: "alert" | "sale" | "maintenance" | "stock" | "login";
   status: "success" | "failed" | null;

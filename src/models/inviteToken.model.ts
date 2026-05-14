@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface IInviteToken extends Document {
+  _id: mongoose.Types.ObjectId;
   email: string;
   firstName: string;
   lastName: string;
