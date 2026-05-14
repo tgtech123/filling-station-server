@@ -15,14 +15,14 @@ import {
 
 const router = express.Router();
 
-router.get("/reorder-items", requireAuth, checkRole("manager"), getReorderItems);
-router.post("/", requireAuth, checkRole("manager"), createProcurement);
-router.get("/", requireAuth, checkRole("manager", "cashier", "supervisor"), getProcurements);
-router.get("/:id", requireAuth, checkRole("manager", "cashier", "supervisor"), getProcurementById);
-router.patch("/:id", requireAuth, checkRole("manager"), updateProcurement);
-router.patch("/:id/submit", requireAuth, checkRole("manager"), submitProcurement);
-router.patch("/:id/ordered", requireAuth, checkRole("manager", "cashier", "supervisor"), markOrdered);
-router.patch("/:id/received", requireAuth, checkRole("manager", "cashier", "supervisor"), markReceived);
-router.delete("/:id", requireAuth, checkRole("manager"), deleteProcurement);
+router.get("/reorder-items", requireAuth, checkRole("manager", "supervisor"), getReorderItems);
+router.post("/", requireAuth, checkRole("manager", "supervisor"), createProcurement);
+router.get("/", requireAuth, checkRole("manager", "supervisor", "cashier"), getProcurements);
+router.get("/:id", requireAuth, checkRole("manager", "supervisor", "cashier"), getProcurementById);
+router.patch("/:id", requireAuth, checkRole("manager", "supervisor"), updateProcurement);
+router.patch("/:id/submit", requireAuth, checkRole("manager", "supervisor"), submitProcurement);
+router.patch("/:id/ordered", requireAuth, checkRole("manager", "supervisor", "cashier"), markOrdered);
+router.patch("/:id/received", requireAuth, checkRole("manager", "supervisor", "cashier"), markReceived);
+router.delete("/:id", requireAuth, checkRole("manager", "supervisor"), deleteProcurement);
 
 export default router;

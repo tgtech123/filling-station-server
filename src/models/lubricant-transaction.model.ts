@@ -17,7 +17,8 @@ export interface ILubricantTransaction extends Document {
   staff: mongoose.Types.ObjectId;
   items: ITransactionItem[];
   totalAmount: number;
-  paymentMethod: "cash" | "transfer" | "POS";
+  paymentMethod: "cash" | "transfer" | "POS" | "mixed";
+  paymentBreakdown?: { cash?: number; transfer?: number; POS?: number };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -88,6 +89,11 @@ const lubricantTransactionSchema = new Schema<ILubricantTransaction>(
       type: String,
       enum: ["cash", "transfer", "POS", "mixed"],
       required: true,
+    },
+    paymentBreakdown: {
+      cash:     { type: Number, default: 0 },
+      transfer: { type: Number, default: 0 },
+      POS:      { type: Number, default: 0 },
     },
   },
   { timestamps: true }

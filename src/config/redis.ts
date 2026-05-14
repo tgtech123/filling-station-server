@@ -4,14 +4,14 @@ const redis = new Redis({
   host: process.env.REDIS_HOST || "localhost",
   port: Number(process.env.REDIS_PORT) || 6379,
   password: process.env.REDIS_PASSWORD || undefined,
-  lazyConnect: true,
-  retryStrategy: (times) => {
-    if (times > 3) {
-      console.warn("⚠️ Redis unavailable — running without cache");
-      return null;
-    }
-    return Math.min(times * 200, 1000);
-  },
+  // Connect eagerly so the connection is ready before the first command
+  lazyConnect: false,
+  // Keep retrying on disconnect — never give up permanently
+  retryStrategy: (times) => Math.min(times * 300, 5000),
+  // Fail individual commands immediately when the socket is closed
+  // rather than queuing them and potentially hanging login requests
+  enableOfflineQueue: false,
+  maxRetriesPerRequest: 0,
 });
 
 redis.on("connect", () => {
