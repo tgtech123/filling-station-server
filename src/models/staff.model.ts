@@ -16,7 +16,7 @@ export interface IStaff extends Document {
   role: "manager" | "supervisor" | "accountant" | "cashier" | "attendant" | "admin";
   station: mongoose.Types.ObjectId;
   password: string;
-  shiftType?: string;
+  shiftType?: "One-Day-Morning" | "One-Day-Evening" | "Day-Off" | "24/7" | "Full-Time";
   responsibility: string[];
   addSaleTarget?: boolean;
   payType?: string;
@@ -62,7 +62,10 @@ const StaffSchema = new Schema<IStaff>(
     },
     station: { type: Schema.Types.ObjectId, ref: "FillingStation" },
     password: { type: String, required: true },
-    shiftType:  { type: String },
+    shiftType: {
+      type: String,
+      enum: ["One-Day-Morning", "One-Day-Evening", "Day-Off", "24/7", "Full-Time"],
+    },
     responsibility: [String],
     onDuty: {type: Boolean, required: true, default: false},
     addSaleTarget: { type: Boolean, required: true, default: false },

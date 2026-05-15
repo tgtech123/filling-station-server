@@ -9,6 +9,7 @@ export interface IDelivery extends Document {
   suplier: string;
   deliveryDate: Date;
   status: "Pending" | "Completed" | "Cancelled";
+  supplierPaid: boolean;
 }
 
 const DeliverySchema = new Schema<IDelivery>(
@@ -48,6 +49,10 @@ const DeliverySchema = new Schema<IDelivery>(
       type: String,
       enum: ["Pending", "Completed", "Cancelled"],
       default: "Pending",
+    },
+    supplierPaid: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true }
