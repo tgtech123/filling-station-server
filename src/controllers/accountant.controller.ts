@@ -10,6 +10,8 @@ import Tank from "../models/tanks.model";
 import Pump from "../models/pump.model";
 import Lubricant from "../models/lubricant.model";
 import Staff from "../models/staff.model";
+import FixedAsset, { calcNetBookValue } from "../models/fixedAsset.model";
+import FinancialEntry from "../models/financialEntry.model";
 
 // Helper function to check if populated field is an object
 const isPopulated = (field: any): field is { _id: any; firstName?: string; lastName?: string; email?: string } => {
@@ -257,7 +259,7 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
         {
           $group: {
             _id: null,
-            totalSales: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+            totalSales: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
           },
         },
       ]).exec();
@@ -481,7 +483,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
         },
       },
     ]).exec();
@@ -517,7 +519,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
           },
         },
       ]).exec();
@@ -525,7 +527,8 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
       previousRevenue = Number(prevFuelRevenue[0]?.total || 0) + Number(prevLubricantRevenue[0]?.total || 0);
     }
 
-    // COST OF GOODS SOLD (Fuel costs from deliveries)
+    // COST OF GOODS SOLD
+    // Fuel COGS = cost of fuel procured and delivered in the period
     const deliveries = await Delivery.find({
       fillingStation: new Types.ObjectId(stationId),
       status: "Completed",
@@ -533,7 +536,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
     }).lean();
 
     const stationTanks = await Tank.findOne({ fillingStation: new Types.ObjectId(stationId) }).lean();
-    let currentCOGS = 0;
+    let currentFuelCOGS = 0;
 
     if (stationTanks && stationTanks.tanks) {
       deliveries.forEach((delivery: any) => {
@@ -541,12 +544,12 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
           (t: any) => t._id.toString() === delivery.tank.toString()
         );
         if (matchedTank) {
-          currentCOGS += Number(delivery.quantity) * Number(delivery.pricePerLtr);
+          currentFuelCOGS += Number(delivery.quantity) * Number(delivery.pricePerLtr);
         }
       });
     }
 
-    // Lubricant COGS
+    // Lubricant COGS = cost price of lubricants sold (qty sold × unit cost)
     const lubricantSales = await LubricantSale.find({
       fillingStation: new Types.ObjectId(stationId),
       createdAt: { $gte: currentStart, $lte: currentEnd },
@@ -554,13 +557,18 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
       .populate("lubricant", "unitCost")
       .lean();
 
+    let currentLubricantCOGS = 0;
     lubricantSales.forEach((sale: any) => {
       if (sale.lubricant && (sale.lubricant as any).unitCost) {
-        currentCOGS += Number(sale.qtySold) * Number((sale.lubricant as any).unitCost);
+        currentLubricantCOGS += Number(sale.qtySold) * Number((sale.lubricant as any).unitCost);
       }
     });
 
-    // Previous COGS
+    const currentCOGS = currentFuelCOGS + currentLubricantCOGS;
+
+    // Previous COGS (split the same way)
+    let previousFuelCOGS = 0;
+    let previousLubricantCOGS = 0;
     let previousCOGS = 0;
     if (previousStart && previousEnd) {
       const prevDeliveries = await Delivery.find({
@@ -575,7 +583,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
             (t: any) => t._id.toString() === delivery.tank.toString()
           );
           if (matchedTank) {
-            previousCOGS += Number(delivery.quantity) * Number(delivery.pricePerLtr);
+            previousFuelCOGS += Number(delivery.quantity) * Number(delivery.pricePerLtr);
           }
         });
       }
@@ -589,9 +597,11 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
 
       prevLubricantSales.forEach((sale: any) => {
         if (sale.lubricant && (sale.lubricant as any).unitCost) {
-          previousCOGS += Number(sale.qtySold) * Number((sale.lubricant as any).unitCost);
+          previousLubricantCOGS += Number(sale.qtySold) * Number((sale.lubricant as any).unitCost);
         }
       });
+
+      previousCOGS = previousFuelCOGS + previousLubricantCOGS;
     }
 
     const currentGrossProfit = currentRevenue - currentCOGS;
@@ -638,50 +648,143 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
 
     const currentOperatingIncome = currentGrossProfit - currentOperatingExpenses;
     const previousOperatingIncome = previousGrossProfit - previousOperatingExpenses;
-
-    // NET INCOME
     const currentNetIncome = currentOperatingIncome;
     const previousNetIncome = previousOperatingIncome;
+
+    // Per-fuel-type revenue (Shift.product: "PMS" | "AGO" | "DPK" etc.)
+    const fuelRevenueByType = await Shift.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(stationId),
+          shiftDate: { $gte: currentStart, $lte: currentEnd },
+          status: "Completed",
+        },
+      },
+      { $group: { _id: { $toUpper: "$product" }, total: { $sum: "$totalAmount" } } },
+    ]).exec();
+    const fuelByType: Record<string, number> = {};
+    fuelRevenueByType.forEach((item: any) => {
+      fuelByType[(item._id || "OTHER").toUpperCase()] = Number(item.total || 0);
+    });
+    const pmsSales = fuelByType["PMS"] || 0;
+    const agoSales = fuelByType["AGO"] || fuelByType["DIESEL"] || 0;
+    const dpkSales = fuelByType["DPK"] || fuelByType["KEROSENE"] || 0;
+    const lubricantSalesRevenue = Number(lubricantRevenue[0]?.total || 0);
+
+    // Expense breakdown by category
+    const expensesByCategory = await Expense.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(stationId),
+          createdAt: { $gte: currentStart, $lte: currentEnd },
+          status: "Approved",
+        },
+      },
+      { $group: { _id: "$category", total: { $sum: "$amount" } } },
+    ]).exec();
+    const expByCat: Record<string, number> = {};
+    expensesByCategory.forEach((item: any) => { expByCat[item._id] = Number(item.total || 0); });
+    const salariesAndWages = expByCat["Salaries"] || 0;
+    const utilities = expByCat["Utilities"] || 0;
+    const maintenance = expByCat["Maintenance & Repair"] || 0;
+    // Anything not in the three named lines (Administrative, Operational, Product purchase, Depreciation, Other)
+    const otherExpenses = Math.max(0, currentOperatingExpenses - salariesAndWages - utilities - maintenance);
+
+    // Comparison block (only when previous period provided)
+    let comparison: any = null;
+    if (previousStart && previousEnd) {
+      const prevFuelByTypeAgg = await Shift.aggregate([
+        {
+          $match: {
+            fillingStation: new Types.ObjectId(stationId),
+            shiftDate: { $gte: previousStart, $lte: previousEnd },
+            status: "Completed",
+          },
+        },
+        { $group: { _id: { $toUpper: "$product" }, total: { $sum: "$totalAmount" } } },
+      ]).exec();
+      const prevFuelMap: Record<string, number> = {};
+      prevFuelByTypeAgg.forEach((item: any) => { prevFuelMap[(item._id || "OTHER").toUpperCase()] = Number(item.total || 0); });
+
+      const prevLubAgg = await LubricantSale.aggregate([
+        {
+          $match: {
+            fillingStation: new Types.ObjectId(stationId),
+            createdAt: { $gte: previousStart, $lte: previousEnd },
+          },
+        },
+        { $group: { _id: null, total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+      ]).exec();
+      const prevLubRev = Number(prevLubAgg[0]?.total || 0);
+
+      const prevExpByCatAgg = await Expense.aggregate([
+        {
+          $match: {
+            fillingStation: new Types.ObjectId(stationId),
+            createdAt: { $gte: previousStart, $lte: previousEnd },
+            status: "Approved",
+          },
+        },
+        { $group: { _id: "$category", total: { $sum: "$amount" } } },
+      ]).exec();
+      const prevExpByCat: Record<string, number> = {};
+      prevExpByCatAgg.forEach((item: any) => { prevExpByCat[item._id] = Number(item.total || 0); });
+
+      const prevSalaries = prevExpByCat["Salaries"] || 0;
+      const prevUtilities = prevExpByCat["Utilities"] || 0;
+      const prevMaintenance = prevExpByCat["Maintenance & Repair"] || 0;
+      const prevOtherExpenses = Math.max(0, previousOperatingExpenses - prevSalaries - prevUtilities - prevMaintenance);
+
+      comparison = {
+        revenue: {
+          pmsSales: prevFuelMap["PMS"] || 0,
+          agoSales: prevFuelMap["AGO"] || prevFuelMap["DIESEL"] || 0,
+          dpkSales: prevFuelMap["DPK"] || prevFuelMap["KEROSENE"] || 0,
+          lubricantSales: prevLubRev,
+          totalRevenue: previousRevenue,
+        },
+        costOfGoodsSold: {
+          fuelCOGS: previousFuelCOGS,
+          lubricantCOGS: previousLubricantCOGS,
+          totalCOGS: previousCOGS,
+        },
+        operatingExpenses: {
+          salariesAndWages: prevSalaries,
+          utilities: prevUtilities,
+          maintenance: prevMaintenance,
+          otherExpenses: prevOtherExpenses,
+          totalOperatingExpenses: previousOperatingExpenses,
+        },
+        grossProfit: previousGrossProfit,
+        netProfit: previousNetIncome,
+      };
+    }
 
     return res.status(200).json({
       success: true,
       data: {
         revenue: {
-          description: "Fuel Sales",
-          currentPeriod: currentRevenue,
-          previousPeriod: previousRevenue,
-          variance: currentRevenue - previousRevenue,
+          pmsSales,
+          agoSales,
+          dpkSales,
+          lubricantSales: lubricantSalesRevenue,
+          totalRevenue: currentRevenue,
         },
         costOfGoodsSold: {
-          description: "Cost of Goods Sold",
-          currentPeriod: currentCOGS,
-          previousPeriod: previousCOGS,
-          variance: currentCOGS - previousCOGS,
-        },
-        grossProfit: {
-          description: "Gross Profit",
-          currentPeriod: currentGrossProfit,
-          previousPeriod: previousGrossProfit,
-          variance: currentGrossProfit - previousGrossProfit,
+          fuelCOGS: currentFuelCOGS,
+          lubricantCOGS: currentLubricantCOGS,
+          totalCOGS: currentCOGS,
         },
         operatingExpenses: {
-          description: "Operating Expenses",
-          currentPeriod: currentOperatingExpenses,
-          previousPeriod: previousOperatingExpenses,
-          variance: currentOperatingExpenses - previousOperatingExpenses,
+          salariesAndWages,
+          utilities,
+          maintenance,
+          otherExpenses,
+          totalOperatingExpenses: currentOperatingExpenses,
         },
-        operatingIncome: {
-          description: "Operating Income",
-          currentPeriod: currentOperatingIncome,
-          previousPeriod: previousOperatingIncome,
-          variance: currentOperatingIncome - previousOperatingIncome,
-        },
-        netIncome: {
-          description: "Net Income",
-          currentPeriod: currentNetIncome,
-          previousPeriod: previousNetIncome,
-          variance: currentNetIncome - previousNetIncome,
-        },
+        grossProfit: currentGrossProfit,
+        netProfit: currentNetIncome,
+        ...(comparison ? { comparison } : {}),
       },
     });
   } catch (error: any) {
@@ -714,7 +817,6 @@ export const getBalanceSheet = async (req: AuthenticatedRequest, res: Response) 
     // ASSETS
     // Current Assets
     const tanks = await Tank.findOne({ fillingStation: new Types.ObjectId(stationId) }).lean();
-    let cashAndEquivalents = 0; // This would come from actual cash records - simplified for now
     let fuelInventory = 0;
     let lubricantInventory = 0;
 
@@ -729,33 +831,107 @@ export const getBalanceSheet = async (req: AuthenticatedRequest, res: Response) 
       lubricantInventory += Number(lub.quantity || 0) * Number(lub.unitCost || 0);
     });
 
+    // Cash = net revenue collected minus expenses paid in the period (operating cash proxy)
+    const bsRevAgg = await Shift.aggregate([
+      { $match: { fillingStation: new Types.ObjectId(stationId), shiftDate: { $gte: currentStart, $lte: currentEnd }, status: "Completed" } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+    ]).exec();
+    const bsLubRevAgg = await LubricantSale.aggregate([
+      { $match: { fillingStation: new Types.ObjectId(stationId), createdAt: { $gte: currentStart, $lte: currentEnd } } },
+      { $group: { _id: null, total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+    ]).exec();
+    const bsExpAgg = await Expense.aggregate([
+      { $match: { fillingStation: new Types.ObjectId(stationId), createdAt: { $gte: currentStart, $lte: currentEnd }, status: "Approved" } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]).exec();
+    const bsRevenue = Number(bsRevAgg[0]?.total || 0) + Number(bsLubRevAgg[0]?.total || 0);
+    const bsExpenses = Number(bsExpAgg[0]?.total || 0);
+    const cashAndEquivalents = Math.max(0, bsRevenue - bsExpenses);
+
     const totalCurrentAssets = cashAndEquivalents + fuelInventory + lubricantInventory;
 
-    // Fixed Assets (simplified - would need actual asset records)
-    const landAndBuilding = 0; // Placeholder
-    const fuelDispenser = 0; // Placeholder
-    const otherEquipment = 0; // Placeholder
+    // Fixed Assets — read from FixedAsset register, compute net book value per asset
+    const fixedAssets = await FixedAsset.find({ fillingStation: new Types.ObjectId(stationId) }).lean();
+    let landAndBuilding = 0;
+    let fuelDispenser = 0;
+    let otherEquipment = 0;
+    const now = new Date();
+    fixedAssets.forEach((fa: any) => {
+      const { netBookValue } = calcNetBookValue(fa.purchasePrice, fa.purchaseDate, fa.usefulLifeYears, fa.depreciationMethod, now);
+      if (fa.category === "Land & Building") landAndBuilding += netBookValue;
+      else if (fa.category === "Fuel Dispenser") fuelDispenser += netBookValue;
+      else otherEquipment += netBookValue;
+    });
     const totalFixedAssets = landAndBuilding + fuelDispenser + otherEquipment;
 
-    // LIABILITIES & EQUITY
-    // Current Liabilities (simplified)
-    const accountsPayable = 0; // Placeholder
-    const accruedExpenses = 0; // Placeholder
-    const taxPayable = 0; // Placeholder
-    const totalCurrentLiabilities = accountsPayable + accruedExpenses + taxPayable;
+    // ── LIABILITIES ────────────────────────────────────────────────────────────
+    // Accounts Payable = completed deliveries not yet paid to supplier
+    const unpaidDeliveriesAgg = await Delivery.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(stationId),
+          status: "Completed",
+          supplierPaid: { $ne: true },
+        },
+      },
+      { $group: { _id: null, total: { $sum: { $multiply: ["$quantity", "$pricePerLtr"] } } } },
+    ]).exec();
+    const accountsPayable = Number(unpaidDeliveriesAgg[0]?.total || 0);
 
-    // Long Term Liabilities (simplified)
-    const longTermLoans = 0; // Placeholder
-    const equipmentFinancing = 0; // Placeholder
-    const totalLongTermLiabilities = longTermLoans + equipmentFinancing;
-    const totalLiabilities = totalCurrentLiabilities + totalLongTermLiabilities;
+    // All other liabilities and equity come from the Financial Entries register
+    const financialEntries = await FinancialEntry.find({
+      fillingStation: new Types.ObjectId(stationId),
+    }).lean();
 
-    // Equity (simplified)
-    const ownersCapital = 0; // Placeholder
-    const retainedEarnings = 0; // Placeholder
-    const currentYearEarnings = 0; // Placeholder - would calculate from income statement
-    const totalEquity = ownersCapital + retainedEarnings + currentYearEarnings;
+    const byCategory: Record<string, number> = {};
+    financialEntries.forEach((e: any) => {
+      byCategory[e.category] = (byCategory[e.category] || 0) + Number(e.amount);
+    });
 
+    const accruedExpenses       = byCategory["Accrued Expenses"]    || 0;
+    const taxPayable             = byCategory["Tax Payable"]          || 0;
+    const longTermLoans          = byCategory["Long-term Loan"]       || 0;
+    const equipmentFinancing     = byCategory["Equipment Financing"]  || 0;
+    const ownersCapital          = byCategory["Owner's Capital"]      || 0;
+    const retainedEarnings       = byCategory["Retained Earnings"]    || 0;
+
+    const totalCurrentLiabilities    = accountsPayable + accruedExpenses + taxPayable;
+    const totalLongTermLiabilities   = longTermLoans + equipmentFinancing;
+    const totalLiabilities           = totalCurrentLiabilities + totalLongTermLiabilities;
+
+    // ── EQUITY ─────────────────────────────────────────────────────────────────
+    // Current Year Earnings = net profit for the selected period
+    const balRevAgg = await Shift.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(stationId),
+          shiftDate: { $gte: currentStart, $lte: currentEnd },
+          status: "Completed",
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+    ]).exec();
+    const balLubRevAgg = await LubricantSale.aggregate([
+      {
+        $match: { fillingStation: new Types.ObjectId(stationId), createdAt: { $gte: currentStart, $lte: currentEnd } },
+      },
+      { $group: { _id: null, total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+    ]).exec();
+    const balExpAgg = await Expense.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(stationId),
+          createdAt: { $gte: currentStart, $lte: currentEnd },
+          status: "Approved",
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]).exec();
+    const balRevenue          = Number(balRevAgg[0]?.total || 0) + Number(balLubRevAgg[0]?.total || 0);
+    const balExpenses         = Number(balExpAgg[0]?.total || 0);
+    const currentYearEarnings = balRevenue - balExpenses;
+
+    const totalEquity            = ownersCapital + retainedEarnings + currentYearEarnings;
     const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
 
     return res.status(200).json({
@@ -763,40 +939,40 @@ export const getBalanceSheet = async (req: AuthenticatedRequest, res: Response) 
       data: {
         assets: {
           currentAssets: {
-            cashAndEquivalents,
-            fuelInventory,
-            lubricantInventory,
-            total: totalCurrentAssets,
+            cashAndCashEquivalent: cashAndEquivalents,
+            inventoryFuel: fuelInventory,
+            inventoryLubricant: lubricantInventory,
+            totalCurrentAssets,
           },
           fixedAssets: {
             landAndBuilding,
             fuelDispenser,
             otherEquipment,
-            total: totalFixedAssets,
+            totalFixedAssets,
           },
           totalAssets: totalCurrentAssets + totalFixedAssets,
         },
-        liabilitiesAndEquity: {
+        liabilities: {
           currentLiabilities: {
             accountsPayable,
             accruedExpenses,
             taxPayable,
-            total: totalCurrentLiabilities,
+            totalCurrentLiabilities,
           },
           longTermLiabilities: {
             longTermLoans,
             equipmentFinancing,
-            total: totalLongTermLiabilities,
+            totalLongTermLiabilities,
           },
           totalLiabilities,
-          equity: {
-            ownersCapital,
-            retainedEarnings,
-            currentYearEarnings,
-            total: totalEquity,
-          },
-          totalLiabilitiesAndEquity,
         },
+        equity: {
+          ownersCapital,
+          retainedEarnings,
+          currentYearEarnings,
+          totalEquity,
+        },
+        totalLiabilitiesAndEquity,
       },
     });
   } catch (error: any) {
@@ -848,7 +1024,7 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
         },
       },
     ]).exec();
@@ -974,7 +1150,7 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
           },
         },
       ]).exec();
@@ -1073,7 +1249,7 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
       ...recentLubricantSales.map((sale: any) => ({
         date: sale.createdAt,
         service: "Lubricant sales",
-        amount: Number(sale.qtySold) * Number(sale.pricePerUnit),
+        amount: Number(sale.qtySold) * Number(sale.priceSold),
         type: "Inflow",
       })),
       ...recentExpenses.map((exp: any) => ({
@@ -1089,15 +1265,13 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(200).json({
       success: true,
       data: {
-        summary: {
-          totalInflow: totalInflow,
-          totalOutflow: totalOutflow,
-          netCashflow: netCashflow,
-        },
-        cashflowTrend: cashflowTrend,
-        inflowBreakdown: inflowBreakdown,
-        outflowBreakdown: outflowBreakdown,
-        recentTransactions: recentTransactions,
+        totalInflow,
+        totalOutflow,
+        netCashflow,
+        breakdown: cashflowTrend,
+        inflowBreakdown,
+        outflowBreakdown,
+        recentTransactions,
       },
     });
   } catch (error: any) {
@@ -1154,7 +1328,7 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
         },
       },
     ]).exec();
@@ -1212,56 +1386,97 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
     ]).exec();
 
     const totalExpenses = Number(expenses[0]?.total || 0);
-    const grossProfit = totalRevenue - cogs;
+    const grossProfit   = totalRevenue - cogs;
     const operatingProfit = grossProfit - totalExpenses;
-    const netProfit = operatingProfit;
+    const netProfit     = operatingProfit;
 
-    // Calculate ratios
-    const grossProfitMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+    // ── Profitability margins (income-statement data only, always accurate) ────
+    const grossProfitMargin     = totalRevenue > 0 ? (grossProfit    / totalRevenue) * 100 : 0;
     const operatingProfitMargin = totalRevenue > 0 ? (operatingProfit / totalRevenue) * 100 : 0;
-    const netProfitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+    const netProfitMargin       = totalRevenue > 0 ? (netProfit       / totalRevenue) * 100 : 0;
 
-    // Assets (simplified)
-    const tanks = await Tank.findOne({ fillingStation: new Types.ObjectId(stationId) }).lean();
-    let currentAssets = 0;
-    if (tanks && tanks.tanks) {
-      tanks.tanks.forEach((tank: any) => {
-        currentAssets += Number(tank.quantity || 0) * Number(tank.pricePerLtr || 0);
+    // ── Inventory (current balance — same source as Balance Sheet) ────────────
+    const krTanks = await Tank.findOne({ fillingStation: new Types.ObjectId(stationId) }).lean();
+    let fuelInventoryValue = 0;
+    if (krTanks && krTanks.tanks) {
+      krTanks.tanks.forEach((t: any) => {
+        fuelInventoryValue += Number(t.quantity || 0) * Number(t.pricePerLtr || 0);
       });
     }
+    const krLubricants = await Lubricant.find({ fillingStation: new Types.ObjectId(stationId) }).lean();
+    const lubricantInventoryValue = krLubricants.reduce(
+      (s: number, l: any) => s + Number(l.quantity || 0) * Number(l.unitCost || 0), 0
+    );
+    const totalInventory = fuelInventoryValue + lubricantInventoryValue;
 
-    const lubricants = await Lubricant.find({ fillingStation: new Types.ObjectId(stationId) }).lean();
-    lubricants.forEach((lub: any) => {
-      currentAssets += Number(lub.quantity || 0) * Number(lub.unitCost || 0);
-    });
+    // ── Cash (net operating cash for the period — same as Balance Sheet) ─────
+    const krRevAgg = await Shift.aggregate([
+      { $match: { fillingStation: new Types.ObjectId(stationId), shiftDate: { $gte: currentStart, $lte: currentEnd }, status: "Completed" } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+    ]).exec();
+    const krLubRevAgg = await LubricantSale.aggregate([
+      { $match: { fillingStation: new Types.ObjectId(stationId), createdAt: { $gte: currentStart, $lte: currentEnd } } },
+      { $group: { _id: null, total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+    ]).exec();
+    const krPeriodRevenue  = Number(krRevAgg[0]?.total || 0) + Number(krLubRevAgg[0]?.total || 0);
+    const cash             = Math.max(0, krPeriodRevenue - totalExpenses);
+    const totalCurrentAssets = cash + totalInventory;
 
-    const totalAssets = currentAssets; // Simplified
+    // ── Fixed assets (FixedAsset register — same as Balance Sheet) ────────────
+    const krFixedAssets = await FixedAsset.find({ fillingStation: new Types.ObjectId(stationId) }).lean();
+    const fixedAssetsValue = krFixedAssets.reduce((s: number, fa: any) => {
+      const { netBookValue } = calcNetBookValue(fa.purchasePrice, fa.purchaseDate, fa.usefulLifeYears, fa.depreciationMethod);
+      return s + netBookValue;
+    }, 0);
+    const totalAssets = totalCurrentAssets + fixedAssetsValue;
+
+    // ── Liabilities (FinancialEntry register + unpaid deliveries) ─────────────
+    const krEntries = await FinancialEntry.find({ fillingStation: new Types.ObjectId(stationId) }).lean();
+    const krByCat: Record<string, number> = {};
+    krEntries.forEach((e: any) => { krByCat[e.category] = (krByCat[e.category] || 0) + Number(e.amount); });
+
+    const krUnpaidAgg = await Delivery.aggregate([
+      { $match: { fillingStation: new Types.ObjectId(stationId), status: "Completed", supplierPaid: { $ne: true } } },
+      { $group: { _id: null, total: { $sum: { $multiply: ["$quantity", "$pricePerLtr"] } } } },
+    ]).exec();
+    const accountsPayable       = Number(krUnpaidAgg[0]?.total || 0);
+    const accruedExpenses       = krByCat["Accrued Expenses"]   || 0;
+    const taxPayable            = krByCat["Tax Payable"]         || 0;
+    const totalCurrentLiabilities = accountsPayable + accruedExpenses + taxPayable;
+
+    const longTermLoans         = krByCat["Long-term Loan"]      || 0;
+    const equipmentFinancing    = krByCat["Equipment Financing"] || 0;
+    const totalLongTermLiabilities = longTermLoans + equipmentFinancing;
+    const totalDebt             = totalLongTermLiabilities; // long-term debt only
+    const totalLiabilities      = totalCurrentLiabilities + totalLongTermLiabilities;
+
+    // ── Equity (FinancialEntry register + current year earnings) ─────────────
+    const ownersCapital         = krByCat["Owner's Capital"]     || 0;
+    const retainedEarnings      = krByCat["Retained Earnings"]   || 0;
+    const totalEquity           = ownersCapital + retainedEarnings + netProfit;
+
+    // ── Profitability — ROA & ROE now use proper assets/equity ───────────────
     const returnOnAssets = totalAssets > 0 ? (netProfit / totalAssets) * 100 : 0;
-
-    // Equity (simplified)
-    const totalEquity = totalAssets; // Simplified
     const returnOnEquity = totalEquity > 0 ? (netProfit / totalEquity) * 100 : 0;
 
-    // Liquidity ratios
-    const currentLiabilities = 0; // Placeholder
-    const currentRatio = currentLiabilities > 0 ? currentAssets / currentLiabilities : 0;
-    const quickRatio = currentLiabilities > 0 ? currentAssets / currentLiabilities : 0; // Simplified
-    const cashRatio = currentLiabilities > 0 ? 0 / currentLiabilities : 0; // Placeholder
-    const workingCapital = currentAssets - currentLiabilities;
+    // ── Liquidity ─────────────────────────────────────────────────────────────
+    // null = no liabilities recorded yet → frontend shows "N/A"
+    const currentRatio = totalCurrentLiabilities > 0 ? totalCurrentAssets / totalCurrentLiabilities : null;
+    const quickRatio   = totalCurrentLiabilities > 0 ? cash / totalCurrentLiabilities : null;   // cash only (inventory excluded as illiquid)
+    const cashRatio    = totalCurrentLiabilities > 0 ? cash / totalCurrentLiabilities : null;
+    const workingCapital = totalCurrentAssets - totalCurrentLiabilities;
 
-    // Efficiency ratios
-    const averageInventory = currentAssets; // Simplified
-    const inventoryTurnover = averageInventory > 0 ? cogs / averageInventory : 0;
-    const assetTurnover = totalAssets > 0 ? totalRevenue / totalAssets : 0;
-    const receivablesTurnover = 0; // Placeholder
-    const daysSalesOutstanding = receivablesTurnover > 0 ? 365 / receivablesTurnover : 0;
+    // ── Efficiency ────────────────────────────────────────────────────────────
+    const inventoryTurnover = totalInventory > 0 ? cogs / totalInventory : 0;
+    const assetTurnover     = totalAssets > 0    ? totalRevenue / totalAssets : 0;
+    // Receivables: filling stations are a cash/POS business — no credit sales → N/A
+    // DaySalesOutstanding: follows from receivables → N/A
 
-    // Leverage ratios
-    const totalDebt = 0; // Placeholder
-    const debtToAssets = totalAssets > 0 ? (totalDebt / totalAssets) * 100 : 0;
-    const debtToEquity = totalEquity > 0 ? (totalDebt / totalEquity) * 100 : 0;
-    const interestCoverage = 0; // Placeholder
-    const equityMultiplier = totalEquity > 0 ? totalAssets / totalEquity : 0;
+    // ── Leverage ──────────────────────────────────────────────────────────────
+    const debtToAssets     = totalAssets  > 0 ? (totalDebt / totalAssets)  * 100 : 0;
+    const debtToEquity     = totalEquity  > 0 ? (totalDebt / totalEquity)  * 100 : 0;
+    // Interest Coverage needs interest expense which isn't tracked separately → N/A
+    const equityMultiplier = totalEquity  > 0 ? totalAssets / totalEquity : null;
 
     return res.status(200).json({
       success: true,
@@ -1269,27 +1484,27 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
         profitability: {
           grossProfitMargin: Number(grossProfitMargin.toFixed(2)),
           operatingProfitMargin: Number(operatingProfitMargin.toFixed(2)),
-          netProfit: Number(netProfitMargin.toFixed(2)),
+          netProfitMargin: Number(netProfitMargin.toFixed(2)),
           returnOnAssets: Number(returnOnAssets.toFixed(2)),
           returnOnEquity: Number(returnOnEquity.toFixed(2)),
         },
         liquidity: {
-          currentRatio: Number(currentRatio.toFixed(2)),
-          quickRatio: Number(quickRatio.toFixed(2)),
-          cashRatio: Number(cashRatio.toFixed(2)),
+          currentRatio: currentRatio !== null ? Number(currentRatio.toFixed(2)) : null,
+          quickRatio: quickRatio !== null ? Number(quickRatio.toFixed(2)) : null,
+          cashRatio: cashRatio !== null ? Number(cashRatio.toFixed(2)) : null,
           workingCapital: workingCapital,
         },
         efficiency: {
           inventoryTurnover: Number(inventoryTurnover.toFixed(2)),
-          assetTurnover: Number(assetTurnover.toFixed(2)),
-          receivablesTurnover: Number(receivablesTurnover.toFixed(2)),
-          daysSalesOutstanding: Number(daysSalesOutstanding.toFixed(2)),
+          assetTurnover:     Number(assetTurnover.toFixed(2)),
+          receivablesTurnover: null,   // N/A — cash/POS business, no credit sales
+          daySalesOutstanding: null,   // N/A — follows from receivables
         },
         leverage: {
-          debtToAssets: Number(debtToAssets.toFixed(2)),
-          debtToEquity: Number(debtToEquity.toFixed(2)),
-          interestCoverage: Number(interestCoverage.toFixed(2)),
-          equityMultiplier: Number(equityMultiplier.toFixed(2)),
+          debtToAssets:     Number(debtToAssets.toFixed(2)),
+          debtToEquity:     Number(debtToEquity.toFixed(2)),
+          interestCoverage: null,      // N/A — interest expense not tracked separately
+          equityMultiplier: equityMultiplier !== null ? Number(equityMultiplier.toFixed(2)) : null,
         },
       },
     });
@@ -1340,7 +1555,7 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
         },
       },
     ]).exec();
@@ -1404,7 +1619,7 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
           },
         },
       ]).exec();
@@ -1497,14 +1712,15 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
+          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
         },
       },
     ]).exec();
 
-    const totalRevenue = Number(revenue[0]?.total || 0);
+    const totalFuelRevenue = Number(revenue[0]?.total || 0);
     const totalLubricantSales = Number(lubricantRevenue[0]?.total || 0);
-    const otherSales = 0; // Placeholder
+    const totalRevenue = totalFuelRevenue + totalLubricantSales; // combined for percentages
+    const otherSales = 0;
 
     // Fuel income breakdown by type
     const fuelBreakdown = await Shift.aggregate([
@@ -1525,7 +1741,7 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
       },
     ]).exec();
 
-    const totalFuelSales = fuelBreakdown.reduce((sum, item) => sum + Number(item.totalRevenue || 0), 0);
+    const totalFuelSales = fuelBreakdown.reduce((sum, item) => sum + Number(item.totalRevenue || 0), 0) || totalFuelRevenue;
 
     const fuelIncomeReport = fuelBreakdown.map((item) => ({
       fuelType: item._id || "Unknown",
@@ -1560,8 +1776,8 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
           barcode: { $first: "$lubricantDoc.barcode" },
           lubricantName: { $first: "$lubricantDoc.name" },
           unitSold: { $sum: "$qtySold" },
-          totalRevenue: { $sum: { $multiply: ["$qtySold", "$pricePerUnit"] } },
-          avgPricePerUnit: { $avg: "$pricePerUnit" },
+          totalRevenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          avgPricePerUnit: { $avg: "$priceSold" },
         },
       },
     ]).exec();
@@ -1577,9 +1793,9 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
 
     return res.status(200).json({
       success: true,
-      data: {   
+      data: {
         summary: {
-          totalRevenueGenerated: totalRevenue,
+          totalRevenueGenerated: totalRevenue,   // fuel + lubricant combined
           totalFuelSales: totalFuelSales,
           totalLubricantSales: totalLubricantSales,
           otherSales: otherSales,

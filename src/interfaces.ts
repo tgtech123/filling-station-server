@@ -6,6 +6,8 @@ export interface IUserPayload {
   _id?: string;
   email?: string;
   role: string;
+  firstName?: string;
+  lastName?: string;
   permissions?: string[];
   station?: Types.ObjectId;
   isSuperManager?: boolean;

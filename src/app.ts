@@ -34,6 +34,9 @@ import branchRoutes from "./routes/branch.route";
 import contactus from "./routes/contact.route";
 import supportRoutes from "./routes/support.route";
 import procurementRoutes from "./routes/procurement.route";
+import salaryRoutes from "./routes/salary.route";
+import fixedAssetRoutes from "./routes/fixedAsset.route";
+import financialEntryRoutes from "./routes/financialEntry.route";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -122,7 +125,14 @@ const isAuthenticatedPollingPath = (req: any) => {
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  // Authenticated users get their own per-token bucket (300).
+  // Unauthenticated traffic still shares the IP bucket (100).
+  max: (req: any) =>
+    req.headers.authorization?.startsWith("Bearer ") ? 300 : 100,
+  keyGenerator: (req: any) => {
+    const auth = req.headers.authorization as string | undefined;
+    return auth?.startsWith("Bearer ") ? auth : (req.ip ?? "unknown");
+  },
   message: { error: "Too many requests. Please try again later.", retryAfter: "15 minutes" },
   standardHeaders: true,
   legacyHeaders: false,
@@ -200,7 +210,7 @@ app.use("/api/payments", paymentLimiter);
 app.use("/api/auth/forgot-password", resetLimiter);
 app.use("/api/auth/reset-password", resetLimiter);
 
-// ── Routes ────────────────────────────────────────────────────────────────────
+// ── Routes 
 app.use("/api/auth", authRoutes);
 app.use("/api/register", fillinStation);
 app.use("/api/contactus", contactus);
@@ -231,8 +241,11 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/procurement", procurementRoutes);
+app.use("/api/salary", salaryRoutes);
+app.use("/api/fixed-assets", fixedAssetRoutes);
+app.use("/api/financial-entries", financialEntryRoutes);
 
-// ── Health check ──────────────────────────────────────────────────────────────
+// ── Health check 
 app.get("/api/health", (_, res) => {
   res.json({ status: "OK", message: "Server is healthy" });
 });

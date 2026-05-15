@@ -197,6 +197,8 @@ export const switchStation = async (req: AuthenticatedRequest, res: Response) =>
       {
         id: managerId,
         role: req.user?.role,
+        firstName: req.user?.firstName,
+        lastName: req.user?.lastName,
         station: targetStationId,
         email: req.user?.email,
         isSuperManager: true,
@@ -490,6 +492,8 @@ export const acceptInvite = async (req: any, res: Response) => {
       {
         id: newManager._id,
         role: "manager",
+        firstName: newManager.firstName,
+        lastName: newManager.lastName,
         station: invite.station,
         email: newManager.email,
         isSuperManager: false,
