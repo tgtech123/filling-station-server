@@ -12,6 +12,8 @@ import Lubricant from "../models/lubricant.model";
 import Staff from "../models/staff.model";
 import FixedAsset, { calcNetBookValue } from "../models/fixedAsset.model";
 import FinancialEntry from "../models/financialEntry.model";
+import SalaryDraft from "../models/salary.model";
+import LubricantPurchase from "../models/lubricant-purchase.model";
 
 // Helper function to check if populated field is an object
 const isPopulated = (field: any): field is { _id: any; firstName?: string; lastName?: string; email?: string } => {
@@ -61,6 +63,13 @@ const getDateRange = (duration: string = "today") => {
       startDate.setHours(0, 0, 0, 0);
       endDate = new Date(lastQuarterYear, lastQuarterMonth + 3, 0);
       endDate.setHours(23, 59, 59, 999);
+      break;
+    case "last3months":
+      // Rolling 3 months: first day of 2 months ago → today (includes current month)
+      endDate = new Date(now);
+      endDate.setHours(23, 59, 59, 999);
+      startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      startDate.setHours(0, 0, 0, 0);
       break;
     case "thisyear":
       startDate = new Date(now.getFullYear(), 0, 1);
@@ -1525,7 +1534,7 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ message: "Station ID is required" });
     }
 
-    const { duration = "lastquarter" } = req.query;
+    const { duration = "last3months" } = req.query;
     const { startDate, endDate } = getDateRange(duration as string);
 
     // Calculate total revenue
@@ -1722,7 +1731,13 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
     const totalRevenue = totalFuelRevenue + totalLubricantSales; // combined for percentages
     const otherSales = 0;
 
-    // Fuel income breakdown by type
+    // All fuel types registered at this station (source of truth for what we sell)
+    const tankDoc = await Tank.findOne({ fillingStation: new Types.ObjectId(stationId) }).lean() as any;
+    const knownFuelTypes: string[] = tankDoc
+      ? ([...new Set((tankDoc.tanks as any[]).map((t: any) => t.fuelType).filter(Boolean))] as string[])
+      : [];
+
+    // Fuel income breakdown by type (only completed shifts in period)
     const fuelBreakdown = await Shift.aggregate([
       {
         $match: {
@@ -1741,15 +1756,30 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
       },
     ]).exec();
 
-    const totalFuelSales = fuelBreakdown.reduce((sum, item) => sum + Number(item.totalRevenue || 0), 0) || totalFuelRevenue;
+    const totalFuelSales = fuelBreakdown.reduce((sum: number, item: any) => sum + Number(item.totalRevenue || 0), 0) || totalFuelRevenue;
 
-    const fuelIncomeReport = fuelBreakdown.map((item) => ({
-      fuelType: item._id || "Unknown",
-      litresSold: Number(item.litresSold || 0),
-      pricePerLtr: Number(item.avgPricePerLtr || 0),
-      totalRevenue: Number(item.totalRevenue || 0),
-      percentageOfTotalSales: totalRevenue > 0 ? ((Number(item.totalRevenue || 0) / totalRevenue) * 100).toFixed(2) : "0.00",
-    }));
+    // Build a lookup map: fuelType → aggregated sales row
+    const salesByType: Record<string, any> = {};
+    fuelBreakdown.forEach((item: any) => {
+      if (item._id) salesByType[item._id] = item;
+    });
+
+    // Always include all registered types (even if no sales this period)
+    const typesToShow = knownFuelTypes.length > 0 ? knownFuelTypes : Object.keys(salesByType);
+
+    const fuelIncomeReport = typesToShow.map((fuelType) => {
+      const sales = salesByType[fuelType];
+      return {
+        fuelType,
+        litresSold: Number(sales?.litresSold || 0),
+        pricePerLtr: Number(sales?.avgPricePerLtr || 0),
+        totalRevenue: Number(sales?.totalRevenue || 0),
+        percentageOfTotalSales:
+          totalRevenue > 0
+            ? ((Number(sales?.totalRevenue || 0) / totalRevenue) * 100).toFixed(2)
+            : "0.00",
+      };
+    });
 
     // Lubricant income breakdown
     const lubricantBreakdown = await LubricantSale.aggregate([
@@ -1806,6 +1836,260 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
     });
   } catch (error: any) {
     console.error("Error fetching income report:", error);
+    return res.status(500).json({ message: error.message || "Internal server error" });
+  }
+};
+
+/**
+ * GET /api/accountant/tax-report
+ * Full tax-ready report — VAT, PAYE (real salary draft data), CIT, Education Tax
+ */
+export const getTaxReport = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    if (!stationId) {
+      return res.status(400).json({ message: "Station ID is required" });
+    }
+
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "startDate and endDate are required" });
+    }
+
+    const start = new Date(startDate as string);
+    const end   = new Date(endDate as string);
+    end.setHours(23, 59, 59, 999);
+
+    // Derive salary month from startDate using UTC methods so the result is
+    // independent of the server's local timezone (date strings like "2026-05-01"
+    // are parsed as UTC midnight by the Date constructor).
+    const monthStr = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
+    const stId = new Types.ObjectId(stationId);
+
+    // ── 1. Revenue ───────────────────────────────────────────────────────────
+    const fuelByProduct = await Shift.aggregate([
+      { $match: { fillingStation: stId, shiftDate: { $gte: start, $lte: end }, status: "Completed" } },
+      { $group: { _id: { $toUpper: "$product" }, revenue: { $sum: "$totalAmount" }, litres: { $sum: "$litresSold" } } },
+    ]).exec();
+
+    const revenueMap: Record<string, number> = {};
+    const litresMap:  Record<string, number> = {};
+    fuelByProduct.forEach((r: any) => {
+      revenueMap[r._id] = Number(r.revenue || 0);
+      litresMap[r._id]  = Number(r.litres  || 0);
+    });
+
+    const pmsRevenue  = revenueMap["PMS"]  || revenueMap["PETROL"]   || 0;
+    const agoRevenue  = revenueMap["AGO"]  || revenueMap["DIESEL"]   || 0;
+    const dpkRevenue  = revenueMap["DPK"]  || revenueMap["KEROSENE"] || 0;
+    const totalFuelRevenue = Object.values(revenueMap).reduce((s, v) => s + v, 0);
+
+    const lubRevAgg = await LubricantSale.aggregate([
+      { $match: { fillingStation: stId, createdAt: { $gte: start, $lte: end } } },
+      { $group: { _id: null, revenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+    ]).exec();
+    const lubricantRevenue = Number(lubRevAgg[0]?.revenue || 0);
+    const totalRevenue     = totalFuelRevenue + lubricantRevenue;
+
+    // PMS & DPK are VAT-exempt; AGO and lubricants are taxable
+    const vatTaxableRevenue = agoRevenue + lubricantRevenue;
+    const vatExemptRevenue  = pmsRevenue + dpkRevenue;
+
+    // ── 2. Procurement costs ─────────────────────────────────────────────────
+    const fuelProcAgg = await Delivery.aggregate([
+      { $match: { fillingStation: stId, status: "Completed", deliveryDate: { $gte: start, $lte: end } } },
+      { $group: { _id: null, total: { $sum: { $multiply: ["$quantity", "$pricePerLtr"] } } } },
+    ]).exec();
+    const fuelProcurementCost = Number(fuelProcAgg[0]?.total || 0);
+
+    const lubProcAgg = await LubricantPurchase.aggregate([
+      { $match: { fillingStation: stId, createdAt: { $gte: start, $lte: end } } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+    ]).exec();
+    const lubricantPurchaseCost = Number(lubProcAgg[0]?.total || 0);
+
+    // ── 3. VAT ───────────────────────────────────────────────────────────────
+    const VAT_RATE  = 7.5;
+    // Output VAT: extracted from VAT-inclusive taxable revenue
+    const outputVAT = (vatTaxableRevenue * VAT_RATE) / (100 + VAT_RATE);
+
+    // Input VAT source 1: lubricant purchase invoices (computed from purchase cost)
+    const inputVATFromLubPurchases = (lubricantPurchaseCost * VAT_RATE) / (100 + VAT_RATE);
+
+    // Input VAT source 2: vatAmount recorded on approved expense records
+    const expVATAgg = await Expense.aggregate([
+      { $match: { fillingStation: stId, status: "Approved", expenseDate: { $gte: start, $lte: end } } },
+      { $group: { _id: null, totalVAT: { $sum: "$vatAmount" } } },
+    ]).exec();
+    const inputVATFromExpenses = Number(expVATAgg[0]?.totalVAT || 0);
+
+    const inputVAT      = inputVATFromLubPurchases + inputVATFromExpenses;
+    const netVATPayable = Math.max(0, outputVAT - inputVAT);
+
+    // ── 4. Expenses by category ──────────────────────────────────────────────
+    const expAgg = await Expense.aggregate([
+      { $match: { fillingStation: stId, status: "Approved", expenseDate: { $gte: start, $lte: end } } },
+      { $group: { _id: "$category", total: { $sum: "$amount" } } },
+    ]).exec();
+
+    const expMap: Record<string, number> = {};
+    expAgg.forEach((e: any) => { expMap[e._id] = Number(e.total || 0); });
+
+    const expSalaries       = expMap["Salaries"]            || 0;
+    const expMaintenance    = expMap["Maintenance & Repair"] || 0;
+    const expUtilities      = expMap["Utilities"]            || 0;
+    const expOperational    = expMap["Operational"]          || 0;
+    const expAdminAndOther  = (expMap["Administrative"] || 0) + (expMap["Other Expenses"] || 0);
+    const expDepreciation   = expMap["Depreciation"]         || 0;
+    const totalExpenses     = Object.values(expMap).reduce((s, v) => s + v, 0);
+
+    // ── 5. PAYE — real data from SalaryDraft ─────────────────────────────────
+    const salaryDraft = await SalaryDraft.findOne({ station: stId, month: monthStr }).lean() as any;
+
+    type PayeSource = "salary_draft" | "estimate";
+    let payeSource: PayeSource = "estimate";
+    let totalGrossSalary  = 0;
+    let totalPAYEDeducted = 0;
+    const staffBreakdown: any[] = [];
+
+    const pensionEnabled: boolean = salaryDraft?.pensionEnabled !== false; // default true for legacy drafts
+
+    if (salaryDraft?.entries?.length) {
+      payeSource = "salary_draft";
+      (salaryDraft.entries as any[]).forEach((entry) => {
+        totalGrossSalary  += Number(entry.basicSalary || 0);
+        totalPAYEDeducted += Number(entry.taxAmount   || 0);
+        staffBreakdown.push({
+          name:            `${entry.firstName} ${entry.lastName}`,
+          role:            entry.role,
+          basicSalary:     Number(entry.basicSalary     || 0),
+          bonus:           Number(entry.totalBonus      || 0),
+          taxAmount:       Number(entry.taxAmount       || 0),
+          employeePension: Number(entry.employeePension || 0),
+          employerPension: Number(entry.employerPension || 0),
+          salaryToPay:     Number(entry.salaryToPay     || 0),
+        });
+      });
+    } else {
+      // No salary draft yet — estimate from approved salary expense
+      totalGrossSalary  = expSalaries;
+      totalPAYEDeducted = expSalaries * 0.15;
+    }
+
+    // Pension: use per-entry stored values when available (draft exists), else compute from gross
+    let employeePension: number;
+    let employerPension: number;
+    if (salaryDraft?.entries?.length) {
+      employeePension = staffBreakdown.reduce((s: number, e: any) => s + (e.employeePension || 0), 0);
+      employerPension = staffBreakdown.reduce((s: number, e: any) => s + (e.employerPension || 0), 0);
+    } else {
+      employeePension = pensionEnabled ? totalGrossSalary * 0.08 : 0;
+      employerPension = pensionEnabled ? totalGrossSalary * 0.10 : 0;
+    }
+    const totalPension = employeePension + employerPension;
+
+    // ── 6. CIT & Education Tax ────────────────────────────────────────────────
+    const totalCOGS        = fuelProcurementCost + lubricantPurchaseCost;
+    const grossProfit      = totalRevenue - totalCOGS;
+    const operatingProfit  = grossProfit - totalExpenses;
+    const netProfit        = operatingProfit;
+    const assessableProfit = Math.max(0, netProfit);
+
+    const CIT_RATE      = 30;
+    const EDU_TAX_RATE  = 2.5;
+    const companyIncomeTax  = assessableProfit * (CIT_RATE / 100);
+    const educationTax      = assessableProfit * (EDU_TAX_RATE / 100);
+    const totalCITLiability = companyIncomeTax + educationTax;
+
+    // ── 7. Grand total ───────────────────────────────────────────────────────
+    const totalTaxLiability = netVATPayable + totalPAYEDeducted + totalCITLiability;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        period: { startDate: start, endDate: end, month: monthStr },
+
+        revenue: {
+          pmsRevenue,
+          agoRevenue,
+          dpkRevenue,
+          lubricantRevenue,
+          totalFuelRevenue,
+          totalRevenue,
+          vatTaxableRevenue,
+          vatExemptRevenue,
+          byProduct: fuelByProduct.map((r: any) => ({
+            product: r._id,
+            revenue: Number(r.revenue || 0),
+            litres:  Number(r.litres  || 0),
+          })),
+        },
+
+        procurement: {
+          fuelProcurementCost,
+          lubricantPurchaseCost,
+          totalProcurementCost: fuelProcurementCost + lubricantPurchaseCost,
+        },
+
+        vat: {
+          rate: VAT_RATE,
+          taxableRevenue: vatTaxableRevenue,
+          exemptRevenue:  vatExemptRevenue,
+          outputVAT,
+          inputVATFromLubPurchases,
+          inputVATFromExpenses,
+          inputVAT,
+          netVATPayable,
+        },
+
+        expenses: {
+          salaries:      expSalaries,
+          maintenance:   expMaintenance,
+          utilities:     expUtilities,
+          operational:   expOperational,
+          adminAndOther: expAdminAndOther,
+          depreciation:  expDepreciation,
+          totalExpenses,
+        },
+
+        paye: {
+          source:           payeSource,
+          month:            monthStr,
+          draftStatus:      salaryDraft?.status || null,
+          pensionEnabled,
+          totalGrossSalary,
+          totalPAYEDeducted,
+          employeePension,
+          employerPension,
+          totalPension,
+          staffBreakdown,
+        },
+
+        cit: {
+          totalRevenue,
+          totalCOGS,
+          grossProfit,
+          totalExpenses,
+          netProfit,
+          assessableProfit,
+          citRate:         CIT_RATE,
+          companyIncomeTax,
+          educationTaxRate: EDU_TAX_RATE,
+          educationTax,
+          totalCITLiability,
+        },
+
+        summary: {
+          netVATPayable,
+          totalPAYEDeducted,
+          totalPension,
+          totalCITLiability,
+          totalTaxLiability,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("Error fetching tax report:", error);
     return res.status(500).json({ message: error.message || "Internal server error" });
   }
 };

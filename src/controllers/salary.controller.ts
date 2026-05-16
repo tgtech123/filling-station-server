@@ -35,8 +35,8 @@ const buildBonusMap = (structures: any[]): Map<string, number> => {
   return map;
 };
 
-// Recalculate derived amounts — bonus amounts are now stored directly, not as % of basic
-const recalcEntry = (e: Partial<ISalaryEntry>): Partial<ISalaryEntry> => {
+// Recalculate derived amounts — pension is applied only when pensionEnabled = true
+const recalcEntry = (e: Partial<ISalaryEntry>, pensionEnabled = true): Partial<ISalaryEntry> => {
   const basic = Number(e.basicSalary) || 0;
   const ba = e.bonusAmounts ?? { monthlySalesTarget: 0, zeroDiscrepancies: 0, topPerformer: 0 };
 
@@ -45,15 +45,19 @@ const recalcEntry = (e: Partial<ISalaryEntry>): Partial<ISalaryEntry> => {
   const tp  = Number(ba.topPerformer)       || 0;
   const totalBonus = mst + zd + tp;
 
-  const taxAmount  = Math.round(basic * (Number(e.taxPercentage) || 0) / 100);
-  const shortage   = Number(e.shortage) || 0;
-  const salaryToPay = Math.max(0, basic + totalBonus - taxAmount - shortage);
+  const taxAmount       = Math.round(basic * (Number(e.taxPercentage) || 0) / 100);
+  const shortage        = Number(e.shortage) || 0;
+  const employeePension = pensionEnabled ? Math.round(basic * 0.08) : 0;
+  const employerPension = pensionEnabled ? Math.round(basic * 0.10) : 0;
+  const salaryToPay     = Math.max(0, basic + totalBonus - taxAmount - employeePension - shortage);
 
   return {
     ...e,
     bonusAmounts: { monthlySalesTarget: mst, zeroDiscrepancies: zd, topPerformer: tp },
     totalBonus,
     taxAmount,
+    employeePension,
+    employerPension,
     salaryToPay,
   };
 };
@@ -62,7 +66,8 @@ const recalcEntry = (e: Partial<ISalaryEntry>): Partial<ISalaryEntry> => {
 const buildFreshEntry = (
   s: any,
   structureByRole: Map<string, any>,
-  bonusMap: Map<string, number>
+  bonusMap: Map<string, number>,
+  pensionEnabled = true,
 ): Partial<ISalaryEntry> => {
   const base: Partial<ISalaryEntry> = {
     staff: s._id as mongoose.Types.ObjectId,
@@ -81,11 +86,13 @@ const buildFreshEntry = (
     totalBonus: 0,
     taxPercentage: 0,
     taxAmount: 0,
+    employeePension: 0,
+    employerPension: 0,
     shortage: 0,
     salaryToPay: s.amount ?? 0,
     bankDetails: { acctNo: "", acctName: "", bankName: "" },
   };
-  return recalcEntry(base);
+  return recalcEntry(base, pensionEnabled);
 };
 
 // Resolve caller's full name — prefer token fields, fall back to DB
@@ -125,7 +132,7 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
       const structureByRole = new Map(structures.map((s) => [s.role, s]));
       const bonusMap = buildBonusMap(bonusStructures);
 
-      const entries = staffList.map((s) => buildFreshEntry(s, structureByRole, bonusMap));
+      const entries = staffList.map((s) => buildFreshEntry(s, structureByRole, bonusMap, true));
 
       const preparedByName = await resolveFullName(userId, firstName, lastName);
 
@@ -133,6 +140,7 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
         station: stationOid,
         month,
         entries,
+        pensionEnabled: true,
         status: "draft",
         preparedBy: new mongoose.Types.ObjectId(userId),
         preparedByName,
@@ -206,9 +214,11 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
           // placeholders — will be recalculated by recalcEntry
           totalBonus: 0,
           taxAmount:  0,
+          employeePension: 0,
+          employerPension: 0,
           salaryToPay: 0,
         };
-        return recalcEntry(merged);
+        return recalcEntry(merged, draft.pensionEnabled);
       });
 
     // Detect if any staff were removed (length changed)
@@ -224,7 +234,7 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
       ]);
       const structureByRole = new Map(structures.map((s) => [s.role, s]));
       const bonusMap = buildBonusMap(bonusStructures);
-      newStaff.forEach((s) => syncedEntries.push(buildFreshEntry(s, structureByRole, bonusMap)));
+      newStaff.forEach((s) => syncedEntries.push(buildFreshEntry(s, structureByRole, bonusMap, draft.pensionEnabled)));
     }
 
     if (modified) {
@@ -244,7 +254,7 @@ export const saveDraft = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { station } = req.user!;
-    const { entries } = req.body as { entries: Partial<ISalaryEntry>[] };
+    const { entries, pensionEnabled } = req.body as { entries: Partial<ISalaryEntry>[]; pensionEnabled?: boolean };
 
     if (!Array.isArray(entries)) {
       return res.status(400).json({ message: "entries array is required" });
@@ -260,7 +270,10 @@ export const saveDraft = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ message: "Cannot edit a submitted or validated draft" });
     }
 
-    draft.entries = entries.map(recalcEntry) as typeof draft.entries;
+    // Persist pension toggle if provided; keep existing value otherwise
+    const pension = pensionEnabled !== undefined ? pensionEnabled : draft.pensionEnabled;
+    draft.pensionEnabled = pension;
+    draft.entries = entries.map((e) => recalcEntry(e, pension)) as typeof draft.entries;
     await draft.save();
 
     return res.status(200).json({ success: true, data: draft });

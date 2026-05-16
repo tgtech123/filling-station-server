@@ -6,7 +6,8 @@ export interface IExpense extends Document {
   expId: string; // e.g., "#exp1232"
   category: "Product purchase" | "Maintenance & Repair" | "Salaries" | "Operational" | "Utilities" | "Administrative" | "Depreciation" | "Other Expenses";
   description: string;
-  amount: number;
+  amount: number;       // net pre-VAT amount (e.g. ₦100,000)
+  vatAmount?: number;   // VAT portion on this invoice (e.g. ₦7,500) — claimable as input VAT
   submittedBy: mongoose.Types.ObjectId; // reference to Staff
   status: "Pending" | "Approved" | "Rejected";
   expenseDate: Date; // date when expense occurred
@@ -50,6 +51,11 @@ const ExpenseSchema = new Schema<IExpense>(
     amount: {
       type: Number,
       required: true,
+      min: 0,
+    },
+    vatAmount: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     submittedBy: {

@@ -10,6 +10,7 @@ import {
   getKeyRatios,
   getProfitLoss,
   getIncomeReport,
+  getTaxReport,
 } from "../controllers/accountant.controller";
 
 const router = express.Router();
@@ -33,5 +34,6 @@ router.get("/financial-statement/key-ratios", getKeyRatios);
 // Reports
 router.get("/profit-loss", getProfitLoss);
 router.get("/income", getIncomeReport);
+router.get("/tax-report", getTaxReport);
 
 export default router;

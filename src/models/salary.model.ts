@@ -18,6 +18,8 @@ export interface ISalaryEntry {
   totalBonus: number;
   taxPercentage: number;
   taxAmount: number;
+  employeePension: number; // 8% of basic when pension enabled, else 0
+  employerPension: number; // 10% of basic when pension enabled, else 0
   shortage: number;
   salaryToPay: number;
   bankDetails: {
@@ -39,6 +41,7 @@ export interface ISalaryDraft extends Document {
   validatedBy?: mongoose.Types.ObjectId;
   validatedByName?: string;
   validatedAt?: Date;
+  pensionEnabled: boolean;              // company-level toggle — persisted with the draft
   expenseRef?: mongoose.Types.ObjectId; // auto-created expense on validation
   totalPayroll?: number;                // cached at validation time
   createdAt?: Date;
@@ -63,6 +66,8 @@ const salaryEntrySchema = new Schema<ISalaryEntry>(
     totalBonus: { type: Number, default: 0 },
     taxPercentage: { type: Number, default: 0 },
     taxAmount: { type: Number, default: 0 },
+    employeePension: { type: Number, default: 0 },
+    employerPension: { type: Number, default: 0 },
     shortage: { type: Number, default: 0 },
     salaryToPay: { type: Number, default: 0 },
     bankDetails: {
@@ -90,6 +95,7 @@ const salaryDraftSchema = new Schema<ISalaryDraft>(
     validatedBy: { type: Schema.Types.ObjectId, ref: "Staff" },
     validatedByName: { type: String },
     validatedAt: { type: Date },
+    pensionEnabled: { type: Boolean, default: true },
     expenseRef: { type: Schema.Types.ObjectId, ref: "Expense" },
     totalPayroll: { type: Number, default: 0 },
   },

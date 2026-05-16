@@ -113,7 +113,7 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const { category, description, amount, expenseDate } = req.body;
+    const { category, description, amount, vatAmount, expenseDate } = req.body;
 
     // Validate required fields
     if (!category || !description || !amount) {
@@ -144,6 +144,11 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ error: "Amount must be a positive number" });
     }
 
+    const vatAmountNum = vatAmount ? Number(vatAmount) : 0;
+    if (isNaN(vatAmountNum) || vatAmountNum < 0) {
+      return res.status(400).json({ error: "VAT amount must be zero or a positive number" });
+    }
+
     // Validate expense date or use current date
     const date = expenseDate ? new Date(expenseDate) : new Date();
 
@@ -153,6 +158,7 @@ export const createExpense = async (req: AuthenticatedRequest, res: Response) =>
       category,
       description: description.trim(),
       amount: amountNum,
+      vatAmount: vatAmountNum,
       submittedBy: new Types.ObjectId(staffId),
       status: "Pending",
       expenseDate: date,
@@ -189,7 +195,7 @@ export const updateExpense = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     const expenseId = req.params.id;
-    const { status, category, description, amount, expenseDate, rejectionReason } = req.body;
+    const { status, category, description, amount, vatAmount, expenseDate, rejectionReason } = req.body;
 
     // Validate expense ID
     if (!Types.ObjectId.isValid(expenseId)) {
@@ -259,6 +265,13 @@ export const updateExpense = async (req: AuthenticatedRequest, res: Response) =>
         const amountNum = Number(amount);
         if (!isNaN(amountNum) && amountNum > 0) {
           expense.amount = amountNum;
+        }
+      }
+
+      if (vatAmount !== undefined) {
+        const vatNum = Number(vatAmount);
+        if (!isNaN(vatNum) && vatNum >= 0) {
+          (expense as any).vatAmount = vatNum;
         }
       }
 
