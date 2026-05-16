@@ -8,6 +8,7 @@ import {
   getSalesAndCashReport,
 } from "../controllers/managerReports.controller";
 import { getActivityLogs } from "../controllers/supervisor.controller";
+import { getTaxReport } from "../controllers/accountant.controller";
 
 const router = express.Router();
 
@@ -20,6 +21,9 @@ router.get("/reports/sales-overview", getSalesOverview);
 router.get("/reports/cash-overview", getCashOverview);
 router.get("/reports/sales-and-cash", getSalesAndCashReport);
 router.post("/reports/export", exportReport);
+
+// Tax report (read-only view of accountant-computed data)
+router.get("/tax-report", getTaxReport);
 
 // Activity Logs
 router.get("/activity-logs", getActivityLogs);

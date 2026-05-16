@@ -662,83 +662,85 @@ export const getPaymentHistory = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ message: "Station ID is required" });
     }
 
-    const {
-      page = 1,
-      limit = 10,
-      search,
-      status,
-      startDate,
-      endDate,
-      month,
-      year,
-    } = req.query;
+    const { page = 1, limit = 10, search, status, month, year } = req.query;
 
-    const skip = (Number(page) - 1) * Number(limit);
+    const skip     = (Number(page) - 1) * Number(limit);
     const limitNum = Number(limit);
 
-    // Build match filter
-    const matchFilter: any = {
-      fillingStation: new Types.ObjectId(stationId),
-    };
-
-    if (status) {
-      matchFilter.status = status;
-    }
-
+    // ── Base match filter ────────────────────────────────────────────────────
+    const matchFilter: any = { fillingStation: new Types.ObjectId(stationId) };
+    if (status)      matchFilter.status           = status;
     if (month && year) {
       matchFilter["period.month"] = Number(month);
-      matchFilter["period.year"] = Number(year);
+      matchFilter["period.year"]  = Number(year);
     }
 
-    // Get payments with populated staff
-    let payments = await CommissionPayment.find(matchFilter)
-      .populate("staff", "firstName lastName role")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum)
-      .lean();
+    // ── Aggregation pipeline — joins staff so search runs at DB level ────────
+    const basePipeline: any[] = [
+      { $match: matchFilter },
+      {
+        $lookup: {
+          from: "staffs",
+          localField: "staff",
+          foreignField: "_id",
+          as: "staffDoc",
+        },
+      },
+      { $unwind: { path: "$staffDoc", preserveNullAndEmptyArrays: true } },
+    ];
 
-    // Filter by search term (staff name)
     if (search) {
-      const searchLower = (search as string).toLowerCase();
-      payments = payments.filter((payment: any) => {
-        const staff = payment.staff as any;
-        const staffName = staff
-          ? `${staff.firstName} ${staff.lastName}`.toLowerCase()
-          : "";
-        return staffName.includes(searchLower);
+      const regex = new RegExp(search as string, "i");
+      basePipeline.push({
+        $match: {
+          $or: [
+            { "staffDoc.firstName": { $regex: regex } },
+            { "staffDoc.lastName":  { $regex: regex } },
+            { "staffDoc.role":      { $regex: regex } },
+          ],
+        },
       });
     }
 
-    // Format response
-    const formattedPayments = payments.map((payment: any) => {
-      const staff = payment.staff as any;
-      return {
-        _id: payment._id,
-        staffName: staff ? `${staff.firstName} ${staff.lastName}` : "Unknown",
-        role: staff?.role || "Unknown",
-        sales: payment.sales,
-        commissionPercent: `${payment.commissionRate}%`,
-        commissionAmount: payment.commissionAmount,
-        bonus: payment.bonus,
-        totalEarnings: payment.totalEarnings,
-        status: payment.status,
-        period: payment.period,
-        paidAt: payment.paidAt,
-      };
-    });
+    // Total count on filtered set
+    const [countResult] = await CommissionPayment.aggregate([
+      ...basePipeline,
+      { $count: "total" },
+    ]).exec();
+    const total = countResult?.total || 0;
 
-    // Get total count
-    const total = await CommissionPayment.countDocuments(matchFilter);
+    // Paginated results
+    const payments = await CommissionPayment.aggregate([
+      ...basePipeline,
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limitNum },
+    ]).exec();
+
+    const formattedPayments = payments.map((payment: any) => ({
+      _id:              payment._id,
+      staffName:        payment.staffDoc
+                          ? `${payment.staffDoc.firstName} ${payment.staffDoc.lastName}`
+                          : "Unknown",
+      role:             payment.staffDoc?.role || "Unknown",
+      sales:            payment.sales,
+      commissionPercent:`${payment.commissionRate}%`,
+      commissionAmount: payment.commissionAmount,
+      bonus:            payment.bonus,
+      totalEarnings:    payment.totalEarnings,
+      status:           payment.status,
+      period:           payment.period,
+      paidAt:           payment.paidAt,
+    }));
 
     return res.status(200).json({
       success: true,
       data: {
         payments: formattedPayments,
         pagination: {
-          page: Number(page),
+          page:  Number(page),
           limit: limitNum,
-          total: formattedPayments.length,
+          total,
           pages: Math.ceil(total / limitNum),
         },
       },

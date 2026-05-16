@@ -43,7 +43,9 @@ const FixedAssetSchema = new Schema<IFixedAsset>(
 
 FixedAssetSchema.index({ fillingStation: 1, category: 1 });
 
-// Compute net book value as of a given date (defaults to now)
+// Compute net book value as of a given date (defaults to now).
+// Depreciation is charged per completed calendar month — the figure only
+// changes when a new month begins, not every time the function is called.
 export function calcNetBookValue(
   purchasePrice: number,
   purchaseDate: Date,
@@ -51,17 +53,23 @@ export function calcNetBookValue(
   method: DepreciationMethod,
   asOf: Date = new Date()
 ): { accumulated: number; netBookValue: number } {
-  const msPerYear = 1000 * 60 * 60 * 24 * 365.25;
-  const yearsOwned = Math.max(0, (asOf.getTime() - purchaseDate.getTime()) / msPerYear);
+  // Count whole months elapsed (year × 12 + month difference)
+  const monthsElapsed = Math.max(
+    0,
+    (asOf.getFullYear() - purchaseDate.getFullYear()) * 12 +
+      (asOf.getMonth() - purchaseDate.getMonth())
+  );
+  // Express as fractional years based on completed months only
+  const yearsOwned = monthsElapsed / 12;
 
   let accumulated = 0;
   if (method === "Straight-line") {
     const annual = purchasePrice / usefulLifeYears;
     accumulated = Math.min(annual * yearsOwned, purchasePrice);
   } else {
-    // Declining balance: rate = 2 / usefulLifeYears
-    const rate = 2 / usefulLifeYears;
-    accumulated = purchasePrice * (1 - Math.pow(1 - rate, yearsOwned));
+    // Declining balance: rate = 2 / usefulLifeYears (monthly compounding)
+    const monthlyRate = (2 / usefulLifeYears) / 12;
+    accumulated = purchasePrice * (1 - Math.pow(1 - monthlyRate, monthsElapsed));
     accumulated = Math.min(accumulated, purchasePrice);
   }
 

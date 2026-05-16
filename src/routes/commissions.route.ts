@@ -35,10 +35,10 @@ router.put("/bonus-structure", checkRole("manager"), updateBonusStructure);
 // Payment History - accessible to manager, accountant
 router.get("/payment-history", checkRole("manager", "accountant"), getPaymentHistory);
 
-// Calculate Commissions - only manager
-router.post("/calculate", checkRole("manager"), calculateCommissions);
+// Calculate Commissions - manager or accountant
+router.post("/calculate", checkRole("manager", "accountant"), calculateCommissions);
 
-// Mark Payment as Paid - only manager
-router.put("/payment/:id/mark-paid", checkRole("manager"), markPaymentAsPaid);
+// Mark Payment as Paid - manager or accountant
+router.put("/payment/:id/mark-paid", checkRole("manager", "accountant"), markPaymentAsPaid);
 
 export default router;
