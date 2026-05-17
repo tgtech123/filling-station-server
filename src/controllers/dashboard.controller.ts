@@ -216,12 +216,23 @@ export const getFuelManagement = async (req: AuthenticatedRequest, res: Response
       ? tankDoc.tanks.reduce((sum: number, t: any) => sum + (Number(t.currentQuantity) || 0), 0)
       : 0;
 
+    const capacityByFuelType: { fuelType: string; currentQuantity: number }[] = tankDoc
+      ? Object.entries(
+          tankDoc.tanks.reduce((acc: Record<string, number>, t: any) => {
+            const ft = t.fuelType || "Unknown";
+            acc[ft] = (acc[ft] || 0) + (Number(t.currentQuantity) || 0);
+            return acc;
+          }, {})
+        ).map(([fuelType, currentQuantity]) => ({ fuelType, currentQuantity }))
+      : [];
+
     const response = {
       message: "Fuel management data retrieved successfully",
       data: {
         dailyConsumption,
         weeklyAverageConsumption,
         totalCapacityAvailable,
+        capacityByFuelType,
       },
     };
     await setCache(cacheKey, response, 300);
