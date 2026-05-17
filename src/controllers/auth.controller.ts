@@ -236,7 +236,7 @@ export const loginStaff = async (
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       let redisAvailable = false;
       try {
-        await redis.setex(`otp:${staff._id}`, 300, otp);
+        await redis.set(`otp:${staff._id}`, otp, { ex: 300 });
         redisAvailable = true;
       } catch (redisErr: any) {
         console.warn("Redis unavailable — skipping 2FA and issuing JWT directly:", redisErr.message);
