@@ -1,31 +1,13 @@
-import Redis from "ioredis";
+import { Redis } from "@upstash/redis";
 
 const redis = new Redis({
-  host: process.env.REDIS_HOST || "localhost",
-  port: Number(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  // Connect eagerly so the connection is ready before the first command
-  lazyConnect: false,
-  // Keep retrying on disconnect — never give up permanently
-  retryStrategy: (times) => Math.min(times * 300, 5000),
-  // Fail individual commands immediately when the socket is closed
-  // rather than queuing them and potentially hanging login requests
-  enableOfflineQueue: false,
-  maxRetriesPerRequest: 0,
-});
-
-redis.on("connect", () => {
-  console.log("✅ Redis connected");
-});
-
-redis.on("error", (err) => {
-  console.warn("⚠️ Redis error:", err.message);
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
 export const getCache = async (key: string): Promise<any | null> => {
   try {
-    const data = await redis.get(key);
-    return data ? JSON.parse(data) : null;
+    return await redis.get(key);
   } catch {
     return null;
   }
@@ -37,7 +19,7 @@ export const setCache = async (
   ttlSeconds: number = 300
 ): Promise<void> => {
   try {
-    await redis.setex(key, ttlSeconds, JSON.stringify(data));
+    await redis.set(key, data, { ex: ttlSeconds });
   } catch {
     // Fail silently
   }
