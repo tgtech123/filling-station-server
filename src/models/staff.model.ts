@@ -34,6 +34,8 @@ export interface IStaff extends Document {
   };
   managedStations: mongoose.Types.ObjectId[];
   isSuperManager: boolean;
+  gasStation: boolean;
+  department: "fuel" | "gas" | "both";
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -83,6 +85,8 @@ const StaffSchema = new Schema<IStaff>(
     },
     managedStations: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
     isSuperManager: { type: Boolean, default: false },
+    gasStation: { type: Boolean, default: false },
+    department: { type: String, enum: ["fuel", "gas", "both"], default: "fuel" },
   },
   { timestamps: true }
 );

@@ -37,6 +37,8 @@ import procurementRoutes from "./routes/procurement.route";
 import salaryRoutes from "./routes/salary.route";
 import fixedAssetRoutes from "./routes/fixedAsset.route";
 import financialEntryRoutes from "./routes/financialEntry.route";
+import gasRoutes from "./routes/gas.route";
+import gasPublicRoutes from "./routes/gasPublic.route";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -247,6 +249,8 @@ app.use("/api/procurement", procurementRoutes);
 app.use("/api/salary", salaryRoutes);
 app.use("/api/fixed-assets", fixedAssetRoutes);
 app.use("/api/financial-entries", financialEntryRoutes);
+app.use("/api/gas", gasRoutes);
+app.use("/api/gas-public", gasPublicRoutes);
 
 // ── Health check 
 app.get("/api/health", (_, res) => {
