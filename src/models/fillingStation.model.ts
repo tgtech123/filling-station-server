@@ -41,6 +41,7 @@ export interface IFillingStation extends Document {
   parentStation: mongoose.Types.ObjectId | null;
   branches: mongoose.Types.ObjectId[];
   isSuperManager: boolean;
+  gasEnabled: boolean;           // master switch — disables/freezes entire gas department
   gasStationCode?: string;
   gasBankName?: string;
   gasBankAccount?: string;
@@ -111,6 +112,7 @@ const FillingStationSchema = new Schema<IFillingStation>(
     },
     branches: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
     isSuperManager: { type: Boolean, default: false },
+    gasEnabled:               { type: Boolean, default: true },
     gasStationCode:           { type: String, trim: true, uppercase: true },
     gasBankName:              { type: String, trim: true },
     gasBankAccount:           { type: String, trim: true },

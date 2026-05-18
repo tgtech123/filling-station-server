@@ -3,6 +3,7 @@ import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
 
 import {
+  getGasStatus, toggleGasDepartment,
   getCurrentPricing, getPricingHistory, setPrice,
   getCylinderSizes, addCylinderSize, toggleCylinderSize,
   updateGasSettings, getInventory, getLoyaltyConfig,
@@ -10,6 +11,7 @@ import {
   listPumps, addPump, updatePump,
   getGasStaff, assignGasStaff, unassignGasStaff,
 } from "../controllers/gasSettings.controller";
+import { requireGasEnabled } from "../middlewares/gasEnabled.middleware";
 import {
   createProcurement, listProcurements, getProcurement,
   confirmDelivery, validateProcurement, cancelProcurement, resendOrderEmail,
@@ -39,6 +41,13 @@ const mgrOrAcct  = checkRole("manager", "admin", "accountant");
 const cashier    = checkRole("cashier");
 const attendant  = checkRole("attendant");
 const allGas     = checkRole("manager", "admin", "accountant", "cashier", "attendant");
+
+// ─── Gas department status + toggle (bypass gasEnabled check) ────────────────
+router.get("/status",  allGas, getGasStatus);
+router.patch("/toggle", mgr,   toggleGasDepartment);
+
+// ─── All routes below require gas to be enabled ──────────────────────────────
+router.use(requireGasEnabled);
 
 // ─── Settings & Pricing ─────────────────────────────────────────────────────
 router.get("/pricing",         mgrOrAcct, getCurrentPricing);
