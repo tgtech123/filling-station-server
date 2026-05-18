@@ -73,7 +73,7 @@ export const addPump = async (req: AuthenticatedRequest, res: Response) => {
         title: newTitle,
         pricePerLtr: priceNum,
         startDate: new Date(startDate),
-        status: "Idle",
+        status: "Active",
         dailyLtrSales: [],
       } as any;
 
@@ -102,7 +102,7 @@ export const addPump = async (req: AuthenticatedRequest, res: Response) => {
       title: newTitle,
       pricePerLtr: priceNum,
       startDate: new Date(startDate),
-      status: "Idle",
+      status: "Active",
       dailyLtrSales: [],
     } as any;
 

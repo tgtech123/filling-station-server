@@ -36,7 +36,7 @@ const dipReadingSchema = new Schema<IDipReading>(
     fuelType: {
       type: String,
       required: true,
-      enum: ["Petrol", "Diesel", "Kerosene", "Gas", "PMS", "AGO"],
+      enum: ["Petrol", "Diesel", "Kerosene", "PMS", "AGO"],
     },
     systemReading: {
       type: Number,

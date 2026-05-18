@@ -41,6 +41,15 @@ export interface IFillingStation extends Document {
   parentStation: mongoose.Types.ObjectId | null;
   branches: mongoose.Types.ObjectId[];
   isSuperManager: boolean;
+  gasStationCode?: string;
+  gasBankName?: string;
+  gasBankAccount?: string;
+  gasBankAccountName?: string;
+  gasQREnabled: boolean;
+  // Loyalty programme configuration
+  gasLoyaltyPointsPerK:    number;  // points earned per ₦1,000 spent
+  gasLoyaltyMinRedeem:     number;  // minimum points balance before customer can redeem
+  gasLoyaltyNairaPerPoint: number;  // ₦ value of each point when redeeming
   createdAt: Date;
   updatedAt: Date;
 }
@@ -102,6 +111,14 @@ const FillingStationSchema = new Schema<IFillingStation>(
     },
     branches: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
     isSuperManager: { type: Boolean, default: false },
+    gasStationCode:           { type: String, trim: true, uppercase: true },
+    gasBankName:              { type: String, trim: true },
+    gasBankAccount:           { type: String, trim: true },
+    gasBankAccountName:       { type: String, trim: true },
+    gasQREnabled:             { type: Boolean, default: false },
+    gasLoyaltyPointsPerK:     { type: Number, default: 10,  min: 1 },
+    gasLoyaltyMinRedeem:      { type: Number, default: 500, min: 1 },
+    gasLoyaltyNairaPerPoint:  { type: Number, default: 1,   min: 0.01 },
     createdAt: { type: Date },
     updatedAt: { type: Date },
   },
