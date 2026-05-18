@@ -112,7 +112,10 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-// ── Rate limiters 
+// ── Keep-alive ping — must be before rate limiters so cron jobs never get blocked
+app.get("/ping", (_, res) => res.status(200).send("pong"));
+
+// ── Rate limiters
 const isAuthenticatedPollingPath = (req: any) => {
   const authed =
     typeof req.headers.authorization === "string" &&
