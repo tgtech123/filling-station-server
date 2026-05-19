@@ -613,7 +613,18 @@ export const getAttendantDirectory = async (req: AuthenticatedRequest, res: Resp
     // Calculate metrics
     const totalStaff = attendantDirectory.length;
     const onDutyToday = attendantDirectory.filter((a) => a.status === "On Duty" || a.status === "Active").length;
-    const overallPerformance = 98.8; // Would need calculation based on actual metrics
+
+    // Real overall performance: % of shifts completed without discrepancy in last 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recentShifts = await Shift.find({
+      fillingStation: stationId,
+      shiftDate: { $gte: thirtyDaysAgo },
+    }).lean();
+    const completedShifts = recentShifts.filter((s: any) => s.status === "Completed").length;
+    const overallPerformance = recentShifts.length > 0
+      ? Math.round((completedShifts / recentShifts.length) * 1000) / 10
+      : 0;
 
     res.json({
       success: true,
@@ -1369,8 +1380,10 @@ export const getStaffPerformance = async (req: AuthenticatedRequest, res: Respon
           (r: any) => r.discrepancy !== 0
         ).length;
 
-        // Calculate efficiency (would need more complex logic in real scenario)
-        const efficiency = completedShifts > 0 ? 95 + Math.random() * 5 : 0; // Placeholder
+        // Efficiency: start at 100, deduct 10 pts per discrepancy, floor at 0
+        const efficiency = completedShifts > 0
+          ? Math.max(0, 100 - (discrepancyCount / completedShifts) * 50)
+          : 0;
 
         // Get sales target
         const monthlyTarget = s.amount || 0;
@@ -1417,7 +1430,13 @@ export const getStaffPerformance = async (req: AuthenticatedRequest, res: Respon
           topPerformer: topPerformer
             ? {
                 name: topPerformer.name,
-                message: "Exceeding all targets",
+                message: topPerformer.targetProgress >= 100
+                  ? "Exceeding all targets"
+                  : topPerformer.targetProgress >= 75
+                  ? "On track with targets"
+                  : topPerformer.targetProgress >= 50
+                  ? "Making progress"
+                  : "Below targets",
               }
             : null,
         },
