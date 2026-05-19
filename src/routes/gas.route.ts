@@ -3,7 +3,7 @@ import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
 
 import {
-  getGasStatus, toggleGasDepartment,
+  getGasStatus, toggleGasDepartment, getGasSettings,
   getCurrentPricing, getPricingHistory, setPrice,
   getCylinderSizes, addCylinderSize, toggleCylinderSize,
   updateGasSettings, getInventory, getLoyaltyConfig,
@@ -58,6 +58,7 @@ router.get("/cylinder-sizes",         allGas,  getCylinderSizes);
 router.post("/cylinder-sizes",        mgr,     addCylinderSize);
 router.patch("/cylinder-sizes/:id",   mgr,     toggleCylinderSize);
 
+router.get("/settings",          mgr,    getGasSettings);
 router.patch("/settings",        mgr,    updateGasSettings);
 router.get("/loyalty-config",   allGas, getLoyaltyConfig);
 router.get("/inventory",        allGas, getInventory);
