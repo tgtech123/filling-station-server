@@ -50,7 +50,7 @@ router.patch("/toggle", mgr,   toggleGasDepartment);
 router.use(requireGasEnabled);
 
 // ─── Settings & Pricing ─────────────────────────────────────────────────────
-router.get("/pricing",         mgrOrAcct, getCurrentPricing);
+router.get("/pricing",         allGas,    getCurrentPricing);
 router.get("/pricing/history", mgrOrAcct, getPricingHistory);
 router.post("/pricing",        mgr,       setPrice);
 
