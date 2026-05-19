@@ -63,6 +63,20 @@ export const toggleGasDepartment = async (req: AuthenticatedRequest, res: Respon
   }
 };
 
+// GET all gas configuration fields (station code, QR, bank, loyalty)
+export const getGasSettings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return res.status(403).json({ message: "Unauthorized" });
+    const doc = await FillingStation.findById(station)
+      .select("gasStationCode gasQREnabled gasBankName gasBankAccount gasBankAccountName gasLoyaltyPointsPerK gasLoyaltyMinRedeem gasLoyaltyNairaPerPoint gasEnabled name")
+      .lean();
+    return res.status(200).json({ data: doc });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
 export const getCurrentPricing = async (req: AuthenticatedRequest, res: Response) => {
