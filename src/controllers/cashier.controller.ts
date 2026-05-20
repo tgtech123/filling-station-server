@@ -650,49 +650,30 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
     // ═══════════════════════════════════════════════════════════════
     // 3. LUBRICANT UNITS SOLD (This Week) - FROM TRANSACTIONS ✅
     // ═══════════════════════════════════════════════════════════════
-    console.log("\n🔍 Querying LubricantTransactions...");
-    
-    const lubricantUnitsResult = await mongoose.connection.collection('lubricanttransactions').aggregate([
-      {
-        $match: {
-          fillingStation: stationObjectId,
-          createdAt: { $gte: startDate, $lte: endDate },
-        },
-      },
-      // Unwind the items array to access individual products
-      { $unwind: "$items" },
-      // Sum up all quantities sold
-      {
-        $group: {
-          _id: null,
-          totalUnits: { $sum: "$items.qtySold" },
-        },
-      },
-    ]).toArray();
+    let lubricantUnitsSold = 0;
+    let lastWeekLubricant = 0;
+    try {
+      const col = mongoose.connection.collection('lubricanttransactions');
+      const [thisWeekRes, lastWeekRes] = await Promise.all([
+        col.aggregate([
+          { $match: { fillingStation: stationObjectId, createdAt: { $gte: startDate, $lte: endDate } } },
+          { $unwind: "$items" },
+          { $group: { _id: null, totalUnits: { $sum: "$items.qtySold" } } },
+        ]).toArray(),
+        col.aggregate([
+          { $match: { fillingStation: stationObjectId, createdAt: { $gte: lastWeekRange.startDate, $lte: lastWeekRange.endDate } } },
+          { $unwind: "$items" },
+          { $group: { _id: null, totalUnits: { $sum: "$items.qtySold" } } },
+        ]).toArray(),
+      ]);
+      lubricantUnitsSold = Number(thisWeekRes[0]?.totalUnits || 0);
+      lastWeekLubricant  = Number(lastWeekRes[0]?.totalUnits  || 0);
+    } catch {
+      // lubricant collection unavailable — default to 0
+    }
 
-    const lubricantUnitsSold = Number(lubricantUnitsResult[0]?.totalUnits || 0);
-    console.log("🛢️ Lubricant Units Sold (This Week):", lubricantUnitsSold);
-
-    // Calculate last week for growth comparison
-    const lastWeekLubricantResult = await mongoose.connection.collection('lubricanttransactions').aggregate([
-      {
-        $match: {
-          fillingStation: stationObjectId,
-          createdAt: { $gte: lastWeekRange.startDate, $lte: lastWeekRange.endDate },
-        },
-      },
-      { $unwind: "$items" },
-      {
-        $group: {
-          _id: null,
-          totalUnits: { $sum: "$items.qtySold" },
-        },
-      },
-    ]).toArray();
-
-    const lastWeekLubricant = Number(lastWeekLubricantResult[0]?.totalUnits || 0);
-    const lubricantGrowth = lastWeekLubricant > 0 
-      ? ((lubricantUnitsSold - lastWeekLubricant) / lastWeekLubricant) * 100 
+    const lubricantGrowth = lastWeekLubricant > 0
+      ? ((lubricantUnitsSold - lastWeekLubricant) / lastWeekLubricant) * 100
       : 0;
 
     console.log("🛢️ Lubricant Units Sold (Last Week):", lastWeekLubricant);

@@ -18,6 +18,7 @@ export interface IPlatformSettings extends Document {
   stationSuspended: boolean;
   systemAlerts: boolean;
   supportWhatsApp: string;
+  logoUrl: string;
   updatedBy: mongoose.Types.ObjectId | null;
   updatedAt: Date;
 }
@@ -89,6 +90,11 @@ const PlatformSettingsSchema = new Schema<IPlatformSettings>(
     systemAlerts: {
       type: Boolean,
       default: true,
+    },
+    logoUrl: {
+      type: String,
+      default: "",
+      trim: true,
     },
     supportWhatsApp: {
       type: String,
