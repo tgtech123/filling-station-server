@@ -236,8 +236,10 @@ export const loginStaff = async (
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       let redisAvailable = false;
       try {
-        await redis.set(`otp:${staff._id}`, otp, { ex: 300 });
-        redisAvailable = true;
+        if (redis) {
+          await redis.set(`otp:${staff._id}`, otp, { ex: 300 });
+          redisAvailable = true;
+        }
       } catch (redisErr: any) {
         console.warn("Redis unavailable — skipping 2FA and issuing JWT directly:", redisErr.message);
       }
@@ -645,7 +647,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
 
     let storedOtp: string | null;
     try {
-      storedOtp = await redis.get(`otp:${userId}`);
+      storedOtp = redis ? await redis.get(`otp:${userId}`) : null;
     } catch (redisErr: any) {
       console.error("Redis error during OTP fetch:", redisErr.message);
       return res.status(503).json({
@@ -662,7 +664,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
     }
 
     try {
-      await redis.del(`otp:${userId}`);
+      if (redis) await redis.del(`otp:${userId}`);
     } catch {
       // Non-critical — OTP will expire on its own via the 5-min TTL
     }
