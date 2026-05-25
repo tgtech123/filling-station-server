@@ -78,46 +78,49 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
       status:            "ordered",
     });
 
-    // Send email to supplier if requested and email provided
-    let emailSent = false;
     const recipient = supplierEmail?.trim() || "";
-    if (sendEmail && recipient) {
-      try {
-        await transporter.sendMail({
-          to:      recipient,
-          subject: `Gas Purchase Order — ${orderNumber}`,
-          html: buildOrderEmail({
-            orderNumber,
-            stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
-            stationAddr:  (stationDoc as any)?.address || "",
-            stationPhone: (stationDoc as any)?.phone   || "",
-            managerName:  `${(managerDoc as any)?.firstName || ""} ${(managerDoc as any)?.lastName || ""}`.trim(),
-            supplierName: supplierName.trim(),
-            quantityKg:   qty,
-            pricePerKg:   price,
-            totalCost:    qty * price,
-            date:         procurement.date.toLocaleDateString("en-NG", { day:"numeric", month:"long", year:"numeric" }),
-            notes:        notes || "",
-          }),
-        });
-        await GasProcurement.findByIdAndUpdate(procurement._id, {
-          emailSentAt: new Date(),
-          emailSentTo: recipient,
-          status: "awaiting_delivery",
-        });
-        procurement.status      = "awaiting_delivery";
-        procurement.emailSentAt = new Date();
-        procurement.emailSentTo = recipient;
-        emailSent = true;
-      } catch (mailErr: any) {
-        console.error("Gas PO email error:", mailErr.message);
-      }
+    const willEmail = !!(sendEmail && recipient);
+
+    // Respond immediately — don't block on SMTP
+    if (willEmail) {
+      procurement.status = "awaiting_delivery";
+      await GasProcurement.findByIdAndUpdate(procurement._id, { status: "awaiting_delivery" });
     }
 
-    return res.status(201).json({
-      message: emailSent ? "Order placed and email sent to supplier" : "Order placed",
-      data: { ...procurement.toObject(), emailSent },
+    res.status(201).json({
+      message: willEmail ? "Order placed — sending email to supplier" : "Order placed",
+      data: { ...procurement.toObject(), emailSent: false, emailPending: willEmail },
     });
+
+    // Fire email in background after response is sent
+    if (willEmail) {
+      transporter.sendMail({
+        to:      recipient,
+        subject: `Gas Purchase Order — ${orderNumber}`,
+        html: buildOrderEmail({
+          orderNumber,
+          stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
+          stationAddr:  (stationDoc as any)?.address || "",
+          stationPhone: (stationDoc as any)?.phone   || "",
+          managerName:  `${(managerDoc as any)?.firstName || ""} ${(managerDoc as any)?.lastName || ""}`.trim(),
+          supplierName: supplierName.trim(),
+          quantityKg:   qty,
+          pricePerKg:   price,
+          totalCost:    qty * price,
+          date:         procurement.date.toLocaleDateString("en-NG", { day:"numeric", month:"long", year:"numeric" }),
+          notes:        notes || "",
+        }),
+      })
+        .then(() =>
+          GasProcurement.findByIdAndUpdate(procurement._id, {
+            emailSentAt: new Date(),
+            emailSentTo: recipient,
+          })
+        )
+        .catch((mailErr: any) => console.error("Gas PO email error:", mailErr.message));
+    }
+
+    return;
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
@@ -252,7 +255,10 @@ export const resendOrderEmail = async (req: AuthenticatedRequest, res: Response)
     const stationDoc = await FillingStation.findById(station).select("name address phone").lean();
     const managerDoc = await Staff.findById(staffId).select("firstName lastName").lean();
 
-    await transporter.sendMail({
+    // Respond immediately, send in background
+    res.status(200).json({ message: "Order email is being sent to supplier" });
+
+    transporter.sendMail({
       to:      recipient,
       subject: `Gas Purchase Order — ${order.orderNumber}`,
       html: buildOrderEmail({
@@ -268,15 +274,17 @@ export const resendOrderEmail = async (req: AuthenticatedRequest, res: Response)
         date:         order.date.toLocaleDateString("en-NG", { day:"numeric", month:"long", year:"numeric" }),
         notes:        order.notes || "",
       }),
-    });
+    })
+      .then(() =>
+        GasProcurement.findByIdAndUpdate(order._id, {
+          emailSentAt: new Date(),
+          emailSentTo: recipient,
+          supplierEmail: recipient,
+        })
+      )
+      .catch((err: any) => console.error("Gas PO resend email error:", err.message));
 
-    await GasProcurement.findByIdAndUpdate(order._id, {
-      emailSentAt: new Date(),
-      emailSentTo: recipient,
-      supplierEmail: recipient,
-    });
-
-    return res.status(200).json({ message: "Order email resent" });
+    return;
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
