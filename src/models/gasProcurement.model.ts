@@ -18,7 +18,8 @@ export interface IGasProcurement extends Document {
   // What was ordered
   orderedQuantityKg: number;
   pricePerKg: number;
-  totalCost: number;
+  orderedCost: number;  // always orderedQty × price — never changes
+  totalCost: number;    // actual cost: deliveredQty × price once delivered, else orderedCost
   invoiceNumber?: string;
   notes?: string;
   recordedBy: mongoose.Types.ObjectId;
@@ -55,6 +56,7 @@ const GasProcurementSchema = new Schema<IGasProcurement>(
     supplierEmail:      { type: String, trim: true, lowercase: true },
     orderedQuantityKg:  { type: Number, required: true, min: 0 },
     pricePerKg:         { type: Number, required: true, min: 0 },
+    orderedCost:        { type: Number, min: 0 },
     totalCost:          { type: Number, required: true, min: 0 },
     invoiceNumber:      { type: String, trim: true },
     notes:              { type: String, trim: true },
@@ -78,7 +80,11 @@ const GasProcurementSchema = new Schema<IGasProcurement>(
 );
 
 GasProcurementSchema.pre("save", function (next) {
-  this.totalCost = this.orderedQuantityKg * this.pricePerKg;
+  // orderedCost is fixed at order time — never recalculated
+  this.orderedCost = this.orderedQuantityKg * this.pricePerKg;
+  // totalCost reflects actual delivery once the supervisor records delivered qty
+  const effectiveQty = this.deliveredQuantityKg ?? this.orderedQuantityKg;
+  this.totalCost = effectiveQty * this.pricePerKg;
   next();
 });
 

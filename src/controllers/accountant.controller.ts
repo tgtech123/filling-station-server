@@ -14,6 +14,7 @@ import FixedAsset, { calcNetBookValue } from "../models/fixedAsset.model";
 import FinancialEntry from "../models/financialEntry.model";
 import SalaryDraft from "../models/salary.model";
 import LubricantPurchase from "../models/lubricant-purchase.model";
+import LubricantProcurement from "../models/lubricantProcurement.model";
 
 // Helper function to check if populated field is an object
 const isPopulated = (field: any): field is { _id: any; firstName?: string; lastName?: string; email?: string } => {
@@ -280,6 +281,21 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
       });
     }
 
+    // 7. Accounts Payable — received procurements with outstanding supplier balance
+    const unpaidProcurements = await LubricantProcurement.find({
+      fillingStation: new Types.ObjectId(stationId),
+      status: "received",
+      paymentStatus: { $in: ["unpaid", "partial"] },
+    }).lean();
+
+    const accountsPayable = unpaidProcurements.reduce((total, p) => {
+      const invoiceTotal = (p.items || []).reduce((s: number, item: any) => {
+        const qty = item.receivedQuantity != null ? item.receivedQuantity : item.quantityToProcure;
+        return s + qty * (item.unitCost || 0);
+      }, 0);
+      return total + Math.max(0, invoiceTotal - (p.amountPaid || 0));
+    }, 0);
+
     return res.status(200).json({
       success: true,
       data: {
@@ -288,6 +304,7 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
           expenses: totalExpenses,
           discrepancies: discrepancies,
           totalStockValue: totalStockValue,
+          accountsPayable,
         },
         salesVsExpensesTrend: salesVsExpensesTrend,
         productSalesOverview: productSalesOverview,

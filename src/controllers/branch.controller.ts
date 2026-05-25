@@ -52,10 +52,26 @@ export const createBranch = async (req: AuthenticatedRequest, res: Response) => 
       city, country, zipCode,
       numberOfPumps, operationHours,
       tankCapacity, fuelTypesOffered,
+      managerFirstName, managerLastName, managerEmail,
     } = req.body;
 
     if (!name || !address || !city) {
       return res.status(400).json({ error: "Branch name, address and city are required" });
+    }
+
+    // Validate manager invite fields if email is provided
+    if (managerEmail) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(managerEmail)) {
+        return res.status(400).json({ error: "Please provide a valid manager email address" });
+      }
+      if (!managerFirstName?.trim() || !managerLastName?.trim()) {
+        return res.status(400).json({ error: "Manager first and last name are required when an email is provided" });
+      }
+      const existing = await Staff.findOne({ email: managerEmail.toLowerCase() });
+      if (existing) {
+        return res.status(400).json({ error: "A staff account already exists with that manager email" });
+      }
     }
 
     const branch = await FillingStation.create({
@@ -104,8 +120,71 @@ export const createBranch = async (req: AuthenticatedRequest, res: Response) => 
       severity: null,
     }).catch(console.error);
 
+    // If manager details were provided, create invite token and fire email in background
+    let inviteSent = false;
+    if (managerEmail && managerFirstName && managerLastName) {
+      const token = crypto.randomBytes(32).toString("hex");
+      await InviteToken.create({
+        email: managerEmail.toLowerCase(),
+        firstName: managerFirstName.trim(),
+        lastName: managerLastName.trim(),
+        role: "manager",
+        station: branch._id,
+        invitedBy: managerId,
+        token,
+        expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      });
+
+      inviteSent = true;
+      const inviteUrl = `${process.env.FRONTEND_URL}/accept-invite?token=${token}`;
+
+      transporter.sendMail({
+        from: `"Flourish Station" <${process.env.EMAIL_USER}>`,
+        to: managerEmail,
+        subject: `You've been invited to manage ${branch.name}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: #1a71f6; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 24px;">Flourish Station</h1>
+            </div>
+            <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
+              <h2 style="color: #1f2937;">You're invited!</h2>
+              <p style="color: #6b7280;">Hi ${managerFirstName},</p>
+              <p style="color: #6b7280;">
+                You have been invited to become the Branch Manager of
+                <strong>${branch.name}</strong> on Flourish Station.
+              </p>
+              <p style="color: #6b7280;">
+                Click the button below to accept the invitation and set up your account.
+                This invite expires in 48 hours.
+              </p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${inviteUrl}"
+                  style="background: #1a71f6; color: white; padding: 14px 32px;
+                  border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
+                  Accept Invitation
+                </a>
+              </div>
+              <p style="color: #9ca3af; font-size: 12px;">
+                If the button doesn't work, copy and paste this link:<br/>
+                <a href="${inviteUrl}" style="color: #1a71f6;">${inviteUrl}</a>
+              </p>
+              <p style="color: #9ca3af; font-size: 12px; margin-top: 20px;">
+                If you didn't expect this invitation, you can safely ignore this email.
+              </p>
+            </div>
+          </div>
+        `,
+      }).catch((mailErr: any) => {
+        console.error("Branch creation invite email error:", mailErr.code, mailErr.message);
+      });
+    }
+
     return res.status(201).json({
-      message: "Branch created successfully",
+      message: inviteSent
+        ? `Branch created and invite sent to ${managerEmail}`
+        : "Branch created successfully",
+      inviteSent,
       branch: {
         id: branch._id,
         name: branch.name,
@@ -365,7 +444,29 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
 
     const inviteUrl = `${process.env.FRONTEND_URL}/accept-invite?token=${token}`;
 
-    await transporter.sendMail({
+    Activity.create({
+      fillingStation: superManagerStation,
+      type: "stock",
+      title: "Branch Manager Invited",
+      description: `${firstName} ${lastName} invited to manage ${branch.name}`,
+      timestamp: new Date(),
+      severity: null,
+    }).catch(console.error);
+
+    // Respond immediately — don't block on SMTP
+    res.status(200).json({
+      message: `Invitation sent to ${email}. They have 48 hours to accept.`,
+      data: {
+        email,
+        firstName,
+        lastName,
+        branch: branch.name,
+        expiresIn: "48 hours",
+      },
+    });
+
+    // Fire email in background
+    transporter.sendMail({
       from: `"Flourish Station" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: `You've been invited to manage ${branch.name}`,
@@ -402,27 +503,11 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
           </div>
         </div>
       `,
+    }).catch((mailErr: any) => {
+      console.error("Branch invite email error:", mailErr.code, mailErr.message);
     });
 
-    Activity.create({
-      fillingStation: superManagerStation,
-      type: "stock",
-      title: "Branch Manager Invited",
-      description: `${firstName} ${lastName} invited to manage ${branch.name}`,
-      timestamp: new Date(),
-      severity: null,
-    }).catch(console.error);
-
-    return res.status(200).json({
-      message: `Invitation sent to ${email}. They have 48 hours to accept.`,
-      data: {
-        email,
-        firstName,
-        lastName,
-        branch: branch.name,
-        expiresIn: "48 hours",
-      },
-    });
+    return;
   } catch (err: any) {
     console.error("inviteBranchManager:", err);
     return res.status(500).json({ error: err.message });
