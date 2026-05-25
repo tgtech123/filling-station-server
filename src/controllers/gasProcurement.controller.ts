@@ -117,7 +117,7 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
             emailSentTo: recipient,
           })
         )
-        .catch((mailErr: any) => console.error("Gas PO email error:", mailErr.message));
+        .catch((mailErr: any) => console.error("Gas PO email error:", mailErr.code, mailErr.message));
     }
 
     return;
