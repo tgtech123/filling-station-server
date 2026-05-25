@@ -95,6 +95,7 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
     // Fire email in background after response is sent
     if (willEmail) {
       transporter.sendMail({
+        from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
         to:      recipient,
         subject: `Gas Purchase Order — ${orderNumber}`,
         html: buildOrderEmail({
@@ -259,6 +260,7 @@ export const resendOrderEmail = async (req: AuthenticatedRequest, res: Response)
     res.status(200).json({ message: "Order email is being sent to supplier" });
 
     transporter.sendMail({
+      from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
       to:      recipient,
       subject: `Gas Purchase Order — ${order.orderNumber}`,
       html: buildOrderEmail({
