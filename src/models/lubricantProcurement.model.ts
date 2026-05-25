@@ -8,6 +8,7 @@ export interface IProcurementItem {
   currentStock: number;
   reOrderLevel: number;
   quantityToProcure: number;
+  receivedQuantity?: number;   // actual qty received — set when marked as received
   unitCost: number;
 }
 
@@ -19,7 +20,14 @@ export interface ILubricantProcurement extends Document {
   procuredByName: string;
   vendorName: string;
   vendorPhone: string;
+  vendorEmail: string;
+  emailSentAt: Date | null;
+  emailSentTo: string;
   status: "draft" | "submitted" | "ordered" | "received";
+  paymentStatus: "unpaid" | "partial" | "paid";
+  amountPaid: number;
+  paidAt: Date | null;
+  paymentNotes: string;
   items: IProcurementItem[];
   notes: string;
   stationName: string;
@@ -42,6 +50,7 @@ const ProcurementItemSchema = new Schema<IProcurementItem>(
     currentStock: { type: Number, default: 0 },
     reOrderLevel: { type: Number, default: 0 },
     quantityToProcure: { type: Number, required: true, min: 1 },
+    receivedQuantity:  { type: Number, min: 0 },
     unitCost: { type: Number, default: 0 },
   },
   { _id: false }
@@ -55,6 +64,17 @@ const LubricantProcurementSchema = new Schema<ILubricantProcurement>(
     procuredByName: { type: String, required: true },
     vendorName: { type: String, default: "" },
     vendorPhone: { type: String, default: "" },
+    vendorEmail: { type: String, default: "" },
+    emailSentAt: { type: Date, default: null },
+    emailSentTo: { type: String, default: "" },
+    paymentStatus: {
+      type: String,
+      enum: ["unpaid", "partial", "paid"],
+      default: "unpaid",
+    },
+    amountPaid:   { type: Number, default: 0 },
+    paidAt:       { type: Date, default: null },
+    paymentNotes: { type: String, default: "" },
     status: {
       type: String,
       enum: ["draft", "submitted", "ordered", "received"],
