@@ -1,4 +1,4 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
 import axios from "axios";
 import { Response } from "express";
 import { Types } from "mongoose";
@@ -48,7 +48,7 @@ const calculateTax = (
   return { baseAmount: amount, tax, totalAmount };
 };
 
-// ── Initialize Payment ────────────────────────────────────────────────────────
+// â”€â”€ Initialize Payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const initializePayment = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { planSlug, billingCycle, country = "NG" } = req.body;
@@ -140,7 +140,7 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// ── Initialize Guest Payment (no auth) ───────────────────────────────────────
+// â”€â”€ Initialize Guest Payment (no auth) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const initializeGuestPayment = async (req: any, res: Response) => {
   try {
     const { email, name, planSlug, billingCycle, country = "NG" } = req.body;
@@ -151,7 +151,7 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
       });
     }
 
-    // Block payment before Paystack is opened — if the email already belongs to a
+    // Block payment before Paystack is opened â€” if the email already belongs to a
     // registered manager, the payer must log in and upgrade from their dashboard.
     const existingManager = await Staff.findOne({
       email: email.toLowerCase().trim(),
@@ -244,13 +244,13 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
   }
 };
 
-// ── Verify Payment ────────────────────────────────────────────────────────────
+// â”€â”€ Verify Payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const verifyPayment = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { reference } = req.params;
 
     // For guest payments (reference starts with "FS_GUEST_") the webhook marks the payment
-    // "success" but deliberately skips the plan upgrade — that logic lives here so we can
+    // "success" but deliberately skips the plan upgrade â€” that logic lives here so we can
     // determine isExistingUser and handle the two guest sub-cases correctly.
     // Only use the early exit for authenticated (non-guest) payments where the webhook has
     // already done the full plan upgrade.
@@ -425,7 +425,7 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// ── Paystack Webhook ──────────────────────────────────────────────────────────
+// â”€â”€ Paystack Webhook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const paystackWebhook = async (req: any, res: Response) => {
   // Respond 200 immediately to prevent Paystack retries
   res.status(200).json({ received: true });
@@ -439,19 +439,19 @@ export const paystackWebhook = async (req: any, res: Response) => {
     const signature = req.headers["x-paystack-signature"];
 
     if (hash !== signature) {
-      console.error("❌ Invalid Paystack webhook signature");
+      console.error("âŒ Invalid Paystack webhook signature");
       return;
     }
 
     const event = req.body;
-    console.log("📦 Paystack webhook event:", event.event);
+    console.log("ðŸ“¦ Paystack webhook event:", event.event);
 
     if (event.event === "charge.success") {
       const { reference, metadata, amount, customer } = event.data;
 
       const existingPayment = await Payment.findOne({ transactionRef: reference });
       if (existingPayment?.status === "success") {
-        console.log("⏭️ Webhook already processed:", reference);
+        console.log("â­ï¸ Webhook already processed:", reference);
         return;
       }
 
@@ -479,7 +479,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
         });
 
         await deleteCachePattern(`dashboard:*:${stationId}`);
-        console.log(`✅ Station ${stationId} upgraded to ${planSlug}`);
+        console.log(`âœ… Station ${stationId} upgraded to ${planSlug}`);
       }
 
       await Payment.findOneAndUpdate(
@@ -494,12 +494,12 @@ export const paystackWebhook = async (req: any, res: Response) => {
 
       AdminLog.create({
         eventType: "subscription_payment",
-        description: `Payment confirmed via webhook: ${meta?.planName} (${billingCycle}) — ₦${(amount / 100).toLocaleString()}`,
+        description: `Payment confirmed via webhook: ${meta?.planName} (${billingCycle}) â€” â‚¦${(amount / 100).toLocaleString()}`,
         stationOrUser: (station as any)?.name || meta?.guestName || customer?.email || "Unknown",
         status: "success",
       }).catch(console.error);
 
-      console.log(`✅ Webhook processed: ${reference}`);
+      console.log(`âœ… Webhook processed: ${reference}`);
     }
 
     if (event.event === "charge.failed") {
@@ -508,7 +508,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
         { transactionRef: reference },
         { status: "failed" }
       );
-      console.log(`❌ Payment failed: ${reference}`);
+      console.log(`âŒ Payment failed: ${reference}`);
     }
 
     if (event.event === "subscription.disable") {
@@ -519,17 +519,17 @@ export const paystackWebhook = async (req: any, res: Response) => {
           await FillingStation.findByIdAndUpdate(staffMember.station, {
             planStatus: "cancelled",
           });
-          console.log(`⚠️ Subscription cancelled: ${email}`);
+          console.log(`âš ï¸ Subscription cancelled: ${email}`);
         }
       }
     }
   } catch (err: any) {
-    console.error("❌ Webhook processing error:", err.message);
-    // Do NOT throw — already responded 200
+    console.error("âŒ Webhook processing error:", err.message);
+    // Do NOT throw â€” already responded 200
   }
 };
 
-// ── Get Current Plan ──────────────────────────────────────────────────────────
+// â”€â”€ Get Current Plan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getCurrentPlan = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;

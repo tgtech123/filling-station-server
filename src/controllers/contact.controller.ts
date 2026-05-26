@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { transporter } from "../middlewares/transporter.middleware";
 
 export const ContactUs = async (req:Request, res:Response) => {
@@ -9,7 +9,8 @@ export const ContactUs = async (req:Request, res:Response) => {
     }
 try {
     await transporter.sendMail({
-        to: "oboh.thankgod1@gmail.com",
+        from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
+        to: "fueldesksupport@gmail.com",
         subject: `Contact Message from ${firstName + " " + lastName}`,
         html: `
   <div style="font-family: Arial, sans-serif; background-color:#f4f6f8; padding:20px;">
@@ -33,13 +34,13 @@ try {
         </div>
 
         <p style="font-size:13px; color:#666; margin-top:30px;">
-          ⚠ Please respond to this message as soon as possible.
+          âš  Please respond to this message as soon as possible.
         </p>
       </div>
 
       <!-- Footer -->
       <div style="background:#f1f1f1; padding:15px; text-align:center; font-size:12px; color:#555;">
-        <p style="margin:0;">&copy; ${new Date().getFullYear()} Flourish Station. All rights reserved.</p>
+        <p style="margin:0;">&copy; ${new Date().getFullYear()} FuelDesk. All rights reserved.</p>
       </div>
 
     </div>

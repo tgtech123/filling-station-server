@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Lubricant from "../models/lubricant.model";
@@ -6,7 +6,7 @@ import LubricantPurchase, { ILubricantPurchaseItem } from "../models/lubricant-p
 import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
 
-// 🆕 Create a new lubricant purchase
+// ðŸ†• Create a new lubricant purchase
 export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Response) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -22,7 +22,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
       items,
     } = req.body;
 
-    // ✅ Required validations
+    // âœ… Required validations
     if (!fillingStation) {
       await session.abortTransaction();
       return res.status(403).json({ error: "Unauthorized" });
@@ -38,7 +38,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
 
     let totalAmount = 0;
 
-    // 🔄 Process each item
+    // ðŸ”„ Process each item
     const processedItems: ILubricantPurchaseItem[] = [];
 
     for (const item of items) {
@@ -92,7 +92,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
       });
     }
 
-    // 🧾 Create purchase record
+    // ðŸ§¾ Create purchase record
     const purchase = await LubricantPurchase.create(
       [
         {
@@ -113,7 +113,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
 
     // Log stock activity (fire-and-forget)
     const itemSummary = processedItems
-      .map((i) => `${i.productName} ×${i.quantity}`)
+      .map((i) => `${i.productName} Ã—${i.quantity}`)
       .join(", ");
     Activity.create({
       fillingStation,
@@ -148,7 +148,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
   }
 };
 
-// 🆕 Get all purchases
+// ðŸ†• Get all purchases
 export const getAllLubricantPurchases = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -169,7 +169,7 @@ export const getAllLubricantPurchases = async (req: AuthenticatedRequest, res: R
   }
 };
 
-// 🆕 Get single purchase by ID
+// ðŸ†• Get single purchase by ID
 export const getLubricantPurchaseById = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -190,7 +190,7 @@ export const getLubricantPurchaseById = async (req: AuthenticatedRequest, res: R
   }
 };
 
-// 🆕 Update a purchase
+// ðŸ†• Update a purchase
 export const updateLubricantPurchase = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -218,7 +218,7 @@ export const updateLubricantPurchase = async (req: AuthenticatedRequest, res: Re
   }
 };
 
-// 🆕 Delete a purchase
+// ðŸ†• Delete a purchase
 export const deleteLubricantPurchase = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;

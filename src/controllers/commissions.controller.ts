@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Shift from "../models/shift.model";
@@ -667,7 +667,7 @@ export const getPaymentHistory = async (req: AuthenticatedRequest, res: Response
     const skip     = (Number(page) - 1) * Number(limit);
     const limitNum = Number(limit);
 
-    // ── Base match filter ────────────────────────────────────────────────────
+    // â”€â”€ Base match filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const matchFilter: any = { fillingStation: new Types.ObjectId(stationId) };
     if (status)      matchFilter.status           = status;
     if (month && year) {
@@ -675,7 +675,7 @@ export const getPaymentHistory = async (req: AuthenticatedRequest, res: Response
       matchFilter["period.year"]  = Number(year);
     }
 
-    // ── Aggregation pipeline — joins staff so search runs at DB level ────────
+    // â”€â”€ Aggregation pipeline â€” joins staff so search runs at DB level â”€â”€â”€â”€â”€â”€â”€â”€
     const basePipeline: any[] = [
       { $match: matchFilter },
       {

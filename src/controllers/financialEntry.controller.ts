@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import FinancialEntry from "../models/financialEntry.model";
@@ -100,7 +100,7 @@ export const deleteEntry = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// GET /api/financial-entries/unpaid-deliveries  — list deliveries not yet paid to supplier
+// GET /api/financial-entries/unpaid-deliveries  â€” list deliveries not yet paid to supplier
 export const listUnpaidDeliveries = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -125,7 +125,7 @@ export const listUnpaidDeliveries = async (req: AuthenticatedRequest, res: Respo
   }
 };
 
-// PATCH /api/financial-entries/deliveries/:id/mark-paid  — mark one delivery as paid
+// PATCH /api/financial-entries/deliveries/:id/mark-paid  â€” mark one delivery as paid
 export const markDeliveryPaid = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;

@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 
@@ -29,7 +29,7 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
 
     /***********************
      * 1) Fuel metrics from Shift collection
-     *    Pump.dailyLtrSales is never populated — endShift writes to Shift.
+     *    Pump.dailyLtrSales is never populated â€” endShift writes to Shift.
      *    Query completed shifts for today and sum litresSold + totalAmount.
      ***********************/
     const shiftAgg = await Shift.aggregate([
@@ -53,7 +53,7 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
     const fuelRevenueToday = Number(shiftAgg[0]?.fuelRevenue || 0);
 
     /***********************
-     * 2) Pump head counts — Pump.tank stores a tank subdocument _id
+     * 2) Pump head counts â€” Pump.tank stores a tank subdocument _id
      *    (Tank.tanks[]._id), not the outer Tank document _id.
      *    Must resolve via Tank.findOne first, then query Pump by those ids.
      ***********************/
@@ -163,7 +163,7 @@ export const getFuelManagement = async (req: AuthenticatedRequest, res: Response
     sevenDaysAgo.setHours(0, 0, 0, 0);
 
     const [dailyAgg, weeklyAgg, tankDoc] = await Promise.all([
-      // dailyConsumption — active or completed shifts today with litres recorded
+      // dailyConsumption â€” active or completed shifts today with litres recorded
       Shift.aggregate([
         {
           $match: {
@@ -181,7 +181,7 @@ export const getFuelManagement = async (req: AuthenticatedRequest, res: Response
         },
       ]).exec(),
 
-      // weeklyAverageConsumption — active or completed shifts over last 7 days with litres recorded
+      // weeklyAverageConsumption â€” active or completed shifts over last 7 days with litres recorded
       Shift.aggregate([
         {
           $match: {
@@ -199,7 +199,7 @@ export const getFuelManagement = async (req: AuthenticatedRequest, res: Response
         },
       ]).exec(),
 
-      // totalCapacityAvailable — sum of all tank currentQuantity for this station
+      // totalCapacityAvailable â€” sum of all tank currentQuantity for this station
       Tank.findOne({ fillingStation: stationObjectId }).lean(),
     ]);
 
@@ -257,7 +257,7 @@ export const getPumpControl = async (req: AuthenticatedRequest, res: Response) =
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    // Pump counts — resolve via Tank subdoc IDs (Pump.tank = Tank.tanks[]._id)
+    // Pump counts â€” resolve via Tank subdoc IDs (Pump.tank = Tank.tanks[]._id)
     let totalPumps = 0;
     let activePumpCount = 0;
     let underMaintenance = 0;
@@ -277,7 +277,7 @@ export const getPumpControl = async (req: AuthenticatedRequest, res: Response) =
     }
 
     const [salesAgg, dispensedAgg] = await Promise.all([
-      // totalFuelSales — sum totalAmount from Completed shifts today
+      // totalFuelSales â€” sum totalAmount from Completed shifts today
       Shift.aggregate([
         {
           $match: {
@@ -295,7 +295,7 @@ export const getPumpControl = async (req: AuthenticatedRequest, res: Response) =
         },
       ]).exec(),
 
-      // fuelDispensedAcross — sum litresSold from Active and Completed shifts today
+      // fuelDispensedAcross â€” sum litresSold from Active and Completed shifts today
       Shift.aggregate([
         {
           $match: {
@@ -356,11 +356,11 @@ export const getStaffManagement = async (req: AuthenticatedRequest, res: Respons
       totalShifts,
       completedShifts,
     ] = await Promise.all([
-      // totalStaff — all non-manager staff for this station
+      // totalStaff â€” all non-manager staff for this station
       // Staff model uses 'station' field, not 'fillingStation'
       Staff.countDocuments({ station: stationObjectId, role: { $ne: "manager" } }).exec(),
 
-      // onDuty — distinct attendants with an Active shift today
+      // onDuty â€” distinct attendants with an Active shift today
       Shift.distinct("attendant", {
         fillingStation: stationObjectId,
         status: "Active",
@@ -370,17 +370,17 @@ export const getStaffManagement = async (req: AuthenticatedRequest, res: Respons
         ],
       }).exec(),
 
-      // averageStaffSalary — average of 'amount' field on non-manager staff
-      // No separate salary model — Staff.amount stores each member's salary/wage
+      // averageStaffSalary â€” average of 'amount' field on non-manager staff
+      // No separate salary model â€” Staff.amount stores each member's salary/wage
       Staff.aggregate([
         { $match: { station: stationObjectId, role: { $ne: "manager" } } },
         { $group: { _id: null, avgSalary: { $avg: "$amount" } } },
       ]).exec(),
 
-      // overallStaffPerformance denominator — all shifts ever for this station
+      // overallStaffPerformance denominator â€” all shifts ever for this station
       Shift.countDocuments({ fillingStation: stationObjectId }).exec(),
 
-      // overallStaffPerformance numerator — completed shifts ever for this station
+      // overallStaffPerformance numerator â€” completed shifts ever for this station
       Shift.countDocuments({ fillingStation: stationObjectId, status: "Completed" }).exec(),
     ]);
 

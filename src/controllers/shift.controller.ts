@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Shift from "../models/shift.model";
@@ -193,7 +193,7 @@ export const startShift = async (req: AuthenticatedRequest, res: Response) => {
         return Activity.create({
           fillingStation: new Types.ObjectId(fillingStation),
           type: "sale",
-          title: `Shift started — ${newShift.pumpTitle}`,
+          title: `Shift started â€” ${newShift.pumpTitle}`,
           description: `${name} started shift`,
           timestamp: new Date(),
           severity: null,
@@ -281,7 +281,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
     Tank.findOne({ fillingStation: shift.fillingStation })
       .then(async (tankDoc) => {
         if (!tankDoc) {
-          console.log("⚠️ No tank document found for station:", shift.fillingStation);
+          console.log("âš ï¸ No tank document found for station:", shift.fillingStation);
           return;
         }
 
@@ -292,7 +292,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
         );
 
         if (tankIndex === -1) {
-          console.log(`⚠️ No tank found for product: ${shift.product}`);
+          console.log(`âš ï¸ No tank found for product: ${shift.product}`);
           return;
         }
 
@@ -304,7 +304,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
         await tankDoc.save();
 
         console.log(
-          `✅ Tank updated: ${tank.fuelType} ${prevQty} → ${tankDoc.tanks[tankIndex].currentQuantity}L (sold: ${litresSold}L)`
+          `âœ… Tank updated: ${tank.fuelType} ${prevQty} â†’ ${tankDoc.tanks[tankIndex].currentQuantity}L (sold: ${litresSold}L)`
         );
 
         // Alert if tank drops below 20%
@@ -318,7 +318,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
             fillingStation: shift.fillingStation,
             type: "alert",
             title: "Low Tank Alert",
-            description: `${updatedTank.fuelType} tank is below 20% — ${updatedTank.currentQuantity}L remaining`,
+            description: `${updatedTank.fuelType} tank is below 20% â€” ${updatedTank.currentQuantity}L remaining`,
             timestamp: new Date(),
             severity: "warning",
             expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -337,8 +337,8 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
         return Activity.create({
           fillingStation: new Types.ObjectId(fillingStation),
           type: "sale",
-          title: `Shift ended — ${shift.pumpTitle}`,
-          description: `${name} — ${shift.litresSold ?? 0} Ltrs sold`,
+          title: `Shift ended â€” ${shift.pumpTitle}`,
+          description: `${name} â€” ${shift.litresSold ?? 0} Ltrs sold`,
           timestamp: new Date(),
           severity: null,
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -351,8 +351,8 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
       fillingStation: new Types.ObjectId(fillingStation),
       type: "message",
       category: "shift_completed",
-      title: `Shift Completed — ${shift.pumpTitle}`,
-      body: `Shift ended on ${shift.pumpTitle}. ${shift.litresSold ?? 0} Ltrs sold, revenue: ₦${(shift.totalAmount ?? 0).toLocaleString()}`,
+      title: `Shift Completed â€” ${shift.pumpTitle}`,
+      body: `Shift ended on ${shift.pumpTitle}. ${shift.litresSold ?? 0} Ltrs sold, revenue: â‚¦${(shift.totalAmount ?? 0).toLocaleString()}`,
       severity: "info",
       timestamp: new Date(),
       targetRole: "accountant",
@@ -388,7 +388,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
                   type: "message",
                   category: "system_update",
                   title: "Target Met!",
-                  body: `${staffName} has met their ${target.duration} sales target of ₦${target.targetAmount.toLocaleString()}. Current: ₦${target.currentProgress.toLocaleString()}`,
+                  body: `${staffName} has met their ${target.duration} sales target of â‚¦${target.targetAmount.toLocaleString()}. Current: â‚¦${target.currentProgress.toLocaleString()}`,
                   severity: "info",
                   timestamp: new Date(),
                   targetRole: "manager",
@@ -400,7 +400,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
                   type: "message",
                   category: "system_update",
                   title: "You met your target!",
-                  body: `Congratulations! You have met your ${target.duration} sales target of ₦${target.targetAmount.toLocaleString()}. Great work!`,
+                  body: `Congratulations! You have met your ${target.duration} sales target of â‚¦${target.targetAmount.toLocaleString()}. Great work!`,
                   severity: "info",
                   timestamp: new Date(),
                   targetRole: "attendant",

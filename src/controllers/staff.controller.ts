@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { Types } from "mongoose";
 import bcrypt from "bcrypt";
 import { AuthenticatedRequest } from "../interfaces";
@@ -304,13 +304,13 @@ export const getStaffTarget = async (
       const progressFmt = target.currentProgress.toLocaleString();
 
       if (target.currentProgress >= target.targetAmount) {
-        // Target was met — notify manager and staff
+        // Target was met â€” notify manager and staff
         Notification.create({
           fillingStation,
           type: "message",
           category: "system_update",
           title: "Target Met!",
-          body: `${staffName} met their ${target.duration} target of ₦${amountFmt}. Final: ₦${progressFmt}`,
+          body: `${staffName} met their ${target.duration} target of â‚¦${amountFmt}. Final: â‚¦${progressFmt}`,
           severity: "info",
           timestamp: now,
           targetRole: "manager",
@@ -322,19 +322,19 @@ export const getStaffTarget = async (
           type: "message",
           category: "system_update",
           title: "You met your target!",
-          body: `Congratulations! You met your ${target.duration} sales target of ₦${amountFmt}. Well done!`,
+          body: `Congratulations! You met your ${target.duration} sales target of â‚¦${amountFmt}. Well done!`,
           severity: "info",
           timestamp: now,
           targetRole: "attendant",
         }).catch((err) => console.error("Notification error (target met - staff):", err));
       } else {
-        // Target not met — notify manager and staff
+        // Target not met â€” notify manager and staff
         Notification.create({
           fillingStation,
           type: "message",
           category: "system_update",
           title: "Target Not Met",
-          body: `${staffName} did not meet their ${target.duration} target of ₦${amountFmt}. Achieved: ₦${progressFmt}`,
+          body: `${staffName} did not meet their ${target.duration} target of â‚¦${amountFmt}. Achieved: â‚¦${progressFmt}`,
           severity: "warning",
           timestamp: now,
           targetRole: "manager",
@@ -346,7 +346,7 @@ export const getStaffTarget = async (
           type: "message",
           category: "system_update",
           title: "Target Period Ended",
-          body: `Your ${target.duration} sales target of ₦${amountFmt} has ended. You achieved ₦${progressFmt}. Keep pushing!`,
+          body: `Your ${target.duration} sales target of â‚¦${amountFmt} has ended. You achieved â‚¦${progressFmt}. Keep pushing!`,
           severity: "warning",
           timestamp: now,
           targetRole: "attendant",

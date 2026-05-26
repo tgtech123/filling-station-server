@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Shift from "../models/shift.model";
@@ -513,7 +513,7 @@ export const clearStaleShifts = async (req: AuthenticatedRequest, res: Response)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // Find shift IDs that already have an approved reconciliation — don't touch those
+    // Find shift IDs that already have an approved reconciliation â€” don't touch those
     const approvedShiftIds = await CashReconciliation.find({
       fillingStation: stationId,
       status: { $in: ["Matched", "Flagged"] },
@@ -719,9 +719,9 @@ export const getScheduledAttendants = async (req: AuthenticatedRequest, res: Res
  */
 export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    console.log("📋 Schedule request body:", JSON.stringify(req.body));
-    console.log("🏪 Station ID:", req.user?.station);
-    console.log("🔍 pumpId received:", req.body.pumpId);
+    console.log("ðŸ“‹ Schedule request body:", JSON.stringify(req.body));
+    console.log("ðŸª Station ID:", req.user?.station);
+    console.log("ðŸ” pumpId received:", req.body.pumpId);
 
     const { attendantId, shiftType, startDate, endDate, pumpId } = req.body;
     const stationId = req.user?.station;
@@ -746,7 +746,7 @@ export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response
       "pumps._id": new Types.ObjectId(pumpId),
     });
 
-    console.log("🚗 Pump parent found:", JSON.stringify(pumpParent?.pumps?.length));
+    console.log("ðŸš— Pump parent found:", JSON.stringify(pumpParent?.pumps?.length));
 
     if (!pumpParent) {
       return res.status(404).json({ message: "Pump not found" });

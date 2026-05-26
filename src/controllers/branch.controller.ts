@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { Types } from "mongoose";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -13,7 +13,7 @@ import InviteToken from "../models/inviteToken.model";
 import Tank from "../models/tanks.model";
 import { transporter } from "../middlewares/transporter.middleware";
 
-// ── Create Branch ─────────────────────────────────────────────────────────────
+// â”€â”€ Create Branch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const createBranch = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const managerId = req.user?._id || req.user?.id;
@@ -139,20 +139,20 @@ export const createBranch = async (req: AuthenticatedRequest, res: Response) => 
       const inviteUrl = `${process.env.FRONTEND_URL}/accept-invite?token=${token}`;
 
       transporter.sendMail({
-        from: `"Flourish Station" <${process.env.EMAIL_USER}>`,
+        from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
         to: managerEmail,
         subject: `You've been invited to manage ${branch.name}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: #1a71f6; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
-              <h1 style="color: white; margin: 0; font-size: 24px;">Flourish Station</h1>
+              <h1 style="color: white; margin: 0; font-size: 24px;">FuelDesk</h1>
             </div>
             <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
               <h2 style="color: #1f2937;">You're invited!</h2>
               <p style="color: #6b7280;">Hi ${managerFirstName},</p>
               <p style="color: #6b7280;">
                 You have been invited to become the Branch Manager of
-                <strong>${branch.name}</strong> on Flourish Station.
+                <strong>${branch.name}</strong> on FuelDesk.
               </p>
               <p style="color: #6b7280;">
                 Click the button below to accept the invitation and set up your account.
@@ -201,7 +201,7 @@ export const createBranch = async (req: AuthenticatedRequest, res: Response) => 
   }
 };
 
-// ── Get Branches ──────────────────────────────────────────────────────────────
+// â”€â”€ Get Branches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getBranches = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const managerId = req.user?._id || req.user?.id;
@@ -243,7 +243,7 @@ export const getBranches = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// ── Switch Station ────────────────────────────────────────────────────────────
+// â”€â”€ Switch Station â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const switchStation = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const managerId = req.user?._id || req.user?.id;
@@ -302,7 +302,7 @@ export const switchStation = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// ── Get Branch Overview ───────────────────────────────────────────────────────
+// â”€â”€ Get Branch Overview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getBranchOverview = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -378,7 +378,7 @@ export const getBranchOverview = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// ── Invite Branch Manager ─────────────────────────────────────────────────────
+// â”€â”€ Invite Branch Manager â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const inviteBranchManager = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { branchId } = req.params;
@@ -453,7 +453,7 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
       severity: null,
     }).catch(console.error);
 
-    // Respond immediately — don't block on SMTP
+    // Respond immediately â€” don't block on SMTP
     res.status(200).json({
       message: `Invitation sent to ${email}. They have 48 hours to accept.`,
       data: {
@@ -467,20 +467,20 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
 
     // Fire email in background
     transporter.sendMail({
-      from: `"Flourish Station" <${process.env.EMAIL_USER}>`,
+      from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: `You've been invited to manage ${branch.name}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="background: #1a71f6; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 24px;">Flourish Station</h1>
+            <h1 style="color: white; margin: 0; font-size: 24px;">FuelDesk</h1>
           </div>
           <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
             <h2 style="color: #1f2937;">You're invited!</h2>
             <p style="color: #6b7280;">Hi ${firstName},</p>
             <p style="color: #6b7280;">
               You have been invited to become the Branch Manager of
-              <strong>${branch.name}</strong> on Flourish Station.
+              <strong>${branch.name}</strong> on FuelDesk.
             </p>
             <p style="color: #6b7280;">
               Click the button below to accept the invitation and set up your account.
@@ -514,7 +514,7 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
   }
 };
 
-// ── Accept Invite ─────────────────────────────────────────────────────────────
+// â”€â”€ Accept Invite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const acceptInvite = async (req: any, res: Response) => {
   try {
     const { token, password } = req.body;
@@ -600,7 +600,7 @@ export const acceptInvite = async (req: any, res: Response) => {
     }
 
     return res.status(201).json({
-      message: "Account created successfully! Welcome to Flourish Station.",
+      message: "Account created successfully! Welcome to FuelDesk.",
       token: authToken,
       user: {
         id: newManager._id,
@@ -623,7 +623,7 @@ export const acceptInvite = async (req: any, res: Response) => {
   }
 };
 
-// ── Get Invites ───────────────────────────────────────────────────────────────
+// â”€â”€ Get Invites â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getInvites = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { branchId } = req.params;
@@ -652,7 +652,7 @@ export const getInvites = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// ── Revoke Invite ─────────────────────────────────────────────────────────────
+// â”€â”€ Revoke Invite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const revokeInvite = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { inviteId } = req.params;
@@ -665,7 +665,7 @@ export const revokeInvite = async (req: AuthenticatedRequest, res: Response) => 
   }
 };
 
-// ── Consolidated Branch Report ────────────────────────────────────────────────
+// â”€â”€ Consolidated Branch Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getConsolidatedReport = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const managerId = req.user?._id || req.user?.id;
@@ -780,7 +780,7 @@ export const getConsolidatedReport = async (req: AuthenticatedRequest, res: Resp
   }
 };
 
-// ── Cross-Branch Staff List ────────────────────────────────────────────────────
+// â”€â”€ Cross-Branch Staff List â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getBranchStaff = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const managerId = req.user?._id || req.user?.id;
@@ -844,7 +844,7 @@ export const getBranchStaff = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
-// ── Transfer Staff Between Branches ──────────────────────────────────────────
+// â”€â”€ Transfer Staff Between Branches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const transferStaff = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { staffId, fromStationId, toStationId } = req.body;

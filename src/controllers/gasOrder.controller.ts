@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import GasOrder from "../models/gasOrder.model";
@@ -26,7 +26,7 @@ const genReceiptNumber = async (stationId: string): Promise<string> => {
   return `RCT-${code}-${year}-${String(count + 1).padStart(4, "0")}`;
 };
 
-// ─── PUBLIC ENDPOINTS (no auth) ─────────────────────────────────────────────
+// â”€â”€â”€ PUBLIC ENDPOINTS (no auth) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getPublicStationInfo = async (req: Request, res: Response) => {
   try {
@@ -145,7 +145,7 @@ export const trackPublicOrder = async (req: Request, res: Response) => {
   }
 };
 
-// ─── CASHIER ENDPOINTS (authenticated) ──────────────────────────────────────
+// â”€â”€â”€ CASHIER ENDPOINTS (authenticated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getCashierInbox = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -226,7 +226,7 @@ export const confirmOrder = async (req: AuthenticatedRequest, res: Response) => 
     order.confirmedAt = new Date();
     await order.save();
 
-    return res.status(200).json({ message: "Order confirmed — receipt created", data: { order, sale } });
+    return res.status(200).json({ message: "Order confirmed â€” receipt created", data: { order, sale } });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
