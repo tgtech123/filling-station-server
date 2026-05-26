@@ -307,7 +307,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
 
     // Save receivedQuantity and unitCost (from supplier's invoice) onto each item
     procurement.items = procurement.items.map((item) => ({
-      ...item.toObject(),
+      ...(item as any).toObject(),
       receivedQuantity: getReceivedQty(item),
       unitCost: getUnitCost(item),
     })) as any;
