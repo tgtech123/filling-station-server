@@ -13,6 +13,25 @@ import InviteToken from "../models/inviteToken.model";
 import Tank from "../models/tanks.model";
 import { transporter } from "../middlewares/transporter.middleware";
 
+// Resolves the root parent station and returns all accessible station IDs for a manager.
+// When the JWT station is a branch, we traverse up one level to the parent so the manager
+// can always see and switch back to the main station and any sibling branches.
+async function getAccessibleIds(stationId: any, manager: any): Promise<string[]> {
+  const station = await FillingStation.findById(stationId).lean() as any;
+  let rootStation: any = station;
+  if (station?.parentStation) {
+    const parent = await FillingStation.findById(station.parentStation).lean() as any;
+    if (parent) rootStation = parent;
+  }
+  const ids = new Set<string>([
+    stationId?.toString(),
+    rootStation?._id?.toString(),
+    ...(manager?.managedStations || []).map((id: any) => id.toString()),
+    ...(rootStation?.branches || []).map((id: any) => id.toString()),
+  ].filter(Boolean) as string[]);
+  return [...ids];
+}
+
 // â”€â”€ Create Branch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const createBranch = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -176,7 +195,7 @@ export const createBranch = async (req: AuthenticatedRequest, res: Response) => 
           </div>
         `,
       }).catch((mailErr: any) => {
-        console.error("Branch creation invite email error:", mailErr.code, mailErr.message);
+        console.error("Branch creation invite email error:", mailErr.code, mailErr.message, mailErr.response || "");
       });
     }
 
@@ -208,15 +227,7 @@ export const getBranches = async (req: AuthenticatedRequest, res: Response) => {
     const stationId = req.user?.station;
 
     const manager = await Staff.findById(managerId).lean();
-    const parentStation = await FillingStation.findById(stationId).lean();
-
-    const allStationIds = [
-      stationId,
-      ...(manager?.managedStations || []),
-      ...(parentStation?.branches || []),
-    ].filter(Boolean);
-
-    const uniqueIds = [...new Set(allStationIds.map((id: any) => id.toString()))];
+    const uniqueIds = await getAccessibleIds(stationId, manager);
 
     const stations = await FillingStation.find({ _id: { $in: uniqueIds } })
       .select("name address city country isActive plan planStatus parentStation")
@@ -254,13 +265,7 @@ export const switchStation = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     const manager = await Staff.findById(managerId).lean();
-    const currentStation = await FillingStation.findById(req.user?.station).lean();
-
-    const allAccessible = [
-      req.user?.station?.toString(),
-      ...(manager?.managedStations || []).map((id: any) => id.toString()),
-      ...(currentStation?.branches || []).map((id: any) => id.toString()),
-    ].filter(Boolean);
+    const allAccessible = await getAccessibleIds(req.user?.station, manager);
 
     if (!allAccessible.includes(targetStationId.toString())) {
       return res.status(403).json({ error: "You do not have access to this station" });
@@ -309,15 +314,7 @@ export const getBranchOverview = async (req: AuthenticatedRequest, res: Response
     const managerId = req.user?._id || req.user?.id;
 
     const manager = await Staff.findById(managerId).lean();
-    const parentStation = await FillingStation.findById(stationId).lean();
-
-    const allIds = [
-      stationId,
-      ...(manager?.managedStations || []),
-      ...(parentStation?.branches || []),
-    ].filter(Boolean);
-
-    const uniqueIds = [...new Set(allIds.map((id: any) => id.toString()))];
+    const uniqueIds = await getAccessibleIds(stationId, manager);
 
     const stationsData = await Promise.all(
       uniqueIds.map(async (id) => {
@@ -359,7 +356,8 @@ export const getBranchOverview = async (req: AuthenticatedRequest, res: Response
           staffCount,
           todayShifts,
           todayRevenue: revenueAgg[0]?.total || 0,
-          isParent: id === stationId?.toString(),
+          isParent: !(station as any).parentStation,
+          isCurrent: id === stationId?.toString(),
         };
       })
     );
@@ -504,7 +502,7 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
         </div>
       `,
     }).catch((mailErr: any) => {
-      console.error("Branch invite email error:", mailErr.code, mailErr.message);
+      console.error("Branch invite email error:", mailErr.code, mailErr.message, mailErr.response || "");
     });
 
     return;
@@ -673,15 +671,7 @@ export const getConsolidatedReport = async (req: AuthenticatedRequest, res: Resp
     const { period = "month" } = req.query;
 
     const manager = await Staff.findById(managerId).lean();
-    const parentStation = await FillingStation.findById(stationId).lean();
-
-    const allIds = [
-      stationId,
-      ...(manager?.managedStations || []),
-      ...(parentStation?.branches || []),
-    ].filter(Boolean);
-
-    const uniqueIds = [...new Set(allIds.map((id: any) => id.toString()))];
+    const uniqueIds = await getAccessibleIds(stationId, manager);
 
     const now = new Date();
     let matchFrom: Date;
@@ -743,7 +733,7 @@ export const getConsolidatedReport = async (req: AuthenticatedRequest, res: Resp
           name: station.name,
           city: station.city,
           plan: station.plan,
-          isParent: id === stationId?.toString(),
+          isParent: !(station as any).parentStation,
           period,
           revenue: revenueAgg[0]?.revenue || 0,
           litresSold: Math.round(revenueAgg[0]?.litres || 0),
@@ -787,15 +777,7 @@ export const getBranchStaff = async (req: AuthenticatedRequest, res: Response) =
     const stationId = req.user?.station;
 
     const manager = await Staff.findById(managerId).lean();
-    const parentStation = await FillingStation.findById(stationId).lean();
-
-    const allIds = [
-      stationId,
-      ...(manager?.managedStations || []),
-      ...(parentStation?.branches || []),
-    ].filter(Boolean);
-
-    const uniqueIds = [...new Set(allIds.map((id: any) => id.toString()))];
+    const uniqueIds = await getAccessibleIds(stationId, manager);
 
     const allStaff = await Staff.find({
       station: { $in: uniqueIds },
