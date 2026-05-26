@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { AuthenticatedRequest } from "../interfaces";
 import SupportTicket from "../models/supportTicket.model";
 import FAQ from "../models/faq.model";
@@ -25,9 +25,9 @@ const PRIORITY_COLOR: Record<string, string> = {
 
 const TICKET_PLANS = ["enterprise", "enterprise-pro", "enterprise-max"];
 
-// ─────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // USER-FACING
-// ─────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // POST /api/support/tickets
 export const createTicket = async (req: AuthenticatedRequest, res: Response) => {
@@ -73,8 +73,9 @@ export const createTicket = async (req: AuthenticatedRequest, res: Response) => 
     const settings = await PlatformSettings.findOne().lean() as any;
     if (settings?.contactEmail) {
       transporter.sendMail({
+        from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
         to: settings.contactEmail,
-        subject: `[${priority.toUpperCase()}] New Support Ticket — ${title}`,
+        subject: `[${priority.toUpperCase()}] New Support Ticket â€” ${title}`,
         html: `
           <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #eee;border-radius:8px;overflow:hidden;">
             <div style="background:#0080ff;padding:20px;color:white;">
@@ -140,9 +141,9 @@ export const getFaqs = async (req: Request, res: Response) => {
   }
 };
 
-// ─────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // ADMIN-FACING
-// ─────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const PRIORITY_ORDER: Record<string, number> = {
   urgent: 0,
@@ -203,8 +204,9 @@ export const respondToTicket = async (req: AuthenticatedRequest, res: Response) 
 
     // Email user
     transporter.sendMail({
+      from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
       to: ticket.userEmail,
-      subject: `Re: ${ticket.title} — Your support ticket has been answered`,
+      subject: `Re: ${ticket.title} â€” Your support ticket has been answered`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #eee;border-radius:8px;overflow:hidden;">
           <div style="background:#0080ff;padding:20px;color:white;">
@@ -267,7 +269,7 @@ export const updateTicketStatus = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
-// ─── FAQ CRUD (admin) ──────────────────────────────
+// â”€â”€â”€ FAQ CRUD (admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // POST /api/admin/support/faqs
 export const createFaq = async (req: AuthenticatedRequest, res: Response) => {

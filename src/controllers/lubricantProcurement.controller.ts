@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces";
 import LubricantProcurement from "../models/lubricantProcurement.model";
 import Lubricant from "../models/lubricant.model";
@@ -7,7 +7,7 @@ import Staff from "../models/staff.model";
 import Activity from "../models/activity.model";
 import { transporter } from "../middlewares/transporter.middleware";
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function buildProcurementNumber(stationId: any): Promise<string> {
   const year = new Date().getFullYear();
@@ -15,7 +15,7 @@ async function buildProcurementNumber(stationId: any): Promise<string> {
   return `PRO-${year}-${String(count + 1).padStart(3, "0")}`;
 }
 
-// ─── GET /api/procurement/reorder-items ───────────────────────────────────────
+// â”€â”€â”€ GET /api/procurement/reorder-items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getReorderItems = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -51,7 +51,7 @@ export const getReorderItems = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
-// ─── POST /api/procurement ─────────────────────────────────────────────────────
+// â”€â”€â”€ POST /api/procurement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const createProcurement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?._id || req.user?.id;
@@ -89,7 +89,7 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// ─── GET /api/procurement ──────────────────────────────────────────────────────
+// â”€â”€â”€ GET /api/procurement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getProcurements = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -115,7 +115,7 @@ export const getProcurements = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
-// ─── GET /api/procurement/:id ──────────────────────────────────────────────────
+// â”€â”€â”€ GET /api/procurement/:id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getProcurementById = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -131,7 +131,7 @@ export const getProcurementById = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
-// ─── PATCH /api/procurement/:id ────────────────────────────────────────────────
+// â”€â”€â”€ PATCH /api/procurement/:id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const updateProcurement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -163,7 +163,7 @@ export const updateProcurement = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// ─── PATCH /api/procurement/:id/submit ────────────────────────────────────────
+// â”€â”€â”€ PATCH /api/procurement/:id/submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const submitProcurement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -204,9 +204,9 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
     const stationDoc  = await FillingStation.findById(stationId).select("name address phone").lean();
     const staffDoc    = await Staff.findById(req.user?._id || req.user?.id).select("firstName lastName").lean();
 
-    // Respond immediately — don't block on SMTP
+    // Respond immediately â€” don't block on SMTP
     res.status(200).json({
-      message: willEmail ? "Procurement submitted — sending order to supplier" : "Procurement submitted",
+      message: willEmail ? "Procurement submitted â€” sending order to supplier" : "Procurement submitted",
       data: { ...procurement.toObject(), emailPending: willEmail },
     });
 
@@ -214,7 +214,7 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
       transporter.sendMail({
         from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
         to:      recipient,
-        subject: `Lubricant Purchase Order — ${procurement.procurementNumber}`,
+        subject: `Lubricant Purchase Order â€” ${procurement.procurementNumber}`,
         html: buildLubricantOrderEmail({
           orderNumber:  procurement.procurementNumber,
           stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
@@ -247,7 +247,7 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// ─── PATCH /api/procurement/:id/ordered ───────────────────────────────────────
+// â”€â”€â”€ PATCH /api/procurement/:id/ordered â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const markOrdered = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -271,7 +271,7 @@ export const markOrdered = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// ─── PATCH /api/procurement/:id/received ──────────────────────────────────────
+// â”€â”€â”€ PATCH /api/procurement/:id/received â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const markReceived = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -286,7 +286,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(400).json({ message: "Only submitted or ordered procurements can be marked as received" });
     }
 
-    // receivedItems: [{ lubricantId, receivedQuantity, unitCost? }] — sent from client
+    // receivedItems: [{ lubricantId, receivedQuantity, unitCost? }] â€” sent from client
     // Falls back to stored values if not provided (backwards compatible)
     const receivedItems: { lubricantId: string; receivedQuantity: number; unitCost?: number }[] = req.body.receivedItems || [];
 
@@ -338,8 +338,8 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       status: "success",
       title: "Procurement Received",
       description: isManager
-        ? `Procurement ${procurement.procurementNumber} — ${procurement.items.length} product(s) stock levels updated${shortItems.length ? ` (${shortItems.length} item(s) short delivered)` : ""}`
-        : `Procurement ${procurement.procurementNumber} received by supervisor — manager must update stock manually`,
+        ? `Procurement ${procurement.procurementNumber} â€” ${procurement.items.length} product(s) stock levels updated${shortItems.length ? ` (${shortItems.length} item(s) short delivered)` : ""}`
+        : `Procurement ${procurement.procurementNumber} received by supervisor â€” manager must update stock manually`,
       timestamp: new Date(),
       severity: shortItems.length ? "warning" : "info",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -355,7 +355,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
   }
 };
 
-// ─── PATCH /api/procurement/:id/payment ──────────────────────────────────────
+// â”€â”€â”€ PATCH /api/procurement/:id/payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const recordPayment = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -376,7 +376,7 @@ export const recordPayment = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ message: "A valid payment amount is required" });
     }
 
-    // Total owed = sum of actual received qty × unit cost (the supplier's invoice amount)
+    // Total owed = sum of actual received qty Ã— unit cost (the supplier's invoice amount)
     const totalCost = procurement.items.reduce(
       (s, item) => s + (item.receivedQuantity ?? item.quantityToProcure) * item.unitCost,
       0
@@ -407,7 +407,7 @@ export const recordPayment = async (req: AuthenticatedRequest, res: Response) =>
       type:      "procurement",
       status:    "success",
       title:     procurement.paymentStatus === "paid" ? "Procurement Fully Paid" : "Partial Payment Recorded",
-      description: `₦${paid.toLocaleString()} paid for ${procurement.procurementNumber} (${procurement.vendorName}) by ${paidByName}`,
+      description: `â‚¦${paid.toLocaleString()} paid for ${procurement.procurementNumber} (${procurement.vendorName}) by ${paidByName}`,
       timestamp:  new Date(),
       severity:   "info",
       expiresAt:  new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -424,7 +424,7 @@ export const recordPayment = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// ─── DELETE /api/procurement/:id ──────────────────────────────────────────────
+// â”€â”€â”€ DELETE /api/procurement/:id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const deleteProcurement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -445,7 +445,7 @@ export const deleteProcurement = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// ─── Email template (no prices — supplier fills them in) ──────────────────────
+// â”€â”€â”€ Email template (no prices â€” supplier fills them in) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildLubricantOrderEmail(p: {
   orderNumber: string; stationName: string; stationAddr: string; stationPhone: string;
   managerName: string; supplierName: string;
@@ -455,8 +455,8 @@ function buildLubricantOrderEmail(p: {
   const rows = p.items.map((i, idx) => `
     <tr style="${idx % 2 === 0 ? "background:#f9fafb;" : ""}">
       <td style="padding:10px 14px;border:1px solid #e5e7eb;font-weight:600;">${i.productName}</td>
-      <td style="padding:10px 14px;border:1px solid #e5e7eb;">${i.brand || "—"}</td>
-      <td style="padding:10px 14px;border:1px solid #e5e7eb;">${i.productType || "—"}</td>
+      <td style="padding:10px 14px;border:1px solid #e5e7eb;">${i.brand || "â€”"}</td>
+      <td style="padding:10px 14px;border:1px solid #e5e7eb;">${i.productType || "â€”"}</td>
       <td style="padding:10px 14px;border:1px solid #e5e7eb;text-align:center;font-weight:700;">${i.quantityToProcure}</td>
       <td style="padding:10px 14px;border:1px solid #bfdbfe;background:#eff6ff;text-align:center;color:#9ca3af;font-style:italic;">___________</td>
     </tr>`).join("");
@@ -494,7 +494,7 @@ function buildLubricantOrderEmail(p: {
           <th style="padding:10px 14px;text-align:left;border:1px solid #1d4ed8;">Brand</th>
           <th style="padding:10px 14px;text-align:left;border:1px solid #1d4ed8;">Type</th>
           <th style="padding:10px 14px;text-align:center;border:1px solid #1d4ed8;">Qty Needed</th>
-          <th style="padding:10px 14px;text-align:center;border:1px solid #93c5fd;background:#bfdbfe;color:#1e3a5f;">Unit Price (₦)</th>
+          <th style="padding:10px 14px;text-align:center;border:1px solid #93c5fd;background:#bfdbfe;color:#1e3a5f;">Unit Price (â‚¦)</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -520,7 +520,7 @@ function buildLubricantOrderEmail(p: {
 
     <p style="margin-top:20px;font-size:13px;color:#888;">
       This is an official purchase order from <strong>${p.stationName}</strong> powered by FuelDesk.
-      Please do not reply to this automated email — contact the station directly using the details above.
+      Please do not reply to this automated email â€” contact the station directly using the details above.
     </p>
   </div>
   <div style="background:#f9fafb;padding:14px;text-align:center;border-radius:0 0 12px 12px;border:1px solid #e5e7eb;border-top:none;">

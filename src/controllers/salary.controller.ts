@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import mongoose from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import SalaryDraft, { ISalaryEntry } from "../models/salary.model";
@@ -25,7 +25,7 @@ const normAchievement = (
   return null;
 };
 
-// Build a Map<key → bonusAmount> from the station's BonusStructure documents
+// Build a Map<key â†’ bonusAmount> from the station's BonusStructure documents
 const buildBonusMap = (structures: any[]): Map<string, number> => {
   const map = new Map<string, number>();
   structures.forEach((b) => {
@@ -35,7 +35,7 @@ const buildBonusMap = (structures: any[]): Map<string, number> => {
   return map;
 };
 
-// Recalculate derived amounts — pension is applied only when pensionEnabled = true
+// Recalculate derived amounts â€” pension is applied only when pensionEnabled = true
 const recalcEntry = (e: Partial<ISalaryEntry>, pensionEnabled = true): Partial<ISalaryEntry> => {
   const basic = Number(e.basicSalary) || 0;
   const ba = e.bonusAmounts ?? { monthlySalesTarget: 0, zeroDiscrepancies: 0, topPerformer: 0 };
@@ -62,7 +62,7 @@ const recalcEntry = (e: Partial<ISalaryEntry>, pensionEnabled = true): Partial<I
   };
 };
 
-// Build a fresh entry — bonus amounts prefilled from the station's BonusStructure
+// Build a fresh entry â€” bonus amounts prefilled from the station's BonusStructure
 const buildFreshEntry = (
   s: any,
   structureByRole: Map<string, any>,
@@ -95,7 +95,7 @@ const buildFreshEntry = (
   return recalcEntry(base, pensionEnabled);
 };
 
-// Resolve caller's full name — prefer token fields, fall back to DB
+// Resolve caller's full name â€” prefer token fields, fall back to DB
 const resolveFullName = async (userId: string, tokenFirst?: string, tokenLast?: string): Promise<string> => {
   if (tokenFirst && tokenLast) return `${tokenFirst} ${tokenLast}`;
   const s = await Staff.findById(userId).select("firstName lastName").lean();
@@ -113,7 +113,7 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
 
     const stationOid = new mongoose.Types.ObjectId(station);
 
-    // Always fetch the live staff roster — this is the source of truth
+    // Always fetch the live staff roster â€” this is the source of truth
     const staffList = await Staff.find({
       station: stationOid,
       role: { $nin: ["manager", "admin"] },
@@ -123,7 +123,7 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
 
     const draft = await SalaryDraft.findOne({ station: stationOid, month });
 
-    // ── Case 1: No draft yet — create from scratch ────────────────────────────
+    // â”€â”€ Case 1: No draft yet â€” create from scratch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (!draft) {
       const [structures, bonusStructures] = await Promise.all([
         CommissionStructure.find({ fillingStation: stationOid }).lean(),
@@ -149,21 +149,21 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
       return res.status(200).json({ success: true, data: newDraft });
     }
 
-    // ── Case 2: Draft is locked (submitted / validated) — return as-is ────────
+    // â”€â”€ Case 2: Draft is locked (submitted / validated) â€” return as-is â”€â”€â”€â”€â”€â”€â”€â”€
     if (draft.status !== "draft") {
       return res.status(200).json({ success: true, data: draft });
     }
 
-    // ── Case 3: Draft exists and is editable — sync staff roster ─────────────
+    // â”€â”€ Case 3: Draft exists and is editable â€” sync staff roster â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     //
     // Rules:
-    //   • Staff-owned fields (name, role, shiftType, payType, basicSalary) are
+    //   â€¢ Staff-owned fields (name, role, shiftType, payType, basicSalary) are
     //     always refreshed from the live Staff document.  Salary amounts are
     //     recalculated because basicSalary may have changed.
-    //   • Accountant-owned fields (bonusPercentages, taxPercentage, shortage,
+    //   â€¢ Accountant-owned fields (bonusPercentages, taxPercentage, shortage,
     //     bankDetails) are NEVER overwritten.
-    //   • New staff members are appended with default accountant fields.
-    //   • Staff who no longer exist in the station are silently removed.
+    //   â€¢ New staff members are appended with default accountant fields.
+    //   â€¢ Staff who no longer exist in the station are silently removed.
 
     const existingIds = new Set(draft.entries.map((e) => e.staff.toString()));
     let modified = false;
@@ -191,14 +191,14 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
         const merged: Partial<ISalaryEntry> = {
           staff:     e.staff,
           staffCode: e.staffCode,
-          // — staff-owned (refreshed) —
+          // â€” staff-owned (refreshed) â€”
           firstName: s.firstName,
           lastName:  s.lastName,
           role:      s.role,
           shiftType: s.shiftType ?? "",
           payType:   s.payType ?? "Monthly",
           basicSalary: s.amount ?? 0,
-          // — accountant-owned (preserved) —
+          // â€” accountant-owned (preserved) â€”
           bonusAmounts: {
             monthlySalesTarget: e.bonusAmounts.monthlySalesTarget,
             zeroDiscrepancies:  e.bonusAmounts.zeroDiscrepancies,
@@ -211,7 +211,7 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
             acctName: e.bankDetails.acctName,
             bankName: e.bankDetails.bankName,
           },
-          // placeholders — will be recalculated by recalcEntry
+          // placeholders â€” will be recalculated by recalcEntry
           totalBonus: 0,
           taxAmount:  0,
           employeePension: 0,
@@ -320,7 +320,7 @@ const displayName = (populated: any, stored: string | undefined): string => {
   return "";
 };
 
-// GET /api/salary/pending  — manager sees submitted drafts
+// GET /api/salary/pending  â€” manager sees submitted drafts
 export const getPendingDrafts = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { station } = req.user!;
@@ -348,7 +348,7 @@ export const getPendingDrafts = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
-// POST /api/salary/:id/validate  — manager validates + auto-records payroll expense
+// POST /api/salary/:id/validate  â€” manager validates + auto-records payroll expense
 export const validateDraft = async (req: AuthenticatedRequest, res: Response) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -387,7 +387,7 @@ export const validateDraft = async (req: AuthenticatedRequest, res: Response) =>
         {
           fillingStation: stationOid,
           category: "Salaries",
-          description: `Payroll for ${monthName} — ${draft.entries.length} staff`,
+          description: `Payroll for ${monthName} â€” ${draft.entries.length} staff`,
           amount: totalPayroll,
           submittedBy: draft.preparedBy,
           status: "Approved",
@@ -420,7 +420,7 @@ export const validateDraft = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// GET /api/salary/history  — list validated records (summary, no entries)
+// GET /api/salary/history  â€” list validated records (summary, no entries)
 export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { station } = req.user!;
@@ -448,7 +448,7 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// GET /api/salary/:id  — full record with entries + station info
+// GET /api/salary/:id  â€” full record with entries + station info
 export const getRecord = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;

@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import GasProcurement from "../models/gasProcurement.model";
@@ -8,7 +8,7 @@ import Staff from "../models/staff.model";
 import { seedGasDefaults } from "./gasSettings.controller";
 import { transporter } from "../middlewares/transporter.middleware";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const genOrderNumber = async (stationId: string): Promise<string> => {
   const st = await FillingStation.findById(stationId).select("gasStationCode").lean();
   const code = (st as any)?.gasStationCode || "GAS";
@@ -20,12 +20,12 @@ const genOrderNumber = async (stationId: string): Promise<string> => {
 const statusLabel: Record<string, string> = {
   ordered:           "Order Placed",
   awaiting_delivery: "Awaiting Delivery",
-  delivered:         "Delivered – Pending Validation",
+  delivered:         "Delivered â€“ Pending Validation",
   validated:         "Validated & Added to Inventory",
   cancelled:         "Cancelled",
 };
 
-// ── 1. Manager places order ───────────────────────────────────────────────────
+// â”€â”€ 1. Manager places order â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const createProcurement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -81,14 +81,14 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
     const recipient = supplierEmail?.trim() || "";
     const willEmail = !!(sendEmail && recipient);
 
-    // Respond immediately — don't block on SMTP
+    // Respond immediately â€” don't block on SMTP
     if (willEmail) {
       procurement.status = "awaiting_delivery";
       await GasProcurement.findByIdAndUpdate(procurement._id, { status: "awaiting_delivery" });
     }
 
     res.status(201).json({
-      message: willEmail ? "Order placed — sending email to supplier" : "Order placed",
+      message: willEmail ? "Order placed â€” sending email to supplier" : "Order placed",
       data: { ...procurement.toObject(), emailSent: false, emailPending: willEmail },
     });
 
@@ -97,7 +97,7 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
       transporter.sendMail({
         from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
         to:      recipient,
-        subject: `Gas Purchase Order — ${orderNumber}`,
+        subject: `Gas Purchase Order â€” ${orderNumber}`,
         html: buildOrderEmail({
           orderNumber,
           stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
@@ -127,7 +127,7 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// ── 2. Supervisor confirms delivery ──────────────────────────────────────────
+// â”€â”€ 2. Supervisor confirms delivery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const confirmDelivery = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -153,13 +153,13 @@ export const confirmDelivery = async (req: AuthenticatedRequest, res: Response) 
     order.status              = "delivered";
     await order.save();
 
-    return res.status(200).json({ message: "Delivery confirmed — awaiting manager validation", data: order });
+    return res.status(200).json({ message: "Delivery confirmed â€” awaiting manager validation", data: order });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
 };
 
-// ── 3. Manager validates — stock added to specific tank here ─────────────────
+// â”€â”€ 3. Manager validates â€” stock added to specific tank here â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const validateProcurement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -213,7 +213,7 @@ export const validateProcurement = async (req: AuthenticatedRequest, res: Respon
     ]);
 
     return res.status(200).json({
-      message: `Validated — ${finalQty} kg added to "${tank.name}"`,
+      message: `Validated â€” ${finalQty} kg added to "${tank.name}"`,
       data: order,
     });
   } catch (err: any) {
@@ -221,7 +221,7 @@ export const validateProcurement = async (req: AuthenticatedRequest, res: Respon
   }
 };
 
-// ── 4. Cancel order ───────────────────────────────────────────────────────────
+// â”€â”€ 4. Cancel order â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const cancelProcurement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -239,7 +239,7 @@ export const cancelProcurement = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// ── 5. Resend email ───────────────────────────────────────────────────────────
+// â”€â”€ 5. Resend email â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const resendOrderEmail = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -262,7 +262,7 @@ export const resendOrderEmail = async (req: AuthenticatedRequest, res: Response)
     transporter.sendMail({
       from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
       to:      recipient,
-      subject: `Gas Purchase Order — ${order.orderNumber}`,
+      subject: `Gas Purchase Order â€” ${order.orderNumber}`,
       html: buildOrderEmail({
         orderNumber:  order.orderNumber,
         stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
@@ -292,7 +292,7 @@ export const resendOrderEmail = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
-// ── 6. List / get ─────────────────────────────────────────────────────────────
+// â”€â”€ 6. List / get â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const listProcurements = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -343,7 +343,7 @@ export const getProcurement = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
-// ── Email template ────────────────────────────────────────────────────────────
+// â”€â”€ Email template â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildOrderEmail(p: {
   orderNumber: string; stationName: string; stationAddr: string; stationPhone: string;
   managerName: string; supplierName: string; quantityKg: number; pricePerKg: number;
@@ -353,7 +353,7 @@ function buildOrderEmail(p: {
   return `
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333;">
   <div style="background:linear-gradient(135deg,#f97316,#f59e0b);padding:32px 24px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="color:#fff;margin:0;font-size:22px;">🔥 Gas Purchase Order</h1>
+    <h1 style="color:#fff;margin:0;font-size:22px;">ðŸ”¥ Gas Purchase Order</h1>
     <p style="color:rgba(255,255,255,0.85);margin:6px 0 0;font-size:15px;">${p.orderNumber}</p>
   </div>
 
@@ -378,11 +378,11 @@ function buildOrderEmail(p: {
       </tr>
       <tr>
         <td style="padding:10px 14px;font-weight:600;border:1px solid #e5e7eb;">Unit Price</td>
-        <td style="padding:10px 14px;border:1px solid #e5e7eb;">₦${fmt(p.pricePerKg)} / kg</td>
+        <td style="padding:10px 14px;border:1px solid #e5e7eb;">â‚¦${fmt(p.pricePerKg)} / kg</td>
       </tr>
       <tr style="background:#fff7ed;">
         <td style="padding:10px 14px;font-weight:700;border:1px solid #fed7aa;font-size:15px;">Total Amount</td>
-        <td style="padding:10px 14px;border:1px solid #fed7aa;font-weight:700;font-size:16px;color:#ea580c;">₦${fmt(p.totalCost)}</td>
+        <td style="padding:10px 14px;border:1px solid #fed7aa;font-weight:700;font-size:16px;color:#ea580c;">â‚¦${fmt(p.totalCost)}</td>
       </tr>
       ${p.notes ? `<tr><td style="padding:10px 14px;font-weight:600;border:1px solid #e5e7eb;">Notes</td><td style="padding:10px 14px;border:1px solid #e5e7eb;">${p.notes}</td></tr>` : ""}
     </table>
@@ -399,7 +399,7 @@ function buildOrderEmail(p: {
 
     <p style="margin-top:20px;font-size:13px;color:#888;">
       This is an official purchase order from <strong>${p.stationName}</strong> powered by FuelDesk.
-      Please do not reply to this email — contact the station directly using the details above.
+      Please do not reply to this email â€” contact the station directly using the details above.
     </p>
   </div>
 

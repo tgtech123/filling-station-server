@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import GasPricing from "../models/gasPricing.model";
@@ -27,7 +27,7 @@ export const seedGasDefaults = async (fillingStationId: Types.ObjectId) => {
   }
 };
 
-// ─── Gas Department Toggle ────────────────────────────────────────────────────
+// â”€â”€â”€ Gas Department Toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getGasStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -77,7 +77,7 @@ export const getGasSettings = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
-// ─── Pricing ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Pricing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getCurrentPricing = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -128,7 +128,7 @@ export const setPrice = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// ─── Cylinder Sizes ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Cylinder Sizes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getCylinderSizes = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -171,7 +171,7 @@ export const toggleCylinderSize = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
-// ─── Gas Bank, QR & Loyalty Settings ─────────────────────────────────────────
+// â”€â”€â”€ Gas Bank, QR & Loyalty Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const updateGasSettings = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -186,15 +186,15 @@ export const updateGasSettings = async (req: AuthenticatedRequest, res: Response
     // Validate loyalty values if provided
     if (gasLoyaltyPointsPerK !== undefined) {
       const v = Number(gasLoyaltyPointsPerK);
-      if (isNaN(v) || v < 1) return res.status(400).json({ message: "gasLoyaltyPointsPerK must be ≥ 1" });
+      if (isNaN(v) || v < 1) return res.status(400).json({ message: "gasLoyaltyPointsPerK must be â‰¥ 1" });
     }
     if (gasLoyaltyMinRedeem !== undefined) {
       const v = Number(gasLoyaltyMinRedeem);
-      if (isNaN(v) || v < 1) return res.status(400).json({ message: "gasLoyaltyMinRedeem must be ≥ 1" });
+      if (isNaN(v) || v < 1) return res.status(400).json({ message: "gasLoyaltyMinRedeem must be â‰¥ 1" });
     }
     if (gasLoyaltyNairaPerPoint !== undefined) {
       const v = Number(gasLoyaltyNairaPerPoint);
-      if (isNaN(v) || v < 0.01) return res.status(400).json({ message: "gasLoyaltyNairaPerPoint must be ≥ 0.01" });
+      if (isNaN(v) || v < 0.01) return res.status(400).json({ message: "gasLoyaltyNairaPerPoint must be â‰¥ 0.01" });
     }
 
     const fields: any = { gasBankName, gasBankAccount, gasBankAccountName, gasQREnabled, gasStationCode };
@@ -239,7 +239,7 @@ export const getLoyaltyConfig = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
-// ─── Inventory (aggregated from all tanks) ────────────────────────────────────
+// â”€â”€â”€ Inventory (aggregated from all tanks) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getInventory = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -281,7 +281,7 @@ export const getInventory = async (req: AuthenticatedRequest, res: Response) => 
   }
 };
 
-// ─── Gas Tanks ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Gas Tanks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const listTanks = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -337,7 +337,7 @@ export const updateTank = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// ─── Gas Pumps ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Gas Pumps â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const listPumps = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -407,7 +407,7 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// ─── Gas Staff ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Gas Staff â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getGasStaff = async (req: AuthenticatedRequest, res: Response) => {
   try {

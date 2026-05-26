@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces";
 import Pump from "../models/pump.model";
 import mongoose from "mongoose";
@@ -8,7 +8,7 @@ import Notification from "../models/notification.model";
 
 export const addPump = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // 0️⃣ Get filling station from auth context
+    // 0ï¸âƒ£ Get filling station from auth context
     const fillingStation = req.user?.station;
     if (!fillingStation) {
       return res
@@ -16,7 +16,7 @@ export const addPump = async (req: AuthenticatedRequest, res: Response) => {
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 1️⃣ Parse inputs
+    // 1ï¸âƒ£ Parse inputs
     const { tankId, pricePerLtr, startDate, title } = req.body as {
       tankId?: string;
       pricePerLtr?: number;
@@ -30,7 +30,7 @@ export const addPump = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // 2️⃣ Validate inputs
+    // 2ï¸âƒ£ Validate inputs
     if (!mongoose.isValidObjectId(tankId)) {
       return res.status(400).json({ error: "Invalid tankId" });
     }
@@ -40,7 +40,7 @@ export const addPump = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: "pricePerLtr must be >= 0" });
     }
 
-    // 3️⃣ Find the Tank document for this station
+    // 3ï¸âƒ£ Find the Tank document for this station
     const stationTankDoc = await Tank.findOne({ fillingStation }).lean();
     if (!stationTankDoc) {
       return res
@@ -48,7 +48,7 @@ export const addPump = async (req: AuthenticatedRequest, res: Response) => {
         .json({ error: "No tank record found for this filling station" });
     }
 
-    // 4️⃣ Find the specific tank inside the tanks array
+    // 4ï¸âƒ£ Find the specific tank inside the tanks array
     const tank = (stationTankDoc.tanks || []).find(
       (t: any) => String(t._id) === String(tankId)
     );
@@ -58,7 +58,7 @@ export const addPump = async (req: AuthenticatedRequest, res: Response) => {
         .json({ error: "Tank not found for this filling station" });
     }
 
-    // 5️⃣ Proceed to create or update Pump document
+    // 5ï¸âƒ£ Proceed to create or update Pump document
     let tankPump = await Pump.findOne({ tank: tankId });
 
     // determine title: if caller provided title use it, else compute from existing pumps
@@ -92,7 +92,7 @@ export const addPump = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // 6️⃣ Append a new pump item to existing pumpDoc
+    // 6ï¸âƒ£ Append a new pump item to existing pumpDoc
     // compute next title based on current pumps length (safe for most cases)
     const nextNumber = (tankPump.pumps && tankPump.pumps.length) ? tankPump.pumps.length + 1 : 1;
     const newTitle = computedTitle ?? `Pump ${nextNumber}`;
@@ -136,14 +136,14 @@ export const getAllPumps = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
 
-    // 1️⃣ Authorization check
+    // 1ï¸âƒ£ Authorization check
     if (!fillingStation) {
       return res
         .status(403)
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Find the Tank document(s) for this filling station
+    // 2ï¸âƒ£ Find the Tank document(s) for this filling station
     const stationTankDoc = await Tank.findOne({ fillingStation }).select("tanks").lean();
     if (!stationTankDoc) {
       return res.status(404).json({
@@ -162,18 +162,18 @@ export const getAllPumps = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // 3️⃣ Build lookup (tankId → fuelType)
+    // 3ï¸âƒ£ Build lookup (tankId â†’ fuelType)
     const tankSubIds = tankSubs.map((t: any) => String(t._id));
     const tanksMap = new Map<string, string | undefined>(
       tankSubs.map((t: any) => [String(t._id), (t as any).fuelType])
     );
 
-    // 4️⃣ Find all Pump documents belonging to the station’s tanks
+    // 4ï¸âƒ£ Find all Pump documents belonging to the stationâ€™s tanks
     const pumpDocs = await Pump.find({
       tank: { $in: tankSubIds.map((id) => new mongoose.Types.ObjectId(id)) },
     }).lean();
 
-    // 5️⃣ Flatten pump data and attach tank info
+    // 5ï¸âƒ£ Flatten pump data and attach tank info
     const flattened: any[] = [];
     let totalLitresSold = 0;
     let totalSalesValue = 0;
@@ -215,7 +215,7 @@ export const getAllPumps = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
-    // 6️⃣ If no pumps found
+    // 6ï¸âƒ£ If no pumps found
     if (flattened.length === 0) {
       return res.status(200).json({
         message: "No pumps found for the tanks in this filling station",
@@ -228,7 +228,7 @@ export const getAllPumps = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // 7️⃣ Count by status
+    // 7ï¸âƒ£ Count by status
     const activeCount = flattened.filter(
       (p) => String(p.status).toLowerCase() === "active"
     ).length;
@@ -236,7 +236,7 @@ export const getAllPumps = async (req: AuthenticatedRequest, res: Response) => {
       (p) => String(p.status).toLowerCase() === "maintenance"
     ).length;
 
-    // 8️⃣ Return full response
+    // 8ï¸âƒ£ Return full response
     return res.status(200).json({
       message: "Pumps retrieved successfully",
       totalPumps: flattened.length,
@@ -287,22 +287,22 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: "Valid pumpId is required" });
     }
 
-    // 1️⃣ Get the Tank document for this station (contains tanks array)
+    // 1ï¸âƒ£ Get the Tank document for this station (contains tanks array)
     const stationTankDoc = await Tank.findOne({ fillingStation }).select("tanks").lean();
     if (!stationTankDoc || !Array.isArray(stationTankDoc.tanks) || stationTankDoc.tanks.length === 0) {
       return res.status(404).json({ error: "No tanks found for this filling station" });
     }
 
-    // 2️⃣ Build list of tank subdoc ids (as ObjectId) for query
+    // 2ï¸âƒ£ Build list of tank subdoc ids (as ObjectId) for query
     const tankSubIds = stationTankDoc.tanks.map((t: any) => new mongoose.Types.ObjectId(String(t._id)));
 
-    // 3️⃣ Find the Pump document that contains the pump subdoc and whose tank belongs to this station
+    // 3ï¸âƒ£ Find the Pump document that contains the pump subdoc and whose tank belongs to this station
     const pumpDoc = await Pump.findOne({ tank: { $in: tankSubIds }, "pumps._id": pumpId });
     if (!pumpDoc) {
       return res.status(404).json({ error: "Pump not found for your filling station" });
     }
 
-    // 4️⃣ Use findIndex to get subdoc index (TS-safe)
+    // 4ï¸âƒ£ Use findIndex to get subdoc index (TS-safe)
     const pumpsArray = (pumpDoc as any).pumps as any[];
     const idx = pumpsArray.findIndex((p) => String(p._id) === String(pumpId));
     if (idx === -1) {
@@ -311,7 +311,7 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
 
     const pumpSubdoc = pumpsArray[idx];
 
-    // 5️⃣ Update allowed fields (title and tank/fuelType NOT updated here)
+    // 5ï¸âƒ£ Update allowed fields (title and tank/fuelType NOT updated here)
     if (pricePerLtr !== undefined) {
       const priceNum = Number(pricePerLtr);
       if (Number.isNaN(priceNum) || priceNum < 0) {
@@ -367,7 +367,7 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
       pumpSubdoc.dailyLtrSales = normalized;
     }
 
-    // 6️⃣ mark modified and save
+    // 6ï¸âƒ£ mark modified and save
     (pumpDoc as any).markModified("pumps");
     await pumpDoc.save();
 
@@ -377,7 +377,7 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
         fillingStation,
         type: "maintenance",
         title: "Maintenance Scheduled",
-        description: `${pumpSubdoc.title} — scheduled for maintenance`,
+        description: `${pumpSubdoc.title} â€” scheduled for maintenance`,
         timestamp: new Date(),
         severity: null,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -395,11 +395,11 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
       }).catch((err) => console.error("Notification error (pump maintenance):", err));
     }
 
-    // 7️⃣ Find the tank subdocument inside the stationTankDoc to get fuelType
+    // 7ï¸âƒ£ Find the tank subdocument inside the stationTankDoc to get fuelType
     const tankIdStr = String(pumpDoc.tank);
     const tankSub = (stationTankDoc.tanks as any[]).find((t) => String(t._id) === tankIdStr);
 
-    // 8️⃣ Return updated pump subdoc
+    // 8ï¸âƒ£ Return updated pump subdoc
     const updatedPump = (pumpDoc as any).pumps[idx];
 
     return res.status(200).json({
@@ -428,34 +428,34 @@ export const deletePump = async (req: AuthenticatedRequest, res: Response) => {
     const fillingStation = req.user?.station;
     const { pumpId } = req.body as { pumpId?: string };
 
-    // 1️⃣ Check authorization
+    // 1ï¸âƒ£ Check authorization
     if (!fillingStation) {
       return res
         .status(403)
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Validate pumpId
+    // 2ï¸âƒ£ Validate pumpId
     if (!pumpId || !mongoose.isValidObjectId(pumpId)) {
       return res.status(400).json({ error: "Valid pumpId is required" });
     }
 
-    // 3️⃣ Find the Tank document for this station (contains tanks array)
+    // 3ï¸âƒ£ Find the Tank document for this station (contains tanks array)
     const stationTankDoc = await Tank.findOne({ fillingStation }).select("tanks").lean();
     if (!stationTankDoc || !Array.isArray(stationTankDoc.tanks) || stationTankDoc.tanks.length === 0) {
       return res.status(404).json({ error: "No tanks found for this filling station" });
     }
 
-    // 4️⃣ Build list of tank subdoc ids (as ObjectId) for query
+    // 4ï¸âƒ£ Build list of tank subdoc ids (as ObjectId) for query
     const tankSubIds = stationTankDoc.tanks.map((t: any) => new mongoose.Types.ObjectId(String(t._id)));
 
-    // 5️⃣ Find pump document containing this pumpId and belonging to any of these tank subdocs
+    // 5ï¸âƒ£ Find pump document containing this pumpId and belonging to any of these tank subdocs
     const pumpDoc = await Pump.findOne({ tank: { $in: tankSubIds }, "pumps._id": pumpId });
     if (!pumpDoc) {
       return res.status(404).json({ error: "Pump not found for your filling station" });
     }
 
-    // 6️⃣ Find the pump in the pumps array (TS-safe using findIndex)
+    // 6ï¸âƒ£ Find the pump in the pumps array (TS-safe using findIndex)
     const pumpsArray = (pumpDoc as any).pumps as any[];
     const pumpIndex = pumpsArray.findIndex((p) => String(p._id) === String(pumpId));
     if (pumpIndex === -1) {
@@ -466,14 +466,14 @@ export const deletePump = async (req: AuthenticatedRequest, res: Response) => {
     const deletedPump = pumpsArray[pumpIndex];
     const deletedTankId = pumpDoc.tank ? String(pumpDoc.tank) : undefined;
 
-    // 7️⃣ Remove the pump subdocument
+    // 7ï¸âƒ£ Remove the pump subdocument
     pumpsArray.splice(pumpIndex, 1);
 
-    // 8️⃣ Mark modified and save
+    // 8ï¸âƒ£ Mark modified and save
     (pumpDoc as any).markModified("pumps");
     await pumpDoc.save();
 
-    // 9️⃣ Lookup fuelType from stationTankDoc for the deleted pump's tank (if present)
+    // 9ï¸âƒ£ Lookup fuelType from stationTankDoc for the deleted pump's tank (if present)
     const tankSub = (stationTankDoc.tanks as any[]).find((t) => String(t._id) === String(deletedTankId));
     const fuelType = tankSub ? tankSub.fuelType : undefined;
 
@@ -569,7 +569,7 @@ export const updatePricesByFuelTypes = async (req: AuthenticatedRequest, res: Re
           type: "message",
           category: "price_update",
           title: "Fuel Price Updated",
-          body: `${fuelType} price has been updated to ₦${newPrice.toLocaleString()} per litre`,
+          body: `${fuelType} price has been updated to â‚¦${newPrice.toLocaleString()} per litre`,
           severity: "info",
           timestamp: new Date(),
           targetRole: "all",
@@ -658,7 +658,7 @@ export const scheduleMaintenance = async (req: AuthenticatedRequest, res: Respon
       type: "alert",
       category: "pump_maintenance",
       title: "Pump Scheduled for Maintenance",
-      body: `${pumpSubdoc.title}${reason ? ` — ${reason}` : ""}. Duration: ${dateRange}`,
+      body: `${pumpSubdoc.title}${reason ? ` â€” ${reason}` : ""}. Duration: ${dateRange}`,
       severity: "warning",
       timestamp: new Date(),
       targetRole: "supervisor",

@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
@@ -105,7 +105,7 @@ export const createFillingStation = async (req: Request, res: Response) => {
         },
       });
     } else {
-      // Check if there's a verified payment reference — activate plan immediately
+      // Check if there's a verified payment reference â€” activate plan immediately
       let planActivated = false;
       if (paymentReference) {
         const payment = await Payment.findOne({
@@ -147,7 +147,7 @@ export const createFillingStation = async (req: Request, res: Response) => {
       }
 
       if (!planActivated) {
-        // No verified payment — mark as trial for 7 days until user pays
+        // No verified payment â€” mark as trial for 7 days until user pays
         const trialExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
         await FillingStation.findByIdAndUpdate(newStation._id, {
           plan: chosenPlan,

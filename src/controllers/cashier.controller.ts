@@ -1,4 +1,4 @@
-// import { Response } from "express";
+﻿// import { Response } from "express";
 // import mongoose, { Types } from "mongoose";
 // import { AuthenticatedRequest } from "../interfaces";
 // import CashReconciliation from "../models/cashReconciliation.model";
@@ -54,16 +54,16 @@
 //     const stationObjectId = new Types.ObjectId(fillingStation);
 //     const { startDate, endDate } = getDateRange("thisweek");
 
-//     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-//     console.log("📊 CASHIER DASHBOARD CALCULATION");
-//     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+//     console.log("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
+//     console.log("ðŸ“Š CASHIER DASHBOARD CALCULATION");
+//     console.log("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
 //     console.log("Station:", fillingStation);
 //     console.log("Cashier:", cashierId);
 //     console.log("This Week Range:", { startDate, endDate });
 
-//     // ═══════════════════════════════════════════════════════════════
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //     // 1. RECONCILED CASH (This Week)
-//     // ═══════════════════════════════════════════════════════════════
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //     const reconciledCashResult = await CashReconciliation.aggregate([
 //       {
 //         $match: {
@@ -82,7 +82,7 @@
 //     ]).exec();
 
 //     const reconciledCash = Number(reconciledCashResult[0]?.reconciledCash || 0);
-//     console.log("💰 Reconciled Cash (This Week):", reconciledCash);
+//     console.log("ðŸ’° Reconciled Cash (This Week):", reconciledCash);
 
 //     // Calculate last week for growth comparison
 //     const lastWeekRange = {
@@ -115,12 +115,12 @@
 //       ? ((reconciledCash - lastWeekReconciled) / lastWeekReconciled) * 100 
 //       : 0;
 
-//     console.log("💰 Reconciled Cash (Last Week):", lastWeekReconciled);
-//     console.log("💰 Growth:", reconciledGrowth.toFixed(1) + "%");
+//     console.log("ðŸ’° Reconciled Cash (Last Week):", lastWeekReconciled);
+//     console.log("ðŸ’° Growth:", reconciledGrowth.toFixed(1) + "%");
 
-//     // ═══════════════════════════════════════════════════════════════
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //     // 2. DISCREPANCIES (This Week)
-//     // ═══════════════════════════════════════════════════════════════
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //     const discrepanciesResult = await CashReconciliation.aggregate([
 //       {
 //         $match: {
@@ -139,12 +139,12 @@
 //     ]).exec();
 
 //     const totalDiscrepancies = Number(discrepanciesResult[0]?.totalDiscrepancies || 0);
-//     console.log("⚠️ Total Discrepancies (This Week):", totalDiscrepancies);
+//     console.log("âš ï¸ Total Discrepancies (This Week):", totalDiscrepancies);
 
-//     // ═══════════════════════════════════════════════════════════════
-//     // 3. LUBRICANT UNITS SOLD (This Week) - FROM TRANSACTIONS ✅
-//     // ═══════════════════════════════════════════════════════════════
-//     console.log("\n🔍 Querying LubricantTransactions...");
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//     // 3. LUBRICANT UNITS SOLD (This Week) - FROM TRANSACTIONS âœ…
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//     console.log("\nðŸ” Querying LubricantTransactions...");
     
 //     const lubricantUnitsResult = await mongoose.connection.collection('lubricanttransactions').aggregate([
 //       {
@@ -165,7 +165,7 @@
 //     ]).toArray();
 
 //     const lubricantUnitsSold = Number(lubricantUnitsResult[0]?.totalUnits || 0);
-//     console.log("🛢️ Lubricant Units Sold (This Week):", lubricantUnitsSold);
+//     console.log("ðŸ›¢ï¸ Lubricant Units Sold (This Week):", lubricantUnitsSold);
 
 //     // Calculate last week for growth comparison
 //     const lastWeekLubricantResult = await mongoose.connection.collection('lubricanttransactions').aggregate([
@@ -189,12 +189,12 @@
 //       ? ((lubricantUnitsSold - lastWeekLubricant) / lastWeekLubricant) * 100 
 //       : 0;
 
-//     console.log("🛢️ Lubricant Units Sold (Last Week):", lastWeekLubricant);
-//     console.log("🛢️ Growth:", lubricantGrowth.toFixed(1) + "%");
+//     console.log("ðŸ›¢ï¸ Lubricant Units Sold (Last Week):", lastWeekLubricant);
+//     console.log("ðŸ›¢ï¸ Growth:", lubricantGrowth.toFixed(1) + "%");
 
-//     // ═══════════════════════════════════════════════════════════════
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //     // 4. SALES TARGET (Monthly Progress)
-//     // ═══════════════════════════════════════════════════════════════
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //     const cashier = await Staff.findById(cashierId).select("amount").lean();
 //     const salesTarget = cashier?.amount || 350000; // Default target
 
@@ -219,13 +219,13 @@
 //     ]).exec();
 
 //     const monthlySales = Number(monthlySalesResult[0]?.monthlySales || 0);
-//     console.log("🎯 Monthly Sales (Current):", monthlySales);
-//     console.log("🎯 Sales Target:", salesTarget);
-//     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+//     console.log("ðŸŽ¯ Monthly Sales (Current):", monthlySales);
+//     console.log("ðŸŽ¯ Sales Target:", salesTarget);
+//     console.log("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n");
 
-//     // ═══════════════════════════════════════════════════════════════
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //     // RESPONSE
-//     // ═══════════════════════════════════════════════════════════════
+//     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //     return res.status(200).json({
 //       message: "Cashier dashboard data retrieved successfully",
 //       data: {
@@ -253,7 +253,7 @@
 //       },
 //     });
 //   } catch (err: any) {
-//     console.error("❌ Error in getCashierDashboard:", err);
+//     console.error("âŒ Error in getCashierDashboard:", err);
 //     return res.status(500).json({ error: err?.message ?? "Server error" });
 //   }
 // };
@@ -302,20 +302,20 @@
 //     }
 
 //     // FIRST: Let's see what raw shift data looks like
-//     console.log("🔍 DEBUG: Match Filter:", JSON.stringify(matchFilter));
+//     console.log("ðŸ” DEBUG: Match Filter:", JSON.stringify(matchFilter));
     
 //     const rawShifts = await Shift.find(matchFilter).limit(1).lean();
-//     console.log("🔍 DEBUG: Raw Shift Sample:", JSON.stringify(rawShifts[0], null, 2));
+//     console.log("ðŸ” DEBUG: Raw Shift Sample:", JSON.stringify(rawShifts[0], null, 2));
     
 //     if (rawShifts.length > 0) {
 //       const shift = rawShifts[0];
-//       console.log("🔍 DEBUG: Attendant ID from shift:", shift.attendant);
-//       console.log("🔍 DEBUG: Pump ID from shift:", shift.pump);
+//       console.log("ðŸ” DEBUG: Attendant ID from shift:", shift.attendant);
+//       console.log("ðŸ” DEBUG: Pump ID from shift:", shift.pump);
       
 //       // Check if attendant exists
 //       if (shift.attendant) {
 //         const attendantExists = await Staff.findById(shift.attendant).lean();
-//         console.log("🔍 DEBUG: Attendant found:", attendantExists);
+//         console.log("ðŸ” DEBUG: Attendant found:", attendantExists);
 //       }
 //     }
 
@@ -436,7 +436,7 @@
 //     ]).exec();
 
 //     // Log the aggregation results for debugging
-//     console.log("🔍 DEBUG: Aggregation Results:", JSON.stringify(shifts[0], null, 2));
+//     console.log("ðŸ” DEBUG: Aggregation Results:", JSON.stringify(shifts[0], null, 2));
 
 //     // Filter by status if provided (for reconciliation status)
 //     let filteredShifts = shifts;
@@ -497,7 +497,7 @@ import CashReconciliation from "../models/cashReconciliation.model";
 import Shift from "../models/shift.model";
 import Staff from "../models/staff.model";
 
-// ─── Nigeria timezone date range helpers (WAT = UTC+1) ───────────────────────
+// â”€â”€â”€ Nigeria timezone date range helpers (WAT = UTC+1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Date.UTC with -1 as the hour rolls back to 23:00 the previous UTC day,
 // which is exactly 00:00 Nigeria midnight (UTC+1).
 
@@ -551,7 +551,7 @@ const getNigeriaMonthRange = () => {
   const endDate = new Date(Date.UTC(year, month, 1, -1, 0, 0, -1));
   return { startDate, endDate };
 };
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // Get Cashier Dashboard Data
 export const getCashierDashboard = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
@@ -566,16 +566,16 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
     const stationObjectId = new Types.ObjectId(fillingStation);
     const { startDate, endDate } = getNigeriaWeekRange();
 
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("📊 CASHIER DASHBOARD CALCULATION");
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
+    console.log("ðŸ“Š CASHIER DASHBOARD CALCULATION");
+    console.log("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
     console.log("Station:", fillingStation);
     console.log("Cashier:", cashierId);
     console.log("This Week Range (Nigeria):", { startDate, endDate });
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // 1. RECONCILED CASH (This Week)
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const reconciledCashResult = await CashReconciliation.aggregate([
       {
         $match: {
@@ -594,7 +594,7 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
     ]).exec();
 
     const reconciledCash = Number(reconciledCashResult[0]?.reconciledCash || 0);
-    console.log("💰 Reconciled Cash (This Week):", reconciledCash);
+    console.log("ðŸ’° Reconciled Cash (This Week):", reconciledCash);
 
     // Calculate last week for growth comparison
     const lastWeekRange = getNigeriaLastWeekRange();
@@ -621,12 +621,12 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
       ? ((reconciledCash - lastWeekReconciled) / lastWeekReconciled) * 100 
       : 0;
 
-    console.log("💰 Reconciled Cash (Last Week):", lastWeekReconciled);
-    console.log("💰 Growth:", reconciledGrowth.toFixed(1) + "%");
+    console.log("ðŸ’° Reconciled Cash (Last Week):", lastWeekReconciled);
+    console.log("ðŸ’° Growth:", reconciledGrowth.toFixed(1) + "%");
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // 2. DISCREPANCIES (This Week)
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const discrepanciesResult = await CashReconciliation.aggregate([
       {
         $match: {
@@ -645,11 +645,11 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
     ]).exec();
 
     const totalDiscrepancies = Number(discrepanciesResult[0]?.totalDiscrepancies || 0);
-    console.log("⚠️ Total Discrepancies (This Week):", totalDiscrepancies);
+    console.log("âš ï¸ Total Discrepancies (This Week):", totalDiscrepancies);
 
-    // ═══════════════════════════════════════════════════════════════
-    // 3. LUBRICANT UNITS SOLD (This Week) - FROM TRANSACTIONS ✅
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // 3. LUBRICANT UNITS SOLD (This Week) - FROM TRANSACTIONS âœ…
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     let lubricantUnitsSold = 0;
     let lastWeekLubricant = 0;
     try {
@@ -669,19 +669,19 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
       lubricantUnitsSold = Number(thisWeekRes[0]?.totalUnits || 0);
       lastWeekLubricant  = Number(lastWeekRes[0]?.totalUnits  || 0);
     } catch {
-      // lubricant collection unavailable — default to 0
+      // lubricant collection unavailable â€” default to 0
     }
 
     const lubricantGrowth = lastWeekLubricant > 0
       ? ((lubricantUnitsSold - lastWeekLubricant) / lastWeekLubricant) * 100
       : 0;
 
-    console.log("🛢️ Lubricant Units Sold (Last Week):", lastWeekLubricant);
-    console.log("🛢️ Growth:", lubricantGrowth.toFixed(1) + "%");
+    console.log("ðŸ›¢ï¸ Lubricant Units Sold (Last Week):", lastWeekLubricant);
+    console.log("ðŸ›¢ï¸ Growth:", lubricantGrowth.toFixed(1) + "%");
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // 4. SALES TARGET (Monthly Progress)
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const cashier = await Staff.findById(cashierId).select("amount").lean();
     const salesTarget = cashier?.amount || 350000; // Default target
 
@@ -706,13 +706,13 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
     ]).exec();
 
     const monthlySales = Number(monthlySalesResult[0]?.monthlySales || 0);
-    console.log("🎯 Monthly Sales (Current):", monthlySales);
-    console.log("🎯 Sales Target:", salesTarget);
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    console.log("ðŸŽ¯ Monthly Sales (Current):", monthlySales);
+    console.log("ðŸŽ¯ Sales Target:", salesTarget);
+    console.log("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n");
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // RESPONSE
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     return res.status(200).json({
       message: "Cashier dashboard data retrieved successfully",
       data: {
@@ -740,7 +740,7 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
       },
     });
   } catch (err: any) {
-    console.error("❌ Error in getCashierDashboard:", err);
+    console.error("âŒ Error in getCashierDashboard:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
@@ -762,7 +762,7 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // Build match filter — all completed shifts from the last 24 hours
+    // Build match filter â€” all completed shifts from the last 24 hours
     const matchFilter: any = {
       fillingStation: stationObjectId,
       status: "Completed",
@@ -778,7 +778,7 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
 
     // Log current indexes on Shift collection (one-time diagnostic)
     Shift.collection.indexes().then((indexes) => {
-      console.log("📋 Shift collection indexes:", JSON.stringify(indexes, null, 2));
+      console.log("ðŸ“‹ Shift collection indexes:", JSON.stringify(indexes, null, 2));
     });
 
     const queryStart = Date.now();
@@ -882,13 +882,13 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
       { $limit: limitNum },
     ]).exec();
 
-    console.log(`⏱️ Daily sales aggregate took: ${Date.now() - queryStart}ms`);
-    console.log(`📊 Documents returned: ${shifts.length}`);
+    console.log(`â±ï¸ Daily sales aggregate took: ${Date.now() - queryStart}ms`);
+    console.log(`ðŸ“Š Documents returned: ${shifts.length}`);
 
     // Get total count for pagination
     const countStart = Date.now();
     const totalShifts = await Shift.countDocuments(matchFilter);
-    console.log(`⏱️ Count query took: ${Date.now() - countStart}ms — total: ${totalShifts}`);
+    console.log(`â±ï¸ Count query took: ${Date.now() - countStart}ms â€” total: ${totalShifts}`);
 
     const getNigeriaDate = (date: Date): string => {
       return new Date(date).toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });

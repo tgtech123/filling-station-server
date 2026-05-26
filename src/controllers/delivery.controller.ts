@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces";
 import Delivery from "../models/delivery.model";
 import Tank from "../models/tanks.model";
@@ -10,17 +10,17 @@ export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
     const fillingStation = req.user?.station;
     const { tank, pricePerLtr, quantity, supplier, deliveryDate, status } = req.body;
 
-    // 1️⃣ Authorization check
+    // 1ï¸âƒ£ Authorization check
     if (!fillingStation) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Validate required fields
+    // 2ï¸âƒ£ Validate required fields
     if (!tank || !pricePerLtr || !quantity || !supplier || !deliveryDate) {
       return res.status(400).json({ error: "Please fill all required fields" });
     }
 
-    // 3️⃣ Find the tank for this station
+    // 3ï¸âƒ£ Find the tank for this station
     const station = await Tank.findOne({ fillingStation }).exec();
 
     if (!station) {
@@ -32,15 +32,15 @@ export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(404).json({ error: "Specified tank not found in this station" });
     }
 
-    // 4️⃣ Calculate new quantity (simulate update before saving)
+    // 4ï¸âƒ£ Calculate new quantity (simulate update before saving)
    const newTotal = Number(foundTank.currentQuantity) + Number(quantity);
     if (newTotal > foundTank.limit) {
       return res.status(400).json({
-        error: `Cannot add ${quantity}L — this will exceed the tank limit of ${foundTank.limit}L.`,
+        error: `Cannot add ${quantity}L â€” this will exceed the tank limit of ${foundTank.limit}L.`,
       });
     }
 
-    // 5️⃣ Create the delivery record first
+    // 5ï¸âƒ£ Create the delivery record first
     const newDelivery = await Delivery.create({
       fillingStation: new mongoose.Types.ObjectId(fillingStation),
       tank: new mongoose.Types.ObjectId(tank),
@@ -51,7 +51,7 @@ export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
       status: status || "Pending",
     });
 
-    // 6️⃣ If status is "Completed", update tank quantity
+    // 6ï¸âƒ£ If status is "Completed", update tank quantity
     if (status === "Completed") {
       foundTank.currentQuantity = newTotal;
       await station.save();
@@ -80,17 +80,17 @@ export const getSupplies = async (req: AuthenticatedRequest, res: Response) => {
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 1️⃣ Fetch all deliveries for this station
+    // 1ï¸âƒ£ Fetch all deliveries for this station
     const deliveries = await Delivery.find({ fillingStation }).lean();
 
     if (!deliveries.length) {
       return res.status(404).json({ message: "No supply records found" });
     }
 
-    // 2️⃣ Fetch all tanks for this station (so we can look up sub-tanks)
+    // 2ï¸âƒ£ Fetch all tanks for this station (so we can look up sub-tanks)
     const stationTanks = await Tank.findOne({ fillingStation }).lean();
 
-    // 3️⃣ Combine delivery + tank details
+    // 3ï¸âƒ£ Combine delivery + tank details
     const result = deliveries.map((delivery) => {
       const matchedTank = stationTanks?.tanks.find(
         (t) => t._id.toString() === delivery.tank.toString()
@@ -126,35 +126,35 @@ export const updateSupply = async (req: AuthenticatedRequest, res: Response) => 
     const fillingStation = req.user?.station;
     const { supplyId, status, pricePerLtr, quantity, supplier, deliveryDate } = req.body;
 
-    // 1️⃣ Authorization check
+    // 1ï¸âƒ£ Authorization check
     if (!fillingStation) {
       return res
         .status(403)
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Validate supplyId
+    // 2ï¸âƒ£ Validate supplyId
     if (!supplyId) {
       return res.status(400).json({ error: "Supply ID is required" });
     }
 
-    // 3️⃣ Find the delivery record
+    // 3ï¸âƒ£ Find the delivery record
     const delivery = await Delivery.findOne({ _id: supplyId, fillingStation });
     if (!delivery) {
       return res.status(404).json({ message: "Supply record not found" });
     }
 
-    // ✅ Store old status before updating
+    // âœ… Store old status before updating
     const oldStatus = delivery.status;
 
-    // 4️⃣ Update allowed fields
+    // 4ï¸âƒ£ Update allowed fields
     if (pricePerLtr !== undefined) delivery.pricePerLtr = pricePerLtr;
     if (quantity !== undefined) delivery.quantity = quantity;
     if (supplier) delivery.suplier = supplier;
     if (deliveryDate) delivery.deliveryDate = deliveryDate;
     if (status) delivery.status = status;
 
-    // 5️⃣ Handle status change to "Completed"
+    // 5ï¸âƒ£ Handle status change to "Completed"
     if (oldStatus !== "Completed" && status === "Completed") {
       const tankRecord = await Tank.findOne({
         fillingStation,
@@ -177,17 +177,17 @@ export const updateSupply = async (req: AuthenticatedRequest, res: Response) => 
 
       const newQuantity = tank.currentQuantity + delivery.quantity;
 
-      // ✅ Check tank limit
+      // âœ… Check tank limit
       if (newQuantity > tank.limit) {
         return res.status(400).json({
           error: `Cannot complete this delivery. Adding ${delivery.quantity} Ltr(s) exceeds the tank limit of ${tank.limit} Ltr(s).`,
         });
       }
 
-      // ✅ Update tank current quantity
+      // âœ… Update tank current quantity
       tank.currentQuantity = newQuantity;
 
-      // ✅ Tell Mongoose we modified a subdocument
+      // âœ… Tell Mongoose we modified a subdocument
       tankRecord.markModified("tanks");
       await tankRecord.save();
 
@@ -202,7 +202,7 @@ export const updateSupply = async (req: AuthenticatedRequest, res: Response) => 
       }).catch((err) => console.error("Notification error (delivery completed):", err));
     }
 
-    // 6️⃣ Save updated delivery
+    // 6ï¸âƒ£ Save updated delivery
     await delivery.save();
 
     return res.status(200).json({
@@ -224,28 +224,28 @@ export const deleteSupply = async (req: AuthenticatedRequest, res: Response) => 
     const fillingStation = req.user?.station;
     const { supplyId } = req.body;
 
-    // 1️⃣ Authorization check
+    // 1ï¸âƒ£ Authorization check
     if (!fillingStation) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Validate ID
+    // 2ï¸âƒ£ Validate ID
     if (!supplyId) {
       return res.status(400).json({ error: "Supply ID is required" });
     }
 
-    // 3️⃣ Find supply
+    // 3ï¸âƒ£ Find supply
     const supply = await Delivery.findOne({ _id: supplyId, fillingStation });
     if (!supply) {
       return res.status(404).json({ error: "Supply record not found" });
     }
 
-    // 4️⃣ Prevent deleting completed supplies
+    // 4ï¸âƒ£ Prevent deleting completed supplies
     if (supply.status === "Completed") {
       return res.status(400).json({ error: "Cannot delete a completed supply record" });
     }
 
-    // 5️⃣ Delete record
+    // 5ï¸âƒ£ Delete record
     await Delivery.deleteOne({ _id: supplyId });
 
     return res.status(200).json({

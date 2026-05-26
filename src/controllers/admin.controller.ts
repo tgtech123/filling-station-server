@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import FillingStation from "../models/fillingStation.model";
@@ -728,7 +728,7 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(404).json({ error: "Station not found" });
     }
 
-    // Soft delete only — never hard delete
+    // Soft delete only â€” never hard delete
     await FillingStation.findByIdAndUpdate(stationId, { isActive: false, isDeleted: true });
 
     return res.status(200).json({ message: "Station deleted successfully" });
@@ -738,14 +738,14 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// ── Subscription Plans ─────────────────────────────────────────────────────
+// â”€â”€ Subscription Plans â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const seedDefaultPlans = async () => {
   const plans = [
     {
       name: "Free Plan",
       slug: "free",
-      description: "Perfect for getting started. Try Flourish Station with limited access for 1 month.",
+      description: "Perfect for getting started. Try FuelDesk with limited access for 1 month.",
       monthlyPrice: 0,
       yearlyPrice: 0,
       currency: "NGN",
@@ -937,14 +937,14 @@ export const seedDefaultPlans = async () => {
     .lean();
 
   console.log("All plans in DB:", JSON.stringify(allPlans, null, 2));
-  console.log("✅ Subscription plans synced");
+  console.log("âœ… Subscription plans synced");
 };
 
 export const updateYearlyPrices = async () => {
   await SubscriptionPlan.updateOne({ slug: "pro" }, { yearlyPrice: 162000 });
   await SubscriptionPlan.updateOne({ slug: "pro-max" }, { yearlyPrice: 432000 });
   await SubscriptionPlan.updateOne({ slug: "enterprise" }, { yearlyPrice: 1080000 });
-  console.log("✅ Yearly prices updated with 10% discount");
+  console.log("âœ… Yearly prices updated with 10% discount");
 };
 
 export const seedAdminLogs = async () => {
@@ -982,7 +982,7 @@ export const seedAdminLogs = async () => {
     },
     {
       eventType: "subscription_expired",
-      description: "Plus plan subscription expired — renewal required",
+      description: "Plus plan subscription expired â€” renewal required",
       stationOrUser: "BP Highway Express",
       status: "warning",
       performedBy: "System",
@@ -1011,7 +1011,7 @@ export const seedAdminLogs = async () => {
   ];
 
   await AdminLog.insertMany(sampleLogs);
-  console.log("✅ Sample admin logs seeded");
+  console.log("âœ… Sample admin logs seeded");
 };
 
 export const seedPlatformSettings = async () => {
@@ -1019,13 +1019,13 @@ export const seedPlatformSettings = async () => {
   if (existing > 0) return;
 
   await PlatformSettings.create({
-    platformName: "Flourish Station",
+    platformName: "FuelDesk",
     contactEmail: "support@flourishstation.com",
     contactPhone: "+234 9030203547",
     contactAddress: "Km 2 Airport Road, Rukpokwu, Port Harcourt, Rivers State",
     currency: "Nigerian Naira (NGN)",
     currencyCode: "NGN",
-    termsAndConditions: "By using Flourish Station, you agree to our terms of service...",
+    termsAndConditions: "By using FuelDesk, you agree to our terms of service...",
     planStatus: true,
     emailNotifications: true,
     inAppNotifications: false,
@@ -1035,10 +1035,10 @@ export const seedPlatformSettings = async () => {
     stationSuspended: true,
     systemAlerts: true,
   });
-  console.log("✅ Platform settings seeded");
+  console.log("âœ… Platform settings seeded");
 };
 
-// ── Platform Settings ─────────────────────────────────────────────────────────
+// â”€â”€ Platform Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // GET /api/admin/settings
 export const getPlatformSettings = async (req: AuthenticatedRequest, res: Response) => {
@@ -1046,7 +1046,7 @@ export const getPlatformSettings = async (req: AuthenticatedRequest, res: Respon
     let settings = await PlatformSettings.findOne().lean();
 
     if (!settings) {
-      settings = await PlatformSettings.create({ platformName: "Flourish Station" }) as any;
+      settings = await PlatformSettings.create({ platformName: "FuelDesk" }) as any;
     }
 
     return res.status(200).json({
@@ -1124,7 +1124,7 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
   }
 };
 
-// GET /api/admin/settings/public — no auth needed
+// GET /api/admin/settings/public â€” no auth needed
 export const getPublicSettings = async (req: Request, res: Response) => {
   try {
     const settings = await PlatformSettings.findOne()
@@ -1134,7 +1134,7 @@ export const getPublicSettings = async (req: Request, res: Response) => {
     return res.status(200).json({
       message: "Public settings retrieved",
       data: {
-        platformName: settings?.platformName || "Flourish Station",
+        platformName: settings?.platformName || "FuelDesk",
         contactEmail: settings?.contactEmail || "",
         contactPhone: settings?.contactPhone || "",
         contactAddress: settings?.contactAddress || "",
@@ -1150,7 +1150,7 @@ export const getPublicSettings = async (req: Request, res: Response) => {
   }
 };
 
-// GET /api/public/plans — no auth needed
+// GET /api/public/plans â€” no auth needed
 export const getPublicPlans = async (req: Request, res: Response) => {
   try {
     const cacheKey = "public:plans";
@@ -1159,7 +1159,7 @@ export const getPublicPlans = async (req: Request, res: Response) => {
 
     const rawPlans = await SubscriptionPlan.find({ isActive: true }).sort({ order: 1 }).lean();
 
-    // Deduplicate by name — keep the first occurrence (lowest order = canonical)
+    // Deduplicate by name â€” keep the first occurrence (lowest order = canonical)
     const seenNames = new Set<string>();
     const plans = rawPlans.filter((p) => {
       const key = p.name.toLowerCase().trim();
@@ -1199,7 +1199,7 @@ export const getPublicPlans = async (req: Request, res: Response) => {
   }
 };
 
-// GET /api/admin/plans — all plans including inactive
+// GET /api/admin/plans â€” all plans including inactive
 export const getAdminPlans = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const plans = await SubscriptionPlan.find().sort({ order: 1 }).lean();
@@ -1284,7 +1284,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const updates = { ...req.body };
-    delete updates.slug; // slug is immutable — never change it after creation
+    delete updates.slug; // slug is immutable â€” never change it after creation
 
     if (updates.monthlyPrice !== undefined) {
       updates.yearlyPrice = Math.round(updates.monthlyPrice * 12 * 0.9);
@@ -1301,7 +1301,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// DELETE /api/admin/plans/:planId — soft delete
+// DELETE /api/admin/plans/:planId â€” soft delete
 export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { planId } = req.params;
@@ -1325,7 +1325,7 @@ export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// ── Payments & Billing ────────────────────────────────────────────────────────
+// â”€â”€ Payments & Billing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // GET /api/admin/payments/stats
 export const getPaymentStats = async (req: AuthenticatedRequest, res: Response) => {
@@ -1405,7 +1405,7 @@ export const getPayments = async (req: AuthenticatedRequest, res: Response) => {
       id: p._id,
       stationName: p.stationName,
       plan: p.planName,
-      amount: `₦${p.amount.toLocaleString("en-NG")}`,
+      amount: `â‚¦${p.amount.toLocaleString("en-NG")}`,
       paymentMethod: p.paymentMethod,
       status: p.status === "success" ? "Active" : p.status === "failed" ? "Failed" : "Pending",
       date: new Date(p.paidAt || p.createdAt).toLocaleDateString("en-US", {
@@ -1487,7 +1487,7 @@ export const getStationSubscriptions = async (req: AuthenticatedRequest, res: Re
         id: station._id,
         stationName: station.name,
         plan: payment?.planName || "Free",
-        amount: payment ? `₦${payment.amount.toLocaleString("en-NG")}` : "₦0",
+        amount: payment ? `â‚¦${payment.amount.toLocaleString("en-NG")}` : "â‚¦0",
         billingCycle: payment?.billingCycle || "free",
         status: station.isActive ? "Active" : "Suspended",
         date: new Date(payment?.paidAt || station.createdAt).toLocaleDateString("en-US", {

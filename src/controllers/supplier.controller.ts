@@ -1,8 +1,8 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces";
 import Supplier from "../models/supplier.model";
 
-// ── List suppliers ────────────────────────────────────────────────────────────
+// â”€â”€ List suppliers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const getSuppliers = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -31,7 +31,7 @@ export const getSuppliers = async (req: AuthenticatedRequest, res: Response) => 
   }
 };
 
-// ── Create supplier ───────────────────────────────────────────────────────────
+// â”€â”€ Create supplier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const createSupplier = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -72,7 +72,7 @@ export const createSupplier = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
-// ── Update supplier ───────────────────────────────────────────────────────────
+// â”€â”€ Update supplier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const updateSupplier = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -101,7 +101,7 @@ export const updateSupplier = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
-// ── Delete (soft-delete) supplier ─────────────────────────────────────────────
+// â”€â”€ Delete (soft-delete) supplier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const deleteSupplier = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;

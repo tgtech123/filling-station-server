@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import CashReconciliation from "../models/cashReconciliation.model";
@@ -75,7 +75,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           type: "alert",
           category: "cash_reconciliation",
           title: "Cash Discrepancy Flagged",
-          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of ₦${discAbs.toLocaleString()}`,
+          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of â‚¦${discAbs.toLocaleString()}`,
           severity: "critical",
           timestamp: new Date(),
           targetRole: "accountant",
@@ -86,7 +86,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           type: "alert",
           category: "cash_reconciliation",
           title: "Cash Discrepancy on Your Shift",
-          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
+          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of â‚¦${discAbs.toLocaleString()}. Please review.`,
           severity: "critical",
           timestamp: new Date(),
           targetRole: "attendant",
@@ -142,7 +142,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           type: "alert",
           category: "cash_reconciliation",
           title: "Cash Discrepancy Flagged",
-          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of ₦${discAbs.toLocaleString()}`,
+          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of â‚¦${discAbs.toLocaleString()}`,
           severity: "critical",
           timestamp: new Date(),
           targetRole: "accountant",
@@ -153,7 +153,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           type: "alert",
           category: "cash_reconciliation",
           title: "Cash Discrepancy on Your Shift",
-          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
+          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of â‚¦${discAbs.toLocaleString()}. Please review.`,
           severity: "critical",
           timestamp: new Date(),
           targetRole: "attendant",

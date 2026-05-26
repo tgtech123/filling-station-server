@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { AuthenticatedRequest } from "../interfaces";
 import bcrypt from "bcrypt";
 import Staff from "../models/staff.model";
@@ -41,7 +41,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       notificationPreferences,
     } = req.body;
 
-    // ✅ Validate required fields
+    // âœ… Validate required fields
     if (
       !firstName ||
       !lastName ||
@@ -185,7 +185,7 @@ export const loginStaff = async (
     // 1. Find staff by email
     const staff = await Staff.findOne({ email });
     if (!staff) {
-      // No station available — skip activity log
+      // No station available â€” skip activity log
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -203,7 +203,7 @@ export const loginStaff = async (
     // 2. Compare passwords
     const isMatch = await bcrypt.compare(password, staff.password);
     if (!isMatch) {
-      // Staff was found so we have a station — log the failed attempt
+      // Staff was found so we have a station â€” log the failed attempt
       if (staff.station) {
         Activity.create({
           fillingStation: staff.station,
@@ -231,7 +231,7 @@ export const loginStaff = async (
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // 2b. If 2FA is enabled, attempt OTP flow — fall back to normal login if Redis is down
+    // 2b. If 2FA is enabled, attempt OTP flow â€” fall back to normal login if Redis is down
     if (staff.twoFactorAuthEnabled) {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       let redisAvailable = false;
@@ -241,11 +241,12 @@ export const loginStaff = async (
           redisAvailable = true;
         }
       } catch (redisErr: any) {
-        console.warn("Redis unavailable — skipping 2FA and issuing JWT directly:", redisErr.message);
+        console.warn("Redis unavailable â€” skipping 2FA and issuing JWT directly:", redisErr.message);
       }
 
       if (redisAvailable) {
         await transporter.sendMail({
+          from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
           to: staff.email,
           subject: "Your Login Verification Code",
           html: `
@@ -262,7 +263,7 @@ export const loginStaff = async (
         });
         return res.status(200).json({ requiresOtp: true, userId: staff._id.toString() });
       }
-      // Redis unavailable — fall through to normal JWT login below
+      // Redis unavailable â€” fall through to normal JWT login below
     }
 
     // 3. Get associated station
@@ -382,6 +383,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
 
     await transporter.sendMail({
+      from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
       to: staff.email,
       subject: "Password Reset",
       html: `
@@ -408,7 +410,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
         </div>
 
         <p style="color: #e63946; font-size: 14px;">
-          ⚠ This link is valid for only <strong>1 hour</strong>.
+          âš  This link is valid for only <strong>1 hour</strong>.
         </p>
 
         <p style="font-size: 14px; color: #666;">
@@ -418,7 +420,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
       <!-- Footer -->
       <div style="background: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #888;">
-        <p>© ${new Date().getFullYear()} Flourish station. All rights reserved.</p>
+        <p>Â© ${new Date().getFullYear()} FuelDesk. All rights reserved.</p>
       </div>
     </div>
   </div>
@@ -666,7 +668,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
     try {
       if (redis) await redis.del(`otp:${userId}`);
     } catch {
-      // Non-critical — OTP will expire on its own via the 5-min TTL
+      // Non-critical â€” OTP will expire on its own via the 5-min TTL
     }
 
     const staff = await Staff.findById(userId);

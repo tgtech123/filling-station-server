@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Activity from "../models/activity.model";
@@ -100,7 +100,7 @@ export const getProductLevels = async (req: AuthenticatedRequest, res: Response)
 
     return res.status(200).json({
       message: "Product levels retrieved successfully",
-      station: "Flourish Station",
+      station: "FuelDesk",
       total: productLevels.length,
       productLevels,
     });

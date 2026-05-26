@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import Tank from "../models/tanks.model";
 import { AuthenticatedRequest } from "../interfaces";
 import Pump from "../models/pump.model";
@@ -23,14 +23,14 @@ export const addTank = async (req: AuthenticatedRequest, res: Response) => {
 
     const fillingStationId = req.user?.station;
 
-    // 1️⃣ Authorization
+    // 1ï¸âƒ£ Authorization
     if (!fillingStationId) {
       return res
         .status(401)
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Validate input
+    // 2ï¸âƒ£ Validate input
     if (!title?.trim() || !fuelType || limit == null || threshold == null) {
       return res.status(400).json({
         error: "Please fill all required fields",
@@ -53,10 +53,10 @@ export const addTank = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // 3️⃣ Check if station exists
+    // 3ï¸âƒ£ Check if station exists
     let station = await Tank.findOne({ fillingStation: fillingStationId });
 
-    // 4️⃣ Create new station record if not exists
+    // 4ï¸âƒ£ Create new station record if not exists
     if (!station) {
       const newStation = await Tank.create({
         fillingStation: fillingStationId,
@@ -77,7 +77,7 @@ export const addTank = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // 5️⃣ Check for duplicate tank title
+    // 5ï¸âƒ£ Check for duplicate tank title
     const existingTank = station.tanks.find(
       (t) => t.title.toLowerCase() === title.toLowerCase()
     );
@@ -88,14 +88,14 @@ export const addTank = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // 6️⃣ Add tank properly with casting to satisfy TypeScript
+    // 6ï¸âƒ£ Add tank properly with casting to satisfy TypeScript
     station.tanks.push({
       title: title.trim(),
       fuelType: normalizedFuelType,
       limit,
       threshold,
       currentQuantity: 0,
-      _id: new (require("mongoose").Types.ObjectId)(), // ✅ ensure unique id & fix TS type
+      _id: new (require("mongoose").Types.ObjectId)(), // âœ… ensure unique id & fix TS type
     } as any);
 
     await station.save();
@@ -119,17 +119,17 @@ export const getTankPerStation = async (req: AuthenticatedRequest, res: Response
   try {
     const fillingStationId = req.user?.station;
 
-    // 1️⃣ Authorization check
+    // 1ï¸âƒ£ Authorization check
     if (!fillingStationId) {
       return res
         .status(401)
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Find the tanks for this station
+    // 2ï¸âƒ£ Find the tanks for this station
     const station = await Tank.findOne({ fillingStation: fillingStationId }).lean();
 
-    // 3️⃣ Handle if no record found
+    // 3ï¸âƒ£ Handle if no record found
     if (!station || !station.tanks?.length) {
       return res.status(404).json({
         message: "No tanks found for this filling station",
@@ -138,10 +138,10 @@ export const getTankPerStation = async (req: AuthenticatedRequest, res: Response
       });
     }
 
-    // 4️⃣ Calculate total of currentQuantity
+    // 4ï¸âƒ£ Calculate total of currentQuantity
     const total = station.tanks.reduce((sum, tank) => sum + (tank.currentQuantity || 0), 0);
 
-    // 5️⃣ Return tanks + total
+    // 5ï¸âƒ£ Return tanks + total
     return res.status(200).json({
       message: "Tanks retrieved successfully",
       total,
@@ -164,14 +164,14 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
     const fillingStationId = req.user?.station;
     const { title, fuelType, limit, threshold, currentQuantity, tankId } = req.body;
 
-    // 1️⃣ Authorization check
+    // 1ï¸âƒ£ Authorization check
     if (!fillingStationId) {
       return res
         .status(401)
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Find the station record
+    // 2ï¸âƒ£ Find the station record
     const station = await Tank.findOne({ fillingStation: fillingStationId });
 
     if (!station) {
@@ -180,14 +180,14 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
         .json({ message: "No tank record found for this station" });
     }
 
-    // 3️⃣ Find specific tank by ID
+    // 3ï¸âƒ£ Find specific tank by ID
     const tank = station.tanks.find((t) => t._id?.toString() === tankId);
 
     if (!tank) {
       return res.status(404).json({ message: "Tank not found" });
     }
 
-    // 4️⃣ If currentQuantity provided, ADD instead of overwrite
+    // 4ï¸âƒ£ If currentQuantity provided, ADD instead of overwrite
     if (currentQuantity !== undefined) {
       const newTotal = tank.currentQuantity + currentQuantity;
 
@@ -201,13 +201,13 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
       tank.currentQuantity = newTotal;
     }
 
-    // 5️⃣ Update other editable fields
+    // 5ï¸âƒ£ Update other editable fields
     if (title) tank.title = title;
     if (fuelType) tank.fuelType = fuelType;
     if (limit !== undefined) tank.limit = limit;
     if (threshold !== undefined) tank.threshold = threshold;
 
-    // 6️⃣ Save updated station record
+    // 6ï¸âƒ£ Save updated station record
     await station.save();
 
     await deleteCache(`dashboard:tanks:${fillingStationId}`);
@@ -220,7 +220,7 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
         fillingStation: fillingStationId,
         type: "alert",
         title: "Inventory Alert",
-        description: `${tank.fuelType} (${tank.title}) below 20% — ${tank.currentQuantity} Ltrs remaining`,
+        description: `${tank.fuelType} (${tank.title}) below 20% â€” ${tank.currentQuantity} Ltrs remaining`,
         timestamp: new Date(),
         severity: "warning",
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -231,7 +231,7 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
         type: "alert",
         category: "tank_alert",
         title: "Low Tank Alert",
-        body: `${tank.fuelType} tank ${tank.title} is below 20% — ${tank.currentQuantity} Ltrs remaining`,
+        body: `${tank.fuelType} tank ${tank.title} is below 20% â€” ${tank.currentQuantity} Ltrs remaining`,
         severity: "warning",
         timestamp: new Date(),
       }).catch((err) => console.error("Notification error (tank alert):", err));
@@ -256,38 +256,38 @@ export const deleteTank = async (req: AuthenticatedRequest, res: Response) => {
     const fillingStationId = req.user?.station;
     const { tankId } = req.params;
 
-    // 1️⃣ Authorization check
+    // 1ï¸âƒ£ Authorization check
     if (!fillingStationId) {
       return res
         .status(401)
         .json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2️⃣ Validate tankId
+    // 2ï¸âƒ£ Validate tankId
     if (!tankId) {
       return res.status(400).json({ error: "Tank ID is required" });
     }
 
-    // 3️⃣ Find station record
+    // 3ï¸âƒ£ Find station record
     const station = await Tank.findOne({ fillingStation: fillingStationId });
 
     if (!station) {
       return res.status(404).json({ message: "No tank record found for this station" });
     }
 
-    // 4️⃣ Check if tank exists under this station
+    // 4ï¸âƒ£ Check if tank exists under this station
     const tankExists = station.tanks.find((t) => t._id.toString() === tankId);
 
     if (!tankExists) {
       return res.status(404).json({ message: "Tank not found in this station" });
     }
 
-    // 5️⃣ Remove the tank
+    // 5ï¸âƒ£ Remove the tank
     station.tanks = station.tanks.filter((t) => t._id.toString() !== tankId);
 
     await station.save();
 
-    // 6️⃣ Return updated tanks
+    // 6ï¸âƒ£ Return updated tanks
     return res.status(200).json({
       message: `Tank "${tankExists.title}" deleted successfully`,
     //   data: station.tanks,
@@ -427,12 +427,12 @@ export const getTankConsumptionAndCapacity = async (req: AuthenticatedRequest, r
         calendarWeek: {
           from: weekStart.toISOString(),
           to: weekEnd.toISOString(),
-          note: "Calendar week (Monday 00:00 → Sunday 23:59:59.999)",
+          note: "Calendar week (Monday 00:00 â†’ Sunday 23:59:59.999)",
         },
       },
       data: {
         dailyConsumption,       // litres
-        weeklyConsumption,      // litres (calendar week Mon→Sun)
+        weeklyConsumption,      // litres (calendar week Monâ†’Sun)
         totalCapacity,          // total tank capacity (sum of limits) in litres
         totalCurrentQuantity,   // current stored litres across tanks
         totalCapacityAvailable, // remaining capacity in litres

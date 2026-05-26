@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Report from "../models/report.model";
@@ -6,7 +6,7 @@ import Notification from "../models/notification.model";
 import Shift from "../models/shift.model";
 import CashReconciliation from "../models/cashReconciliation.model";
 import Tank from "../models/tanks.model";
-import User from "../models/staff.model";  // ✅ Fixed: Renamed import
+import User from "../models/staff.model";  // âœ… Fixed: Renamed import
 import Lubricant from "../models/lubricant.model";
 // import ActivityLog from "../models/activityLog.model";
 
@@ -594,7 +594,7 @@ export const generateStaffPerformanceReport = async (req: AuthenticatedRequest, 
   }
 };
 
-// 6. SYSTEM ACTIVITY LOGS REPORT - ✅ Fixed: Disabled until implemented
+// 6. SYSTEM ACTIVITY LOGS REPORT - âœ… Fixed: Disabled until implemented
 export const generateActivityLogsReport = async (req: AuthenticatedRequest, res: Response) => {
   try {
     return res.status(501).json({ 

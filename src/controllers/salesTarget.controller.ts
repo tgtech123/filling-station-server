@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import SalesTarget from "../models/salesTarget.model";
@@ -49,7 +49,7 @@ export const setStaffTarget = async (req: AuthenticatedRequest, res: Response) =
       { status: "Expired" }
     );
 
-    // Create new target — endDate auto-calculated by pre-save hook from duration
+    // Create new target â€” endDate auto-calculated by pre-save hook from duration
     const target = await SalesTarget.create({
       staff: new Types.ObjectId(staffId),
       fillingStation: new Types.ObjectId(fillingStation),

@@ -1,4 +1,4 @@
-import { Response } from "express";
+﻿import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import GasSale from "../models/gasSale.model";
@@ -55,7 +55,7 @@ const awardPoints = async (
   });
 };
 
-// POST /gas/sales — Cashier POS sale
+// POST /gas/sales â€” Cashier POS sale
 export const createSale = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -87,7 +87,7 @@ export const createSale = async (req: AuthenticatedRequest, res: Response) => {
     if (saleType === "kg")     paid = parseFloat((qty  * pricePerKg).toFixed(2));
     if (saleType === "amount") qty  = parseFloat((paid / pricePerKg).toFixed(3));
 
-    // Loyalty redemption — uses station-configured rates
+    // Loyalty redemption â€” uses station-configured rates
     let discount = 0;
     let redeemed = 0;
     if (customerId && pointsToRedeem > 0) {
@@ -108,7 +108,7 @@ export const createSale = async (req: AuthenticatedRequest, res: Response) => {
           customer: customerId,
           type: "redeem", points: -redeemed,
           balanceBefore: before, balanceAfter: customer.loyaltyPoints,
-          note: `Redeemed ${redeemed} pts = ₦${discount}`,
+          note: `Redeemed ${redeemed} pts = â‚¦${discount}`,
         });
       }
     }
@@ -136,7 +136,7 @@ export const createSale = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// GET /gas/sales/pending — attendant sees pending sales
+// GET /gas/sales/pending â€” attendant sees pending sales
 export const getPendingSales = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -154,7 +154,7 @@ export const getPendingSales = async (req: AuthenticatedRequest, res: Response) 
   }
 };
 
-// PATCH /gas/sales/:id/confirm — attendant confirms
+// PATCH /gas/sales/:id/confirm â€” attendant confirms
 export const confirmSale = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -185,7 +185,7 @@ export const confirmSale = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// PATCH /gas/sales/:id/dispense — attendant marks dispensed
+// PATCH /gas/sales/:id/dispense â€” attendant marks dispensed
 export const dispenseSale = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -194,7 +194,7 @@ export const dispenseSale = async (req: AuthenticatedRequest, res: Response) => 
     const sale = await GasSale.findOne({ _id: req.params.id, fillingStation: station, status: "confirmed" });
     if (!sale) return res.status(404).json({ message: "Confirmed sale not found" });
 
-    // Resolve which tank to deduct from via the sale's pump → tank link
+    // Resolve which tank to deduct from via the sale's pump â†’ tank link
     let tankId: Types.ObjectId | null = null;
     if (sale.pump) {
       const pump = await GasPump.findById(sale.pump).lean();
