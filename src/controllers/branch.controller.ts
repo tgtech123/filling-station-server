@@ -319,7 +319,7 @@ export const getBranchOverview = async (req: AuthenticatedRequest, res: Response
     const stationsData = await Promise.all(
       uniqueIds.map(async (id) => {
         const station = await FillingStation.findById(id)
-          .select("name city isActive plan")
+          .select("name city isActive plan parentStation")
           .lean();
 
         if (!station) return null;
@@ -512,6 +512,35 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
   }
 };
 
+// â”€â”€ Get Invite Preview (public â€” shows station name before password is set) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export const getInvitePreview = async (req: any, res: Response) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: “Token is required” });
+
+    const invite = await InviteToken.findOne({
+      token,
+      used: false,
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!invite) {
+      return res.status(400).json({ error: “Invalid or expired invitation” });
+    }
+
+    const station = await FillingStation.findById(invite.station)
+      .select(“name city”)
+      .lean() as any;
+
+    return res.status(200).json({
+      stationName: station?.name || “Your Station”,
+      firstName: invite.firstName,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 // â”€â”€ Accept Invite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const acceptInvite = async (req: any, res: Response) => {
   try {
@@ -548,6 +577,7 @@ export const acceptInvite = async (req: any, res: Response) => {
       firstName: invite.firstName,
       lastName: invite.lastName,
       email: invite.email,
+      phone: "",
       password: hashedPassword,
       role: "manager",
       station: invite.station,
@@ -687,7 +717,7 @@ export const getConsolidatedReport = async (req: AuthenticatedRequest, res: Resp
     const stationReports = await Promise.all(
       uniqueIds.map(async (id) => {
         const station = await FillingStation.findById(id)
-          .select("name city plan")
+          .select("name city plan parentStation")
           .lean();
 
         if (!station) return null;

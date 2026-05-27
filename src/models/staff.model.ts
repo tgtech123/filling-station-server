@@ -45,12 +45,7 @@ const StaffSchema = new Schema<IStaff>(
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
     email: { type: String, required: true },
-    phone: {
-      type: String,
-      required: function (this: any) {
-        return this.role !== "admin";
-      },
-    },
+    phone: { type: String, default: "" },
     address: { type: String, default: "" },
     city: { type: String, default: "" },
     state: { type: String, default: "" },
