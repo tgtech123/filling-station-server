@@ -119,6 +119,13 @@ app.use(cookieParser());
 app.get("/ping", (_, res) => res.status(200).send("pong"));
 
 // ── Rate limiters
+// Render passes IPv4-mapped IPv6 addresses (::ffff:x.x.x.x); express-rate-limit v7
+// throws ERR_ERL_KEY_GEN_IPV6 if the keyGenerator returns them as-is. Strip the prefix.
+const normalizeIp = (ip: string | undefined): string => {
+  if (!ip) return "unknown";
+  return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+};
+
 const isAuthenticatedPollingPath = (req: any) => {
   const authed =
     typeof req.headers.authorization === "string" &&
@@ -137,7 +144,7 @@ const generalLimiter = rateLimit({
     req.headers.authorization?.startsWith("Bearer ") ? 300 : 100,
   keyGenerator: (req: any) => {
     const auth = req.headers.authorization as string | undefined;
-    return auth?.startsWith("Bearer ") ? auth : (req.ip ?? "unknown");
+    return auth?.startsWith("Bearer ") ? auth : normalizeIp(req.ip);
   },
   message: { error: "Too many requests. Please try again later.", retryAfter: "15 minutes" },
   standardHeaders: true,
@@ -151,7 +158,7 @@ const generalLimiter = rateLimit({
 const activityLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 240,
-  keyGenerator: (req) => req.headers.authorization || req.ip || "unknown",
+  keyGenerator: (req) => req.headers.authorization || normalizeIp(req.ip),
   message: { error: "Too many activity requests. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,

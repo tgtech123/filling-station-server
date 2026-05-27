@@ -328,7 +328,7 @@ export const getBranchOverview = async (req: AuthenticatedRequest, res: Response
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const [staffCount, todayShifts, revenueAgg] = await Promise.all([
+        const [staffCount, todayShifts, revenueAgg, managerDoc] = await Promise.all([
           Staff.countDocuments({ station: id }),
           Shift.countDocuments({
             fillingStation: stationObjId,
@@ -345,6 +345,9 @@ export const getBranchOverview = async (req: AuthenticatedRequest, res: Response
             },
             { $group: { _id: null, total: { $sum: "$totalAmount" } } },
           ]),
+          Staff.findOne({ station: id, role: "manager" })
+            .select("firstName lastName email")
+            .lean(),
         ]);
 
         return {
@@ -358,6 +361,13 @@ export const getBranchOverview = async (req: AuthenticatedRequest, res: Response
           todayRevenue: revenueAgg[0]?.total || 0,
           isParent: !(station as any).parentStation,
           isCurrent: id === stationId?.toString(),
+          manager: managerDoc
+            ? {
+                id: (managerDoc as any)._id,
+                name: `${(managerDoc as any).firstName} ${(managerDoc as any).lastName}`,
+                email: (managerDoc as any).email,
+              }
+            : null,
         };
       })
     );
@@ -512,11 +522,11 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
   }
 };
 
-// â”€â”€ Get Invite Preview (public â€” shows station name before password is set) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Get Invite Preview (public - shows station name before password is set) -----------
 export const getInvitePreview = async (req: any, res: Response) => {
   try {
     const { token } = req.query;
-    if (!token) return res.status(400).json({ error: “Token is required” });
+    if (!token) return res.status(400).json({ error: 'Token is required' });
 
     const invite = await InviteToken.findOne({
       token,
@@ -525,15 +535,15 @@ export const getInvitePreview = async (req: any, res: Response) => {
     });
 
     if (!invite) {
-      return res.status(400).json({ error: “Invalid or expired invitation” });
+      return res.status(400).json({ error: 'Invalid or expired invitation' });
     }
 
     const station = await FillingStation.findById(invite.station)
-      .select(“name city”)
+      .select('name city')
       .lean() as any;
 
     return res.status(200).json({
-      stationName: station?.name || “Your Station”,
+      stationName: station?.name || 'Your Station',
       firstName: invite.firstName,
     });
   } catch (err: any) {
@@ -647,6 +657,47 @@ export const acceptInvite = async (req: any, res: Response) => {
     });
   } catch (err: any) {
     console.error("acceptInvite:", err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// -- Remove Branch Manager -------------------------------------------------------
+export const removeManager = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { branchId } = req.params;
+    const superManagerStation = req.user?.station;
+
+    const branch = await FillingStation.findById(branchId);
+    if (!branch) return res.status(404).json({ error: 'Branch not found' });
+
+    const isAuthorized =
+      branch.parentStation?.toString() === superManagerStation?.toString() ||
+      branchId === superManagerStation?.toString();
+
+    if (!isAuthorized) {
+      return res.status(403).json({ error: 'You do not have permission to manage this branch' });
+    }
+
+    const manager = await Staff.findOne({ station: branchId, role: 'manager' });
+    if (!manager) {
+      return res.status(404).json({ error: 'No manager found for this branch' });
+    }
+
+    await FillingStation.findByIdAndUpdate(branchId, { $pull: { staff: manager._id } });
+    await Staff.findByIdAndDelete(manager._id);
+
+    Activity.create({
+      fillingStation: superManagerStation,
+      type: 'stock',
+      title: 'Branch Manager Removed',
+      description: `${manager.firstName} ${manager.lastName} removed as manager of ${branch.name}`,
+      timestamp: new Date(),
+      severity: null,
+    }).catch(console.error);
+
+    return res.status(200).json({ message: `${manager.firstName} ${manager.lastName} removed successfully` });
+  } catch (err: any) {
+    console.error('removeManager:', err);
     return res.status(500).json({ error: err.message });
   }
 };

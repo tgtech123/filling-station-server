@@ -9,6 +9,7 @@ import {
   inviteBranchManager,
   getInvitePreview,
   acceptInvite,
+  removeManager,
   getInvites,
   revokeInvite,
   getConsolidatedReport,
@@ -28,6 +29,7 @@ router.post("/create", requireAuth, checkRole("manager"), createBranch);
 router.post("/switch", requireAuth, checkRole("manager"), switchStation);
 router.get("/overview", requireAuth, checkRole("manager"), getBranchOverview);
 router.post("/:branchId/invite", requireAuth, checkRole("manager"), inviteBranchManager);
+router.delete("/:branchId/manager", requireAuth, checkRole("manager"), removeManager);
 router.get("/:branchId/invites", requireAuth, checkRole("manager"), getInvites);
 router.delete("/invites/:inviteId", requireAuth, checkRole("manager"), revokeInvite);
 router.get("/consolidated-report", requireAuth, checkRole("manager"), getConsolidatedReport);
