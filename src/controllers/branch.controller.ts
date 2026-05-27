@@ -408,9 +408,18 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
       return res.status(404).json({ error: "Branch not found" });
     }
 
+    // Resolve the effective root station regardless of which station the JWT is set to.
+    // When switched to a branch, superManagerStation = branchId, so we traverse one
+    // level up to find the actual parent.
+    const currentDoc = await FillingStation.findById(superManagerStation).lean() as any;
+    const effectiveRoot: string = currentDoc?.parentStation
+      ? currentDoc.parentStation.toString()
+      : superManagerStation?.toString();
+
+    // Authorized if the target branch belongs to the same root, or IS the root
     const isAuthorized =
-      branch.parentStation?.toString() === superManagerStation?.toString() ||
-      branchId === superManagerStation?.toString();
+      branch.parentStation?.toString() === effectiveRoot ||
+      branch._id.toString() === effectiveRoot;
 
     if (!isAuthorized) {
       return res.status(403).json({
@@ -670,9 +679,14 @@ export const removeManager = async (req: AuthenticatedRequest, res: Response) =>
     const branch = await FillingStation.findById(branchId);
     if (!branch) return res.status(404).json({ error: 'Branch not found' });
 
+    const currentDoc2 = await FillingStation.findById(superManagerStation).lean() as any;
+    const effectiveRoot2: string = currentDoc2?.parentStation
+      ? currentDoc2.parentStation.toString()
+      : superManagerStation?.toString();
+
     const isAuthorized =
-      branch.parentStation?.toString() === superManagerStation?.toString() ||
-      branchId === superManagerStation?.toString();
+      branch.parentStation?.toString() === effectiveRoot2 ||
+      branch._id.toString() === effectiveRoot2;
 
     if (!isAuthorized) {
       return res.status(403).json({ error: 'You do not have permission to manage this branch' });
