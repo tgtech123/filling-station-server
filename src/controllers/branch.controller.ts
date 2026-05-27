@@ -12,6 +12,7 @@ import Activity from "../models/activity.model";
 import InviteToken from "../models/inviteToken.model";
 import Tank from "../models/tanks.model";
 import { transporter } from "../middlewares/transporter.middleware";
+import { cascadeDeleteBranch } from "../utils/branchCleanup";
 
 // Resolves the root parent station and returns all accessible station IDs for a manager.
 // When the JWT station is a branch, we traverse up one level to the parent so the manager
@@ -651,11 +652,16 @@ export const acceptInvite = async (req: any, res: Response) => {
       token: authToken,
       user: {
         id: newManager._id,
+        _id: newManager._id,
         firstName: newManager.firstName,
         lastName: newManager.lastName,
         email: newManager.email,
         role: newManager.role,
-        station: invite.station,
+        station: {
+          ...branch.toObject(),
+          logoUrl: (branch as any).image || null,
+          logo: (branch as any).image || null,
+        },
         isSuperManager: false,
       },
       station: {
@@ -1004,6 +1010,60 @@ export const transferStaff = async (req: AuthenticatedRequest, res: Response) =>
       },
     });
   } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// ── Delete Branch ──────────────────────────────────────────────────────────────────────
+export const deleteBranch = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { branchId } = req.params;
+    const superManagerStation = req.user?.station;
+    const managerId = req.user?._id || req.user?.id;
+
+    const branch = await FillingStation.findById(branchId).lean() as any;
+    if (!branch) return res.status(404).json({ error: 'Branch not found' });
+
+    // Only branches can be deleted — the main station cannot be deleted this way
+    if (!branch.parentStation) {
+      return res.status(400).json({ error: 'The main station cannot be deleted. Only branch stations can be deleted.' });
+    }
+
+    // Resolve effective root (works whether JWT station is main or a branch)
+    const currentDoc = await FillingStation.findById(superManagerStation).lean() as any;
+    const effectiveRoot: string = currentDoc?.parentStation
+      ? currentDoc.parentStation.toString()
+      : superManagerStation?.toString();
+
+    if (branch.parentStation?.toString() !== effectiveRoot) {
+      return res.status(403).json({ error: 'You do not have permission to delete this branch' });
+    }
+
+    // Cascade — delete every document linked to this branch
+    await cascadeDeleteBranch(branchId);
+
+    // Remove from parent's branches array and manager's managedStations
+    await Promise.all([
+      FillingStation.findByIdAndUpdate(branch.parentStation, { $pull: { branches: branch._id } }),
+      Staff.findByIdAndUpdate(managerId, { $pull: { managedStations: branch._id } }),
+    ]);
+
+    // Delete the branch station document itself
+    await FillingStation.findByIdAndDelete(branchId);
+
+    // Log on the parent station
+    Activity.create({
+      fillingStation: branch.parentStation,
+      type: 'stock',
+      title: 'Branch Deleted',
+      description: `${branch.name} (${branch.city}) has been permanently closed and deleted`,
+      timestamp: new Date(),
+      severity: 'critical',
+    }).catch(console.error);
+
+    return res.status(200).json({ message: `${branch.name} has been permanently deleted` });
+  } catch (err: any) {
+    console.error('deleteBranch:', err);
     return res.status(500).json({ error: err.message });
   }
 };
