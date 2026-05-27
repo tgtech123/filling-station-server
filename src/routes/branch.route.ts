@@ -7,6 +7,7 @@ import {
   switchStation,
   getBranchOverview,
   inviteBranchManager,
+  getInvitePreview,
   acceptInvite,
   getInvites,
   revokeInvite,
@@ -18,6 +19,7 @@ import {
 const router = express.Router();
 
 // Public — no auth needed
+router.get("/invite-preview", getInvitePreview);
 router.post("/accept-invite", acceptInvite);
 
 // Protected routes
