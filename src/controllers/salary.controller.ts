@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import SalaryDraft, { ISalaryEntry } from "../models/salary.model";
 import Staff from "../models/staff.model";
+import FillingStation from "../models/fillingStation.model";
 import CommissionStructure from "../models/commissionStructure.model";
 import BonusStructure from "../models/bonusStructure.model";
 import Expense from "../models/expense.model";
@@ -25,7 +26,7 @@ const normAchievement = (
   return null;
 };
 
-// Build a Map<key â†’ bonusAmount> from the station's BonusStructure documents
+// Build a Map<key â†' bonusAmount> from the station's BonusStructure documents
 const buildBonusMap = (structures: any[]): Map<string, number> => {
   const map = new Map<string, number>();
   structures.forEach((b) => {
@@ -35,7 +36,7 @@ const buildBonusMap = (structures: any[]): Map<string, number> => {
   return map;
 };
 
-// Recalculate derived amounts â€” pension is applied only when pensionEnabled = true
+// Recalculate derived amounts â€" pension is applied only when pensionEnabled = true
 const recalcEntry = (e: Partial<ISalaryEntry>, pensionEnabled = true): Partial<ISalaryEntry> => {
   const basic = Number(e.basicSalary) || 0;
   const ba = e.bonusAmounts ?? { monthlySalesTarget: 0, zeroDiscrepancies: 0, topPerformer: 0 };
@@ -62,7 +63,7 @@ const recalcEntry = (e: Partial<ISalaryEntry>, pensionEnabled = true): Partial<I
   };
 };
 
-// Build a fresh entry â€” bonus amounts prefilled from the station's BonusStructure
+// Build a fresh entry â€" bonus amounts prefilled from the station's BonusStructure
 const buildFreshEntry = (
   s: any,
   structureByRole: Map<string, any>,
@@ -84,18 +85,20 @@ const buildFreshEntry = (
       topPerformer:       bonusMap.get("topPerformer")       ?? 0,
     },
     totalBonus: 0,
-    taxPercentage: 0,
+    taxPercentage: (s as any).taxPercentage ?? 0,
     taxAmount: 0,
     employeePension: 0,
     employerPension: 0,
     shortage: 0,
     salaryToPay: s.amount ?? 0,
-    bankDetails: { acctNo: "", acctName: "", bankName: "" },
+    bankDetails: (s as any).bankDetails?.acctNo
+      ? (s as any).bankDetails
+      : { acctNo: "", acctName: "", bankName: "" },
   };
   return recalcEntry(base, pensionEnabled);
 };
 
-// Resolve caller's full name â€” prefer token fields, fall back to DB
+// Resolve caller's full name â€" prefer token fields, fall back to DB
 const resolveFullName = async (userId: string, tokenFirst?: string, tokenLast?: string): Promise<string> => {
   if (tokenFirst && tokenLast) return `${tokenFirst} ${tokenLast}`;
   const s = await Staff.findById(userId).select("firstName lastName").lean();
@@ -113,17 +116,19 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
 
     const stationOid = new mongoose.Types.ObjectId(station);
 
-    // Always fetch the live staff roster â€” this is the source of truth
-    const staffList = await Staff.find({
-      station: stationOid,
-      role: { $nin: ["manager", "admin"] },
-    }).lean();
+    // Always fetch the live staff roster.
+    // Managers are included only when their salary has been configured (amount > 0).
+    const [nonManagerStaff, managerStaff] = await Promise.all([
+      Staff.find({ station: stationOid, role: { $nin: ["manager", "admin"] } }).lean(),
+      Staff.find({ station: stationOid, role: "manager", amount: { $gt: 0 } }).lean(),
+    ]);
+    const staffList = [...nonManagerStaff, ...managerStaff];
 
     const staffById = new Map(staffList.map((s) => [s._id.toString(), s]));
 
     const draft = await SalaryDraft.findOne({ station: stationOid, month });
 
-    // â”€â”€ Case 1: No draft yet â€” create from scratch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ Case 1: No draft yet â€" create from scratch â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if (!draft) {
       const [structures, bonusStructures] = await Promise.all([
         CommissionStructure.find({ fillingStation: stationOid }).lean(),
@@ -149,12 +154,12 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
       return res.status(200).json({ success: true, data: newDraft });
     }
 
-    // â”€â”€ Case 2: Draft is locked (submitted / validated) â€” return as-is â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ Case 2: Draft is locked (submitted / validated) â€" return as-is â"€â"€â"€â"€â"€â"€â"€â"€
     if (draft.status !== "draft") {
       return res.status(200).json({ success: true, data: draft });
     }
 
-    // â”€â”€ Case 3: Draft exists and is editable â€” sync staff roster â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ Case 3: Draft exists and is editable â€" sync staff roster â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     //
     // Rules:
     //   â€¢ Staff-owned fields (name, role, shiftType, payType, basicSalary) are
@@ -191,14 +196,14 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
         const merged: Partial<ISalaryEntry> = {
           staff:     e.staff,
           staffCode: e.staffCode,
-          // â€” staff-owned (refreshed) â€”
+          // â€" staff-owned (refreshed) â€"
           firstName: s.firstName,
           lastName:  s.lastName,
           role:      s.role,
           shiftType: s.shiftType ?? "",
           payType:   s.payType ?? "Monthly",
           basicSalary: s.amount ?? 0,
-          // â€” accountant-owned (preserved) â€”
+          // â€" accountant-owned (preserved) â€"
           bonusAmounts: {
             monthlySalesTarget: e.bonusAmounts.monthlySalesTarget,
             zeroDiscrepancies:  e.bonusAmounts.zeroDiscrepancies,
@@ -211,7 +216,7 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
             acctName: e.bankDetails.acctName,
             bankName: e.bankDetails.bankName,
           },
-          // placeholders â€” will be recalculated by recalcEntry
+          // placeholders â€" will be recalculated by recalcEntry
           totalBonus: 0,
           taxAmount:  0,
           employeePension: 0,
@@ -320,7 +325,7 @@ const displayName = (populated: any, stored: string | undefined): string => {
   return "";
 };
 
-// GET /api/salary/pending  â€” manager sees submitted drafts
+// GET /api/salary/pending  â€" manager sees submitted drafts
 export const getPendingDrafts = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { station } = req.user!;
@@ -348,7 +353,7 @@ export const getPendingDrafts = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
-// POST /api/salary/:id/validate  â€” manager validates + auto-records payroll expense
+// POST /api/salary/:id/validate  â€" manager validates + auto-records payroll expense
 export const validateDraft = async (req: AuthenticatedRequest, res: Response) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -387,7 +392,7 @@ export const validateDraft = async (req: AuthenticatedRequest, res: Response) =>
         {
           fillingStation: stationOid,
           category: "Salaries",
-          description: `Payroll for ${monthName} â€” ${draft.entries.length} staff`,
+          description: `Payroll for ${monthName} â€" ${draft.entries.length} staff`,
           amount: totalPayroll,
           submittedBy: draft.preparedBy,
           status: "Approved",
@@ -420,7 +425,7 @@ export const validateDraft = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// GET /api/salary/history  â€” list validated records (summary, no entries)
+// GET /api/salary/history  â€" list validated records (summary, no entries)
 export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { station } = req.user!;
@@ -448,7 +453,172 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// GET /api/salary/:id  â€” full record with entries + station info
+// GET /api/salary/staff/:staffId/config
+export const getSalaryConfig = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { staffId } = req.params;
+    const callerId = req.user?._id || req.user?.id;
+
+    const target = await Staff.findById(staffId)
+      .select("firstName lastName role amount payType taxPercentage bankDetails station")
+      .lean() as any;
+    if (!target) return res.status(404).json({ message: "Staff not found" });
+
+    const isSelf = target._id.toString() === callerId?.toString();
+    if (!isSelf && !req.user?.isSuperManager) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    return res.status(200).json({ success: true, data: target });
+  } catch (err) {
+    console.error("getSalaryConfig:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// PATCH /api/salary/staff/:staffId/config
+export const configureSalary = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { staffId } = req.params;
+    const callerId = req.user?._id || req.user?.id;
+    const callerStation = req.user?.station;
+
+    const { basicSalary, payType, taxPercentage, bankDetails } = req.body;
+
+    const target = await Staff.findById(staffId).lean() as any;
+    if (!target) return res.status(404).json({ message: "Staff not found" });
+
+    const isSelf = target._id.toString() === callerId?.toString();
+
+    if (!isSelf) {
+      if (!req.user?.isSuperManager) {
+        return res.status(403).json({ message: "Only super managers can configure another manager's salary" });
+      }
+      const managerDoc = await Staff.findById(callerId).lean() as any;
+      const currentDoc = await FillingStation.findById(callerStation).lean() as any;
+      const rootDoc = currentDoc?.parentStation
+        ? await FillingStation.findById(currentDoc.parentStation).lean() as any
+        : currentDoc;
+      const accessibleIds = [...new Set<string>([
+        callerStation?.toString(),
+        rootDoc?._id?.toString(),
+        ...(managerDoc?.managedStations || []).map((id: any) => id.toString()),
+        ...(rootDoc?.branches || []).map((id: any) => id.toString()),
+      ].filter(Boolean))];
+      if (!accessibleIds.includes(target.station?.toString())) {
+        return res.status(403).json({ message: "You do not have access to this staff member" });
+      }
+    }
+
+    const updates: any = {};
+    if (basicSalary !== undefined) updates.amount = Number(basicSalary);
+    if (payType !== undefined) updates.payType = payType;
+    if (taxPercentage !== undefined) updates.taxPercentage = Number(taxPercentage);
+    if (bankDetails !== undefined) updates.bankDetails = bankDetails;
+
+    const updated = await Staff.findByIdAndUpdate(staffId, updates, { new: true })
+      .select("firstName lastName role amount payType taxPercentage bankDetails station");
+
+    return res.status(200).json({ success: true, data: updated });
+  } catch (err) {
+    console.error("configureSalary:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// GET /api/salary/consolidated?month=YYYY-MM
+export const getConsolidatedPayroll = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?.isSuperManager) {
+      return res.status(403).json({ message: "Only super managers can access consolidated payroll" });
+    }
+
+    const { month } = req.query as { month?: string };
+    const stationId = req.user?.station;
+    const managerId = req.user?._id || req.user?.id;
+
+    const managerDoc = await Staff.findById(managerId).lean() as any;
+    const currentStationDoc = await FillingStation.findById(stationId).lean() as any;
+    const rootDoc = currentStationDoc?.parentStation
+      ? await FillingStation.findById(currentStationDoc.parentStation).lean() as any
+      : currentStationDoc;
+
+    const accessibleIds = [...new Set<string>([
+      stationId?.toString(),
+      rootDoc?._id?.toString(),
+      ...(managerDoc?.managedStations || []).map((id: any) => id.toString()),
+      ...(rootDoc?.branches || []).map((id: any) => id.toString()),
+    ].filter(Boolean))];
+
+    const stationDocs = await FillingStation.find({ _id: { $in: accessibleIds } })
+      .select("name city parentStation")
+      .lean();
+
+    const draftQuery: any = {
+      station: { $in: accessibleIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    };
+    if (month) draftQuery.month = month;
+
+    const allDrafts = await SalaryDraft.find(draftQuery).sort({ month: -1 }).lean();
+
+    const draftByStation = new Map<string, any>();
+    allDrafts.forEach((d) => {
+      const sid = d.station.toString();
+      if (!draftByStation.has(sid)) draftByStation.set(sid, d);
+    });
+
+    const stations = (stationDocs as any[])
+      .map((station) => {
+        const sid = station._id.toString();
+        const draft = draftByStation.get(sid);
+        const entries = (draft?.entries || []).map((e: any) => ({
+          staffCode: e.staffCode,
+          firstName: e.firstName,
+          lastName: e.lastName,
+          role: e.role,
+          basicSalary: e.basicSalary,
+          totalBonus: e.totalBonus,
+          taxAmount: e.taxAmount,
+          employeePension: e.employeePension,
+          shortage: e.shortage,
+          salaryToPay: e.salaryToPay,
+          bankDetails: e.bankDetails,
+        }));
+        const subtotal = entries.reduce((s: number, e: any) => s + (e.salaryToPay || 0), 0);
+        return {
+          stationId: sid,
+          stationName: station.name,
+          stationCity: station.city,
+          isParent: !station.parentStation,
+          draftId: draft?._id?.toString() || null,
+          month: draft?.month || null,
+          status: draft?.status || null,
+          preparedBy: draft?.preparedByName || null,
+          validatedBy: draft?.validatedByName || null,
+          entries,
+          subtotal,
+        };
+      })
+      .sort((a, b) => {
+        if (a.isParent && !b.isParent) return -1;
+        if (!a.isParent && b.isParent) return 1;
+        return a.stationName.localeCompare(b.stationName);
+      });
+
+    const grandTotal = stations.reduce((s, st) => s + st.subtotal, 0);
+    const totalStaff = stations.reduce((s, st) => s + st.entries.length, 0);
+
+    return res.status(200).json({
+      success: true,
+      data: { month: month || null, grandTotal, totalStaff, totalStations: stations.length, stations },
+    });
+  } catch (err) {
+    console.error("getConsolidatedPayroll:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// GET /api/salary/:id  -- full record with entries + station info
 export const getRecord = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;

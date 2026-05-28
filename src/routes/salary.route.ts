@@ -9,6 +9,9 @@ import {
   validateDraft,
   getHistory,
   getRecord,
+  getConsolidatedPayroll,
+  getSalaryConfig,
+  configureSalary,
 } from "../controllers/salary.controller";
 
 const router = express.Router();
@@ -32,6 +35,13 @@ router.post("/:id/validate", checkRole("manager"), validateDraft);
 
 // Both: list validated history (summary only)
 router.get("/history", checkRole("manager", "accountant"), getHistory);
+
+// Manager (self) or super manager: read/write salary config for a staff member
+router.get("/staff/:staffId/config", checkRole("manager"), getSalaryConfig);
+router.patch("/staff/:staffId/config", checkRole("manager"), configureSalary);
+
+// Super manager: consolidated payroll across all branches
+router.get("/consolidated", checkRole("manager"), getConsolidatedPayroll);
 
 // Both: get a full salary record by id
 router.get("/:id", checkRole("manager", "accountant"), getRecord);
