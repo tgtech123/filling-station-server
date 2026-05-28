@@ -1021,6 +1021,11 @@ export const deleteBranch = async (req: AuthenticatedRequest, res: Response) => 
     const superManagerStation = req.user?.station;
     const managerId = req.user?._id || req.user?.id;
 
+    // Only super managers (owners of the root station) may delete branches
+    if (!req.user?.isSuperManager) {
+      return res.status(403).json({ error: 'Only the super manager can delete branches' });
+    }
+
     const branch = await FillingStation.findById(branchId).lean() as any;
     if (!branch) return res.status(404).json({ error: 'Branch not found' });
 
@@ -1029,13 +1034,11 @@ export const deleteBranch = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(400).json({ error: 'The main station cannot be deleted. Only branch stations can be deleted.' });
     }
 
-    // Resolve effective root (works whether JWT station is main or a branch)
-    const currentDoc = await FillingStation.findById(superManagerStation).lean() as any;
-    const effectiveRoot: string = currentDoc?.parentStation
-      ? currentDoc.parentStation.toString()
-      : superManagerStation?.toString();
+    // Authorization: same accessible-IDs logic used by all other branch operations
+    const manager = await Staff.findById(managerId).lean();
+    const accessibleIds = await getAccessibleIds(superManagerStation, manager);
 
-    if (branch.parentStation?.toString() !== effectiveRoot) {
+    if (!accessibleIds.includes(branchId.toString())) {
       return res.status(403).json({ error: 'You do not have permission to delete this branch' });
     }
 
