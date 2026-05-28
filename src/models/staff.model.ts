@@ -21,6 +21,8 @@ export interface IStaff extends Document {
   addSaleTarget?: boolean;
   payType?: string;
   amount: number;
+  taxPercentage?: number;
+  bankDetails?: { acctNo: string; acctName: string; bankName: string };
   onDuty?: boolean;
   twoFactorAuthEnabled: boolean;
   notificationPreferences: {
@@ -68,6 +70,12 @@ const StaffSchema = new Schema<IStaff>(
     addSaleTarget: { type: Boolean, required: true, default: false },
     payType: { type: String },
     amount: { type: Number, required: true, default: 0 },
+    taxPercentage: { type: Number, default: 0 },
+    bankDetails: {
+      acctNo: { type: String, default: "" },
+      acctName: { type: String, default: "" },
+      bankName: { type: String, default: "" },
+    },
     twoFactorAuthEnabled: { type: Boolean, default: false },
     notificationPreferences: {
       email: { type: Boolean, default: false },
