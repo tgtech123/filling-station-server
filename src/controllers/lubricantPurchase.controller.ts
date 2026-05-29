@@ -127,12 +127,13 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
 
     Notification.create({
       fillingStation,
-      type: "alert",
-      category: "low_stock",
-      title: "Stock Updated",
-      body: `${itemSummary} added to stock`,
+      type: "message",
+      category: "delivery_arrived",
+      title: "Lubricant Stock Received",
+      body: `${itemSummary} added to inventory.`,
       severity: "info",
       timestamp: new Date(),
+      targetRole: "manager",
     }).catch((err) => console.error("Notification error (addLubricantPurchase):", err));
 
     return res.status(201).json({

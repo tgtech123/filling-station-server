@@ -1,20 +1,57 @@
-﻿import { Response } from "express";
+import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Notification from "../models/notification.model";
+import FillingStation from "../models/fillingStation.model";
+import Staff from "../models/staff.model";
+
+// Resolves all station IDs visible to the current user.
+// Super managers see their root station + all branches.
+// Everyone else sees only their own station.
+async function getAccessibleStationIds(
+  stationId: string,
+  isSuperManager: boolean,
+  managerId: string
+): Promise<string[]> {
+  if (!isSuperManager) return [stationId];
+
+  const [manager, station] = await Promise.all([
+    Staff.findById(managerId).lean() as any,
+    FillingStation.findById(stationId).lean() as any,
+  ]);
+
+  let rootStation: any = station;
+  if (station?.parentStation) {
+    const parent = await FillingStation.findById(station.parentStation).lean() as any;
+    if (parent) rootStation = parent;
+  }
+
+  const ids = new Set<string>(
+    [
+      stationId,
+      rootStation?._id?.toString(),
+      ...(manager?.managedStations || []).map((id: any) => id.toString()),
+      ...(rootStation?.branches || []).map((id: any) => id.toString()),
+    ].filter(Boolean) as string[]
+  );
+  return [...ids];
+}
 
 export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const stationId = req.user?.station;
+    const stationId = String(req.user?.station ?? "");
     if (!stationId) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const stationObjectId = new Types.ObjectId(stationId);
+    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
+    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
 
-    // One-time cleanup: remove old bad notifications created before staff-scoping was fixed
+    // Cleanup stale bad notifications (own station only to avoid excessive writes)
     await Notification.deleteMany({
-      fillingStation: stationObjectId,
+      fillingStation: new Types.ObjectId(stationId),
       $or: [
         { staff: null, category: "failed_login", targetRole: { $ne: "manager" } },
         { staff: null, title: { $regex: "met your target|Target Period", $options: "i" } },
@@ -23,17 +60,22 @@ export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
 
     const staffId = (req.user as any)?._id ?? req.user?.id;
     const userCreatedAt = (req.user as any)?.createdAt ?? new Date(0);
+
     const messages = await Notification.find({
-      fillingStation: stationObjectId,
+      fillingStation: { $in: stationObjectIds },
       type: "message",
       expiresAt: { $gt: new Date() },
       $or: [
         { staff: new Types.ObjectId(staffId) },
-        { staff: null, targetRole: { $in: [req.user?.role ?? "manager", "all"] }, createdAt: { $gte: userCreatedAt } },
+        {
+          staff: null,
+          targetRole: { $in: [req.user?.role ?? "manager", "all"] },
+          createdAt: { $gte: userCreatedAt },
+        },
       ],
     })
       .sort({ timestamp: -1 })
-      .limit(20)
+      .limit(30)
       .lean();
 
     const unreadCount = messages.filter((m) => !m.isRead).length;
@@ -50,6 +92,7 @@ export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
         isRead: m.isRead,
         severity: m.severity ?? null,
         timestamp: m.timestamp,
+        stationId: m.fillingStation,
       })),
     });
   } catch (err: any) {
@@ -60,16 +103,19 @@ export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
 
 export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const stationId = req.user?.station;
+    const stationId = String(req.user?.station ?? "");
     if (!stationId) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const stationObjectId = new Types.ObjectId(stationId);
+    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
+    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
 
-    // One-time cleanup: remove old bad notifications created before staff-scoping was fixed
+    // Cleanup (own station only)
     await Notification.deleteMany({
-      fillingStation: stationObjectId,
+      fillingStation: new Types.ObjectId(stationId),
       $or: [
         { staff: null, category: "failed_login", targetRole: { $ne: "manager" } },
         { staff: null, title: { $regex: "met your target|Target Period", $options: "i" } },
@@ -78,17 +124,22 @@ export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
 
     const staffId = (req.user as any)?._id ?? req.user?.id;
     const userCreatedAt = (req.user as any)?.createdAt ?? new Date(0);
+
     const alerts = await Notification.find({
-      fillingStation: stationObjectId,
+      fillingStation: { $in: stationObjectIds },
       type: "alert",
       expiresAt: { $gt: new Date() },
       $or: [
         { staff: new Types.ObjectId(staffId) },
-        { staff: null, targetRole: { $in: [req.user?.role ?? "manager", "all"] }, createdAt: { $gte: userCreatedAt } },
+        {
+          staff: null,
+          targetRole: { $in: [req.user?.role ?? "manager", "all"] },
+          createdAt: { $gte: userCreatedAt },
+        },
       ],
     })
       .sort({ timestamp: -1 })
-      .limit(20)
+      .limit(30)
       .lean();
 
     const unreadCount = alerts.filter((a) => !a.isRead).length;
@@ -105,6 +156,7 @@ export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
         isRead: a.isRead,
         severity: a.severity ?? null,
         timestamp: a.timestamp,
+        stationId: a.fillingStation,
       })),
     });
   } catch (err: any) {
@@ -115,18 +167,22 @@ export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
 
 export const markMessageRead = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const stationId = req.user?.station;
+    const stationId = String(req.user?.station ?? "");
     const { id } = req.params;
     if (!stationId) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
+    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
+    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
+
     const staffId = (req.user as any)?._id ?? req.user?.id;
-    const stationObjectId = new Types.ObjectId(stationId);
 
     const notification = await Notification.findOne({
       _id: new Types.ObjectId(id),
-      fillingStation: stationObjectId,
+      fillingStation: { $in: stationObjectIds },
       type: "message",
       $or: [
         { targetRole: { $in: [req.user?.role ?? "manager", "all"] }, staff: null },
@@ -150,18 +206,22 @@ export const markMessageRead = async (req: AuthenticatedRequest, res: Response) 
 
 export const markAlertRead = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const stationId = req.user?.station;
+    const stationId = String(req.user?.station ?? "");
     const { id } = req.params;
     if (!stationId) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
+    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
+    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
+
     const staffId = (req.user as any)?._id ?? req.user?.id;
-    const stationObjectId = new Types.ObjectId(stationId);
 
     const notification = await Notification.findOne({
       _id: new Types.ObjectId(id),
-      fillingStation: stationObjectId,
+      fillingStation: { $in: stationObjectIds },
       type: "alert",
       $or: [
         { targetRole: { $in: [req.user?.role ?? "manager", "all"] }, staff: null },
@@ -185,15 +245,21 @@ export const markAlertRead = async (req: AuthenticatedRequest, res: Response) =>
 
 export const markAllMessagesRead = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const stationId = req.user?.station;
+    const stationId = String(req.user?.station ?? "");
     if (!stationId) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
+    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
+    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
+
     const staffId = (req.user as any)?._id ?? req.user?.id;
+
     await Notification.updateMany(
       {
-        fillingStation: new Types.ObjectId(stationId),
+        fillingStation: { $in: stationObjectIds },
         type: "message",
         expiresAt: { $gt: new Date() },
         $or: [
@@ -213,15 +279,21 @@ export const markAllMessagesRead = async (req: AuthenticatedRequest, res: Respon
 
 export const markAllAlertsRead = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const stationId = req.user?.station;
+    const stationId = String(req.user?.station ?? "");
     if (!stationId) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
+    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
+    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
+
     const staffId = (req.user as any)?._id ?? req.user?.id;
+
     await Notification.updateMany(
       {
-        fillingStation: new Types.ObjectId(stationId),
+        fillingStation: { $in: stationObjectIds },
         type: "alert",
         expiresAt: { $gt: new Date() },
         $or: [
