@@ -12,7 +12,9 @@
       "Bash(git stash *)",
       "Bash(git branch *)",
       "Bash(dir /s /b src\\\\*.ts)",
-      "Bash(findstr /i procurement)"
+      "Bash(findstr /i procurement)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\src\\\\app\" -Recurse -Directory -Filter \"*contact*\" -ErrorAction SilentlyContinue)",
+      "Bash(powershell -File -)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",
@@ -21,7 +23,9 @@
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\accountant",
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\branches",
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\accept-invite",
-      "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard"
+      "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard",
+      "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\contact",
+      "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app"
     ]
   }
 }

@@ -3,6 +3,7 @@ import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Expense from "../models/expense.model";
 import Staff from "../models/staff.model";
+import Notification from "../models/notification.model";
 
 /**
  * GET /api/expenses
@@ -229,6 +230,35 @@ export const updateExpense = async (req: AuthenticatedRequest, res: Response) =>
           expense.rejectionReason = rejectionReason.trim();
         } else if (status === "Approved") {
           expense.rejectionReason = undefined;
+
+          // Notify manager
+          Notification.create({
+            fillingStation: new Types.ObjectId(fillingStation),
+            type: "message",
+            category: "report_generated",
+            title: "Expense Approved",
+            body: `An expense of ₦${Number(expense.amount).toLocaleString()} for "${expense.category}" has been approved.`,
+            severity: "info",
+            timestamp: new Date(),
+            targetRole: "manager",
+            expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+          }).catch((e) => console.error("Notification error (expense approved - manager):", e));
+
+          // Notify the submitter individually
+          if (expense.submittedBy) {
+            Notification.create({
+              fillingStation: new Types.ObjectId(fillingStation),
+              type: "message",
+              category: "report_generated",
+              title: "Your Expense Was Approved",
+              body: `Your expense of ₦${Number(expense.amount).toLocaleString()} for "${expense.category}" has been approved.`,
+              severity: "info",
+              timestamp: new Date(),
+              staff: expense.submittedBy,
+              targetRole: "all",
+              expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+            }).catch((e) => console.error("Notification error (expense approved - submitter):", e));
+          }
         }
       } else if (status === "Pending") {
         // Allow resubmission (set back to pending)

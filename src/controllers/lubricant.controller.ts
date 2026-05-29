@@ -6,6 +6,7 @@ import lubricantSaleModels from "../models/lubricant-sale.models";
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import mongoose from "mongoose";
 import Activity from "../models/activity.model";
+import Notification from "../models/notification.model";
 
 export const addLubricant = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -959,6 +960,22 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       lubricant.qtyInStock = currentQty - quantity;
       await lubricant.save({ session });
 
+      // Low-stock alert when quantity drops to or below reorder level
+      const newQty = lubricant.qtyInStock;
+      const reOrder = lubricant.reOrderLevel || 0;
+      if (reOrder > 0 && newQty <= reOrder) {
+        Notification.create({
+          fillingStation: stationObjectId,
+          type: "alert",
+          category: "low_stock",
+          title: "Lubricant Low Stock",
+          body: lubricant.productName + " is running low — " + newQty + " unit(s) remaining (reorder level: " + reOrder + ").",
+          severity: newQty === 0 ? "critical" : "warning",
+          timestamp: new Date(),
+          targetRole: "manager",
+        }).catch((err) => console.error("Notification error (lubricant low stock):", err));
+      }
+
       // ðŸ“ Prepare item for transaction
       const amount = quantity * unitPrice;
       processedItems.push({
@@ -1114,6 +1131,7 @@ export const getLubricantTransactionById = async (req: AuthenticatedRequest, res
       fillingStation: new Types.ObjectId(fillingStation),
     })
       .populate("staff", "firstName lastName email")
+      .populate("fillingStation", "name address")
       .lean();
 
     if (!transaction) {

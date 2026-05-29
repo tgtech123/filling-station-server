@@ -68,6 +68,19 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
       // The pre-save hook will calculate discrepancy and status
       await reconciliation.save();
 
+      // Always notify manager on submission
+      Notification.create({
+        fillingStation: new Types.ObjectId(fillingStation),
+        type: "message",
+        category: "cash_reconciliation",
+        title: "Reconciliation Submitted",
+        body: `Cash reconciliation for ${reconciliation.pumpTitle ?? "a pump"} has been submitted. ₦${(reconciliation.cashReceived || 0).toLocaleString()} collected.`,
+        severity: "info",
+        timestamp: new Date(),
+        targetRole: "manager",
+        expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      }).catch((err) => console.error("Notification error (reconciliation submitted):", err));
+
       if (reconciliation.status === "Flagged") {
         const discAbs = Math.abs(reconciliation.discrepancy ?? 0);
         Notification.create({
@@ -75,7 +88,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           type: "alert",
           category: "cash_reconciliation",
           title: "Cash Discrepancy Flagged",
-          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of â‚¦${discAbs.toLocaleString()}`,
+          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of ₦${discAbs.toLocaleString()}`,
           severity: "critical",
           timestamp: new Date(),
           targetRole: "accountant",
@@ -86,7 +99,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           type: "alert",
           category: "cash_reconciliation",
           title: "Cash Discrepancy on Your Shift",
-          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of â‚¦${discAbs.toLocaleString()}. Please review.`,
+          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
           severity: "critical",
           timestamp: new Date(),
           targetRole: "attendant",
@@ -135,6 +148,19 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
       // The pre-save hook will calculate discrepancy and status
       await reconciliation.save();
 
+      // Always notify manager on submission
+      Notification.create({
+        fillingStation: new Types.ObjectId(fillingStation),
+        type: "message",
+        category: "cash_reconciliation",
+        title: "Reconciliation Submitted",
+        body: `Cash reconciliation for ${reconciliation.pumpTitle ?? "a pump"} has been submitted. ₦${(reconciliation.cashReceived || 0).toLocaleString()} collected.`,
+        severity: "info",
+        timestamp: new Date(),
+        targetRole: "manager",
+        expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      }).catch((err) => console.error("Notification error (reconciliation submitted):", err));
+
       if (reconciliation.status === "Flagged") {
         const discAbs = Math.abs(reconciliation.discrepancy ?? 0);
         Notification.create({
@@ -142,7 +168,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           type: "alert",
           category: "cash_reconciliation",
           title: "Cash Discrepancy Flagged",
-          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of â‚¦${discAbs.toLocaleString()}`,
+          body: `Cash reconciliation for shift on ${reconciliation.pumpTitle ?? "pump"} has a discrepancy of ₦${discAbs.toLocaleString()}`,
           severity: "critical",
           timestamp: new Date(),
           targetRole: "accountant",
@@ -153,7 +179,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           type: "alert",
           category: "cash_reconciliation",
           title: "Cash Discrepancy on Your Shift",
-          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of â‚¦${discAbs.toLocaleString()}. Please review.`,
+          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
           severity: "critical",
           timestamp: new Date(),
           targetRole: "attendant",
