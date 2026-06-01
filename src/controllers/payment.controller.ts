@@ -431,9 +431,12 @@ export const paystackWebhook = async (req: any, res: Response) => {
   res.status(200).json({ received: true });
 
   try {
+    // Use the raw Buffer preserved in app.ts — re-stringifying a parsed object is not safe
+    // because JSON.stringify can change whitespace/key order vs. what Paystack actually signed.
+    const bodyForHmac: Buffer | string = req.rawBody ?? JSON.stringify(req.body);
     const hash = crypto
       .createHmac("sha512", process.env.PAYSTACK_SECRET_KEY || "")
-      .update(JSON.stringify(req.body))
+      .update(bodyForHmac)
       .digest("hex");
 
     const signature = req.headers["x-paystack-signature"];
@@ -469,13 +472,22 @@ export const paystackWebhook = async (req: any, res: Response) => {
       }
 
       if (!isGuest && stationId) {
+        // Apply mapLimit so 999 (unlimited sentinel in plan doc) becomes 999999,
+        // matching the same conversion done in verifyPayment.
+        const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
         await FillingStation.findByIdAndUpdate(stationId, {
           plan: planSlug,
           planId,
           planStatus: "active",
           planStartDate: now,
           planExpiryDate: expiryDate,
-          staffLimits: plan?.staffLimits || {},
+          staffLimits: {
+            attendants:  mapLimit(plan?.staffLimits?.attendants),
+            cashiers:    mapLimit(plan?.staffLimits?.cashiers),
+            accountants: mapLimit(plan?.staffLimits?.accountants),
+            supervisors: mapLimit(plan?.staffLimits?.supervisors),
+            managers:    mapLimit(plan?.staffLimits?.managers),
+          },
         });
 
         await deleteCachePattern(`dashboard:*:${stationId}`);
@@ -494,7 +506,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
 
       AdminLog.create({
         eventType: "subscription_payment",
-        description: `Payment confirmed via webhook: ${meta?.planName} (${billingCycle}) â€” â‚¦${(amount / 100).toLocaleString()}`,
+        description: `Payment confirmed via webhook: ${meta?.planName} (${billingCycle}) â€” ₦${(amount / 100).toLocaleString()}`,
         stationOrUser: (station as any)?.name || meta?.guestName || customer?.email || "Unknown",
         status: "success",
       }).catch(console.error);

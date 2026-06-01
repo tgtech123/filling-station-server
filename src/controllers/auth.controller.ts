@@ -272,7 +272,7 @@ export const loginStaff = async (
     // Super manager = manager whose station has no parentStation (i.e. owns the root station)
     const isSuperManager = staff.role === "manager" && !(station as any)?.parentStation;
 
-    // 4. Create JWT token
+    // 4. Create JWT token — hard 24-hour session from loginAt
     const token = jwt.sign(
       {
         id: staff._id,
@@ -282,9 +282,10 @@ export const loginStaff = async (
         lastName: staff.lastName,
         station: staff.station?.toString(),
         isSuperManager,
+        loginAt: Date.now(),
       },
       process.env.JWT_SECRET!,
-      { expiresIn: "1d" }
+      { expiresIn: "24h" }
     );
 
     // Mark staff as on duty (available) on login
@@ -688,9 +689,10 @@ export const verifyOtp = async (req: Request, res: Response) => {
         lastName: staff.lastName,
         station: staff.station?.toString(),
         isSuperManager,
+        loginAt: Date.now(),
       },
       process.env.JWT_SECRET!,
-      { expiresIn: "1d" }
+      { expiresIn: "24h" }
     );
 
     await Staff.findByIdAndUpdate(staff._id, { onDuty: true });

@@ -32,7 +32,13 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
     }
 
     next();
-  } catch (err) {
-    res.status(403).json({ message: "Invalid token" });
+  } catch (err: any) {
+    if (err.name === "TokenExpiredError") {
+      return res.status(401).json({
+        message: "Session expired. Please log in again.",
+        expired: true,
+      });
+    }
+    return res.status(403).json({ message: "Invalid token" });
   }
 };

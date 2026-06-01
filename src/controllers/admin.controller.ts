@@ -1405,7 +1405,7 @@ export const getPayments = async (req: AuthenticatedRequest, res: Response) => {
       id: p._id,
       stationName: p.stationName,
       plan: p.planName,
-      amount: `â‚¦${p.amount.toLocaleString("en-NG")}`,
+      amount: `₦${p.amount.toLocaleString("en-NG")}`,
       paymentMethod: p.paymentMethod,
       status: p.status === "success" ? "Active" : p.status === "failed" ? "Failed" : "Pending",
       date: new Date(p.paidAt || p.createdAt).toLocaleDateString("en-US", {
@@ -1487,7 +1487,7 @@ export const getStationSubscriptions = async (req: AuthenticatedRequest, res: Re
         id: station._id,
         stationName: station.name,
         plan: payment?.planName || "Free",
-        amount: payment ? `â‚¦${payment.amount.toLocaleString("en-NG")}` : "â‚¦0",
+        amount: payment ? `₦${payment.amount.toLocaleString("en-NG")}` : "₦0",
         billingCycle: payment?.billingCycle || "free",
         status: station.isActive ? "Active" : "Suspended",
         date: new Date(payment?.paidAt || station.createdAt).toLocaleDateString("en-US", {

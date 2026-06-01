@@ -97,11 +97,14 @@ app.use(
   })
 );
 
-// ── Webhook — raw body BEFORE express.json() 
+// ── Webhook — raw body BEFORE express.json()
+// rawBody is preserved on req so the controller can use it for HMAC verification
+// against the exact bytes Paystack signed (re-stringifying a parsed object is not safe).
 app.use(
   "/api/payments/webhook",
   express.raw({ type: "*/*" }),
   (req: any, res, next) => {
+    req.rawBody = req.body; // Buffer — used for HMAC in paystackWebhook controller
     try {
       req.body = JSON.parse(req.body.toString());
     } catch {
@@ -119,12 +122,6 @@ app.use(cookieParser());
 app.get("/ping", (_, res) => res.status(200).send("pong"));
 
 // ── Rate limiters
-// Render passes IPv4-mapped IPv6 addresses (::ffff:x.x.x.x); express-rate-limit v7
-// throws ERR_ERL_KEY_GEN_IPV6 if the keyGenerator returns them as-is. Strip the prefix.
-const normalizeIp = (ip: string | undefined): string => {
-  if (!ip) return "unknown";
-  return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
-};
 
 const isAuthenticatedPollingPath = (req: any) => {
   const authed =
@@ -136,6 +133,11 @@ const isAuthenticatedPollingPath = (req: any) => {
   );
 };
 
+// Paystack's webhook server IPs must never be throttled — they have no auth header
+// and share an IP bucket that would fill up in a busy SaaS environment.
+const isPaystackWebhook = (req: any) =>
+  req.path === "/api/payments/webhook" || req.originalUrl === "/api/payments/webhook";
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   // Authenticated users get their own per-token bucket (300).
@@ -144,12 +146,12 @@ const generalLimiter = rateLimit({
     req.headers.authorization?.startsWith("Bearer ") ? 300 : 100,
   keyGenerator: (req: any) => {
     const auth = req.headers.authorization as string | undefined;
-    return auth?.startsWith("Bearer ") ? auth : normalizeIp(req.ip);
+    return auth?.startsWith("Bearer ") ? auth : (req.ip ?? req.socket?.remoteAddress ?? "unknown");
   },
   message: { error: "Too many requests. Please try again later.", retryAfter: "15 minutes" },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: isAuthenticatedPollingPath,
+  skip: (req: any) => isAuthenticatedPollingPath(req) || isPaystackWebhook(req),
 });
 
 // Dedicated limiter for the activity feed (polled every 30 s per user).
@@ -158,7 +160,7 @@ const generalLimiter = rateLimit({
 const activityLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 240,
-  keyGenerator: (req) => req.headers.authorization || normalizeIp(req.ip),
+  keyGenerator: (req) => (req.headers.authorization as string | undefined) || req.ip || req.socket?.remoteAddress || "unknown",
   message: { error: "Too many activity requests. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -169,7 +171,7 @@ const activityLimiter = rateLimit({
 const dashboardLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
-  keyGenerator: (req) => req.headers.authorization || req.ip || "unknown",
+  keyGenerator: (req) => (req.headers.authorization as string | undefined) || req.ip || req.socket?.remoteAddress || "unknown",
   message: { error: "Too many dashboard requests. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -201,7 +203,8 @@ const paymentLimiter = rateLimit({
   message: { error: "Too many payment attempts. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => process.env.NODE_ENV === "development",
+  // Skip in dev AND skip the webhook path — Paystack server IPs must never be rate-limited
+  skip: (req) => process.env.NODE_ENV === "development" || req.path === "/webhook",
 });
 
 const resetLimiter = rateLimit({

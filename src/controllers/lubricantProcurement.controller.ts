@@ -407,7 +407,7 @@ export const recordPayment = async (req: AuthenticatedRequest, res: Response) =>
       type:      "procurement",
       status:    "success",
       title:     procurement.paymentStatus === "paid" ? "Procurement Fully Paid" : "Partial Payment Recorded",
-      description: `â‚¦${paid.toLocaleString()} paid for ${procurement.procurementNumber} (${procurement.vendorName}) by ${paidByName}`,
+      description: `₦${paid.toLocaleString()} paid for ${procurement.procurementNumber} (${procurement.vendorName}) by ${paidByName}`,
       timestamp:  new Date(),
       severity:   "info",
       expiresAt:  new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -494,7 +494,7 @@ function buildLubricantOrderEmail(p: {
           <th style="padding:10px 14px;text-align:left;border:1px solid #1d4ed8;">Brand</th>
           <th style="padding:10px 14px;text-align:left;border:1px solid #1d4ed8;">Type</th>
           <th style="padding:10px 14px;text-align:center;border:1px solid #1d4ed8;">Qty Needed</th>
-          <th style="padding:10px 14px;text-align:center;border:1px solid #93c5fd;background:#bfdbfe;color:#1e3a5f;">Unit Price (â‚¦)</th>
+          <th style="padding:10px 14px;text-align:center;border:1px solid #93c5fd;background:#bfdbfe;color:#1e3a5f;">Unit Price (₦)</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
