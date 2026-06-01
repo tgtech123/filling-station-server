@@ -10,10 +10,12 @@ import {
 
 const router = express.Router();
 
-const mgr = checkRole("manager", "admin");
-const mgrOrSup = checkRole("manager", "admin", "supervisor");
+const mgr       = checkRole("manager", "admin");
+const mgrOrSup  = checkRole("manager", "admin", "supervisor");
+// Cashiers need read access to populate the supplier dropdown in stock purchase modal
+const canRead   = checkRole("manager", "admin", "supervisor", "cashier");
 
-router.get("/",      requireAuth, mgrOrSup, getSuppliers);
+router.get("/",      requireAuth, canRead,  getSuppliers);
 router.post("/",     requireAuth, mgr,      createSupplier);
 router.patch("/:id", requireAuth, mgr,      updateSupplier);
 router.delete("/:id",requireAuth, mgr,      deleteSupplier);

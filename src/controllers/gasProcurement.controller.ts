@@ -378,11 +378,11 @@ function buildOrderEmail(p: {
       </tr>
       <tr>
         <td style="padding:10px 14px;font-weight:600;border:1px solid #e5e7eb;">Unit Price</td>
-        <td style="padding:10px 14px;border:1px solid #e5e7eb;">â‚¦${fmt(p.pricePerKg)} / kg</td>
+        <td style="padding:10px 14px;border:1px solid #e5e7eb;">₦${fmt(p.pricePerKg)} / kg</td>
       </tr>
       <tr style="background:#fff7ed;">
         <td style="padding:10px 14px;font-weight:700;border:1px solid #fed7aa;font-size:15px;">Total Amount</td>
-        <td style="padding:10px 14px;border:1px solid #fed7aa;font-weight:700;font-size:16px;color:#ea580c;">â‚¦${fmt(p.totalCost)}</td>
+        <td style="padding:10px 14px;border:1px solid #fed7aa;font-weight:700;font-size:16px;color:#ea580c;">₦${fmt(p.totalCost)}</td>
       </tr>
       ${p.notes ? `<tr><td style="padding:10px 14px;font-weight:600;border:1px solid #e5e7eb;">Notes</td><td style="padding:10px 14px;border:1px solid #e5e7eb;">${p.notes}</td></tr>` : ""}
     </table>

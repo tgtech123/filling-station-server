@@ -6,6 +6,21 @@ import Tank from "../models/tanks.model";
 import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
 
+// Fuel-type synonyms — industry codes and common names for the same product.
+// Any key in a group resolves to the full group so matching is always exhaustive.
+const FUEL_ALIASES: Record<string, string[]> = {
+  ago:      ["ago", "diesel"],
+  diesel:   ["diesel", "ago"],
+  pms:      ["pms", "petrol"],
+  petrol:   ["petrol", "pms"],
+  kerosene: ["kerosene", "dpk"],
+  dpk:      ["dpk", "kerosene"],
+};
+
+function resolveFuelAliases(fuelType: string): string[] {
+  return FUEL_ALIASES[fuelType.toLowerCase()] ?? [fuelType.toLowerCase()];
+}
+
 export const addPump = async (req: AuthenticatedRequest, res: Response) => {
   try {
     // 0ï¸âƒ£ Get filling station from auth context
@@ -534,9 +549,10 @@ export const updatePricesByFuelTypes = async (req: AuthenticatedRequest, res: Re
 
     // For each fuelType entry, find subdoc ids in station tanks and update Pump docs
     for (const [fuelType, newPrice] of entries) {
-      // find tank subdoc ids for this fuelType
+      // Resolve all synonyms for this fuel type (e.g. "Diesel" also matches "AGO")
+      const aliases = resolveFuelAliases(fuelType);
       const matchingTankSubIds = (stationTankDoc.tanks as any[])
-        .filter((t) => String(t.fuelType).toLowerCase() === String(fuelType).toLowerCase())
+        .filter((t) => aliases.includes(String(t.fuelType).toLowerCase()))
         .map((t) => String(t._id));
 
       if (matchingTankSubIds.length === 0) {
@@ -549,8 +565,7 @@ export const updatePricesByFuelTypes = async (req: AuthenticatedRequest, res: Re
       // Use updateMany to set pricePerLtr for every element in pumps array ($[] updates all elements)
       const updateResult = await Pump.updateMany(
         { tank: { $in: objectIds } },
-        { $set: { "pumps.$[].pricePerLtr": newPrice } },
-        { multi: true }
+        { $set: { "pumps.$[].pricePerLtr": newPrice } }
       );
 
       // updateResult may be different shapes depending on mongoose/mongo version
@@ -569,7 +584,7 @@ export const updatePricesByFuelTypes = async (req: AuthenticatedRequest, res: Re
           type: "message",
           category: "price_update",
           title: "Fuel Price Updated",
-          body: `${fuelType} price has been updated to â‚¦${newPrice.toLocaleString()} per litre`,
+          body: `${fuelType} price has been updated to ₦${newPrice.toLocaleString()} per litre`,
           severity: "info",
           timestamp: new Date(),
           targetRole: "all",

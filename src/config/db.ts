@@ -1,3 +1,6 @@
+// import dns from 'dns';
+// dns.setServers(['8.8.8.8', '8.8.4.4']); // Force Google DNS for SRV lookups
+
 import mongoose from "mongoose";
 import { seedDefaultPlans, seedAdminLogs, seedPlatformSettings } from "../controllers/admin.controller";
 
@@ -9,6 +12,7 @@ export const connectDB = async () => {
       maxPoolSize: 10,
       heartbeatFrequencyMS: 10000,      // ping every 10s to keep connection alive
       connectTimeoutMS: 15000,
+      // tls: true,
     });
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
 

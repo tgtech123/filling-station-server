@@ -109,7 +109,7 @@ export const createSale = async (req: AuthenticatedRequest, res: Response) => {
           customer: customerId,
           type: "redeem", points: -redeemed,
           balanceBefore: before, balanceAfter: customer.loyaltyPoints,
-          note: `Redeemed ${redeemed} pts = â‚¦${discount}`,
+          note: `Redeemed ${redeemed} pts = ₦${discount}`,
         });
       }
     }
