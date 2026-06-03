@@ -14,6 +14,10 @@ import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Payment from "../models/payment.model";
 import PlatformSettings from "../models/platformSettings.model";
 import { getCache, setCache, deleteCache } from "../config/redis";
+import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
+import crypto from "crypto";
+import ResetPassword from "../models/resetPassword.model";
+import { transporter } from "../middlewares/transporter.middleware";
 
 // Nigeria timezone today/month ranges (WAT = UTC+1)
 const getNigeriaRanges = () => {
@@ -595,6 +599,26 @@ export const updateStationStatus = async (req: AuthenticatedRequest, res: Respon
         fillingStation: station._id,
         performedBy: "Admin",
       }).catch((err: any) => console.error("AdminLog error (reactivate):", err));
+
+      notifyStation(station._id as Types.ObjectId, {
+        type: "message",
+        category: "system_update",
+        title: "Account Reactivated",
+        body: "Your FuelDesk account has been reactivated by the platform administrator. All features are now available.",
+        severity: "info",
+        targetRole: "manager",
+        expiresInDays: 7,
+      });
+
+      notifyAdmin({
+        type: "reactivation",
+        title: "Station Reactivated",
+        body: `${station.name} has been reactivated by admin.`,
+        severity: "info",
+        stationId: station._id as Types.ObjectId,
+        stationName: station.name,
+        triggeredBy: "admin",
+      });
     } else {
       AdminLog.create({
         eventType: "station_suspended",
@@ -604,6 +628,26 @@ export const updateStationStatus = async (req: AuthenticatedRequest, res: Respon
         fillingStation: station._id,
         performedBy: "Admin",
       }).catch((err: any) => console.error("AdminLog error (suspend):", err));
+
+      notifyStation(station._id as Types.ObjectId, {
+        type: "alert",
+        category: "system_update",
+        title: "Account Suspended",
+        body: "Your FuelDesk account has been suspended by the platform administrator. Please contact support at support@flourishstation.com to resolve this.",
+        severity: "critical",
+        targetRole: "manager",
+        expiresInDays: 14,
+      });
+
+      notifyAdmin({
+        type: "suspension",
+        title: "Station Suspended",
+        body: `${station.name} has been suspended by admin.`,
+        severity: "critical",
+        stationId: station._id as Types.ObjectId,
+        stationName: station.name,
+        triggeredBy: "admin",
+      });
     }
 
     return res.status(200).json({
@@ -728,8 +772,26 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(404).json({ error: "Station not found" });
     }
 
-    // Soft delete only â€” never hard delete
     await FillingStation.findByIdAndUpdate(stationId, { isActive: false, isDeleted: true });
+
+    AdminLog.create({
+      eventType: "station_deleted",
+      description: `Station "${station.name}" was soft-deleted by admin`,
+      stationOrUser: station.name,
+      status: "critical",
+      fillingStation: station._id,
+      performedBy: "Admin",
+    }).catch((err: any) => console.error("AdminLog error (delete):", err));
+
+    notifyAdmin({
+      type: "system_alert",
+      title: "Station Deleted",
+      body: `${station.name} has been deleted from the platform by admin.`,
+      severity: "critical",
+      stationId: station._id as Types.ObjectId,
+      stationName: station.name,
+      triggeredBy: "admin",
+    });
 
     return res.status(200).json({ message: "Station deleted successfully" });
   } catch (err: any) {
@@ -738,7 +800,7 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// â”€â”€ Subscription Plans â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Subscription Plans â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export const seedDefaultPlans = async () => {
   const plans = [
@@ -982,7 +1044,7 @@ export const seedAdminLogs = async () => {
     },
     {
       eventType: "subscription_expired",
-      description: "Plus plan subscription expired â€” renewal required",
+      description: "Plus plan subscription expired  -- renewal required",
       stationOrUser: "BP Highway Express",
       status: "warning",
       performedBy: "System",
@@ -1038,7 +1100,7 @@ export const seedPlatformSettings = async () => {
   console.log("âœ… Platform settings seeded");
 };
 
-// â”€â”€ Platform Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Platform Settings â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 // GET /api/admin/settings
 export const getPlatformSettings = async (req: AuthenticatedRequest, res: Response) => {
@@ -1124,7 +1186,7 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
   }
 };
 
-// GET /api/admin/settings/public â€” no auth needed
+// GET /api/admin/settings/public â€" no auth needed
 export const getPublicSettings = async (req: Request, res: Response) => {
   try {
     const settings = await PlatformSettings.findOne()
@@ -1150,7 +1212,7 @@ export const getPublicSettings = async (req: Request, res: Response) => {
   }
 };
 
-// GET /api/public/plans â€” no auth needed
+// GET /api/public/plans â€" no auth needed
 export const getPublicPlans = async (req: Request, res: Response) => {
   try {
     const cacheKey = "public:plans";
@@ -1159,7 +1221,7 @@ export const getPublicPlans = async (req: Request, res: Response) => {
 
     const rawPlans = await SubscriptionPlan.find({ isActive: true }).sort({ order: 1 }).lean();
 
-    // Deduplicate by name â€” keep the first occurrence (lowest order = canonical)
+    // Deduplicate by name â€" keep the first occurrence (lowest order = canonical)
     const seenNames = new Set<string>();
     const plans = rawPlans.filter((p) => {
       const key = p.name.toLowerCase().trim();
@@ -1199,7 +1261,7 @@ export const getPublicPlans = async (req: Request, res: Response) => {
   }
 };
 
-// GET /api/admin/plans â€” all plans including inactive
+// GET /api/admin/plans â€" all plans including inactive
 export const getAdminPlans = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const plans = await SubscriptionPlan.find().sort({ order: 1 }).lean();
@@ -1284,7 +1346,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const updates = { ...req.body };
-    delete updates.slug; // slug is immutable â€” never change it after creation
+    delete updates.slug; // slug is immutable â€" never change it after creation
 
     if (updates.monthlyPrice !== undefined) {
       updates.yearlyPrice = Math.round(updates.monthlyPrice * 12 * 0.9);
@@ -1301,7 +1363,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// DELETE /api/admin/plans/:planId â€” soft delete
+// DELETE /api/admin/plans/:planId â€" soft delete
 export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { planId } = req.params;
@@ -1325,7 +1387,7 @@ export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-// â”€â”€ Payments & Billing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Payments & Billing â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 // GET /api/admin/payments/stats
 export const getPaymentStats = async (req: AuthenticatedRequest, res: Response) => {
@@ -1513,5 +1575,40 @@ export const getStationSubscriptions = async (req: AuthenticatedRequest, res: Re
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
+  }
+};
+
+export const adminResetOwnerPassword = async (req: Request, res: Response) => {
+  try {
+    const { stationId } = req.params;
+
+    const station = await FillingStation.findById(stationId);
+    if (!station) return res.status(404).json({ message: 'Station not found' });
+
+    const owner = await Staff.findOne({ station: stationId, role: 'manager' });
+    if (!owner) return res.status(404).json({ message: 'Station owner not found' });
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+    await ResetPassword.create({
+      staffId: owner._id,
+      token: resetTokenHash,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const resetUrl = process.env.FRONTEND_URL + '/reset-password/change-password/?token=' + resetToken;
+
+    await transporter.sendMail({
+      from: '"FuelDesk" <' + process.env.EMAIL_USER + '>',
+      to: owner.email,
+      subject: 'Password Reset - Admin Initiated',
+      html: '<div style="font-family:Arial,sans-serif;background:#f4f6f8;padding:20px"><div style="max-width:600px;margin:auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.1)"><div style="background:#007BFF;color:#fff;text-align:center;padding:20px"><h2 style="margin:0">Password Reset Request</h2></div><div style="padding:20px;color:#333"><p>Hello <strong style="color:#007BFF">' + owner.firstName + '</strong>,</p><p>A platform administrator has initiated a password reset for your FuelDesk account (<strong>' + owner.email + '</strong>).</p><p>Click the button below to set a new password:</p><div style="text-align:center;margin:30px 0"><a href="' + resetUrl + '" style="background:#007BFF;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block">Reset Password</a></div><p style="color:#e63946;font-size:14px">&#9888; This link is valid for only <strong>1 hour</strong>.</p><p style="font-size:14px;color:#666">If you did not expect this, please contact FuelDesk support immediately.</p></div><div style="background:#f8f9fa;padding:15px;text-align:center;font-size:12px;color:#888"><p>&copy; ' + new Date().getFullYear() + ' FuelDesk. All rights reserved.</p></div></div></div>',
+    });
+
+    return res.json({ message: 'Password reset email sent to owner' });
+  } catch (err: any) {
+    console.error('adminResetOwnerPassword error:', err.message);
+    return res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
