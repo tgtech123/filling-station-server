@@ -9,6 +9,7 @@ import SubscriptionPlan from "../models/subscriptionPlan.model";
 import AdminLog from "../models/adminLog.model";
 import Staff from "../models/staff.model";
 import { deleteCachePattern } from "../config/redis";
+import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
 
 const PAYSTACK_API = "https://api.paystack.co";
 
@@ -503,6 +504,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
       const station = stationId
         ? await FillingStation.findById(stationId).select("name").lean()
         : null;
+      const webhookStationName = (station as any)?.name || meta?.guestName || customer?.email || "Unknown";
 
       AdminLog.create({
         eventType: "subscription_payment",
@@ -510,6 +512,26 @@ export const paystackWebhook = async (req: any, res: Response) => {
         stationOrUser: (station as any)?.name || meta?.guestName || customer?.email || "Unknown",
         status: "success",
       }).catch(console.error);
+
+      if (!isGuest && stationId) {
+        notifyStation(stationId, {
+          type: "message",
+          category: "system_update",
+          title: "Subscription Activated",
+          body: "Your " + (meta?.planName ?? planSlug) + " plan is now active.",
+          severity: "info",
+          targetRole: "manager",
+          expiresInDays: 7,
+        });
+        notifyAdmin({
+          type: "subscription",
+          title: "New Subscription Payment",
+          body: webhookStationName + " activated " + (meta?.planName ?? planSlug) + " (" + billingCycle + ").",
+          severity: "info",
+          stationId: stationId,
+          stationName: webhookStationName,
+        });
+      }
 
       console.log(`âœ… Webhook processed: ${reference}`);
     }

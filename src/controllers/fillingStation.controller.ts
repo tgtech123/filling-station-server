@@ -6,6 +6,7 @@ import AdminLog from "../models/adminLog.model";
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Payment from "../models/payment.model";
 import { Types } from "mongoose";
+import { notifyAdmin } from "../utils/notifyHelpers";
 
 
 export const createFillingStation = async (req: Request, res: Response) => {
@@ -176,6 +177,15 @@ export const createFillingStation = async (req: Request, res: Response) => {
       fillingStation: newStation._id,
       performedBy: "System",
     }).catch((err: any) => console.error("AdminLog error (registration):", err));
+
+    notifyAdmin({
+      type: "new_station",
+      title: "New Station Registered",
+      body: `${stationName} has registered on the ${chosenPlan} plan. Owner: ${firstName} ${lastName} (${email}).`,
+      severity: "info",
+      stationId: newStation._id as Types.ObjectId,
+      stationName,
+    });
 
     res.status(201).json({
       message: "Filling station and manager created successfully",

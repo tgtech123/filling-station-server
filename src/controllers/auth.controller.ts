@@ -777,6 +777,60 @@ export const changePassword = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+// POST /api/auth/change-credentials
+// Allows a logged-in user to change their own email and/or password.
+// Always requires the current password for verification.
+export const changeCredentials = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { currentPassword, email, password } = req.body;
+    const userId = req.user?._id || req.user?.id;
+
+    if (!currentPassword) {
+      return res.status(400).json({ error: "Current password is required" });
+    }
+    if (!email && !password) {
+      return res.status(400).json({ error: "Provide a new email or new password to update" });
+    }
+    if (password && password.length < 8) {
+      return res.status(400).json({ error: "New password must be at least 8 characters" });
+    }
+
+    const user = await Staff.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: "Current password is incorrect" });
+    }
+
+    const updates: Record<string, any> = {};
+
+    if (email && email !== user.email) {
+      const emailTaken = await Staff.findOne({ email: email.toLowerCase().trim(), _id: { $ne: userId } });
+      if (emailTaken) {
+        return res.status(409).json({ error: "That email is already in use by another account" });
+      }
+      updates.email = email.toLowerCase().trim();
+    }
+
+    if (password) {
+      updates.password = await bcrypt.hash(password, 10);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No changes detected" });
+    }
+
+    await Staff.findByIdAndUpdate(userId, updates);
+
+    const changed = [email ? "email" : null, password ? "password" : null].filter(Boolean).join(" and ");
+    return res.status(200).json({ message: `${changed.charAt(0).toUpperCase() + changed.slice(1)} updated successfully` });
+  } catch (err: any) {
+    console.error("changeCredentials error:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
 export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
   const manager = req.user;
   const staffId = req.params.id;

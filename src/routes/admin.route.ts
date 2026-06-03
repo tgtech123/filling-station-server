@@ -26,6 +26,7 @@ import {
   getPlatformSettings,
   updatePlatformSettings,
   getPublicSettings,
+  adminResetOwnerPassword,
 } from "../controllers/admin.controller";
 import {
   getAllTickets,
@@ -37,6 +38,15 @@ import {
   updateFaq,
   deleteFaq,
 } from "../controllers/support.controller";
+import {
+  getAdminNotifications,
+  getAdminNotificationCount,
+  markAdminNotificationRead,
+  markAllAdminNotificationsRead,
+  broadcastNotification,
+  sendAppUpdate,
+  purgeExpiredAdminNotifications,
+} from "../controllers/adminNotification.controller";
 
 const router = express.Router();
 
@@ -54,6 +64,7 @@ router.get("/activity-stats", requireAuth, checkAdmin, getActivityStats);
 router.get("/activity-logs", requireAuth, checkAdmin, getActivityLogs);
 router.delete("/stations/:stationId", requireAuth, checkAdmin, deleteStation);
 router.post("/stations/:stationId/restore", requireAuth, checkAdmin, restoreStation);
+router.post("/stations/:stationId/reset-owner-password", requireAuth, checkAdmin, adminResetOwnerPassword);
 
 router.get("/plans", requireAuth, checkAdmin, getAdminPlans);
 router.post("/plans", requireAuth, checkAdmin, createPlan);
@@ -81,5 +92,14 @@ router.get("/support/faqs", requireAuth, checkAdmin, getAllFaqs);
 router.post("/support/faqs", requireAuth, checkAdmin, createFaq);
 router.patch("/support/faqs/:id", requireAuth, checkAdmin, updateFaq);
 router.delete("/support/faqs/:id", requireAuth, checkAdmin, deleteFaq);
+
+// Admin notifications
+router.get("/notifications/count", requireAuth, checkAdmin, getAdminNotificationCount);
+router.get("/notifications", requireAuth, checkAdmin, getAdminNotifications);
+router.patch("/notifications/read-all", requireAuth, checkAdmin, markAllAdminNotificationsRead);
+router.patch("/notifications/:id/read", requireAuth, checkAdmin, markAdminNotificationRead);
+router.post("/notifications/broadcast", requireAuth, checkAdmin, broadcastNotification);
+router.post("/notifications/app-update", requireAuth, checkAdmin, sendAppUpdate);
+router.delete("/notifications/expired", requireAuth, checkAdmin, purgeExpiredAdminNotifications);
 
 export default router;
