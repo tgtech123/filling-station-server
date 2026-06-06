@@ -2,6 +2,7 @@ import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
 import * as shiftController from "../controllers/shift.controller";
+// getTodaySchedule is exported from the same controller
 
 const router = express.Router();
 
@@ -43,6 +44,14 @@ router.get(
   requireAuth,
   checkRole("attendant"),
   shiftController.getCurrentShift
+);
+
+// Get today's scheduled shift with last closing meter reading
+router.get(
+  "/today-schedule",
+  requireAuth,
+  checkRole("attendant"),
+  shiftController.getTodaySchedule
 );
 
 export default router;

@@ -39,6 +39,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       amount,
       twoFactorAuthEnabled,
       notificationPreferences,
+      department,
     } = req.body;
 
     // âœ… Validate required fields
@@ -130,6 +131,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       addSaleTarget: addSaleTarget ?? false,
       payType,
       amount,
+      department: department || "fuel",
       twoFactorAuthEnabled: twoFactorAuthEnabled ?? false,
       notificationPreferences: {
         email: notificationPreferences?.email ?? false,
@@ -325,6 +327,7 @@ export const loginStaff = async (
         image: staff.image,
         createdAt: staff.createdAt,
         role: staff.role,
+        department: staff.department || "fuel",
         station: station
           ? {
               ...station.toObject(),
@@ -588,6 +591,7 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       "amount",
       "twoFactorAuthEnabled",
       "notificationPreferences",
+      "department",
     ]);
 
     // Build update object from req.body but whitelist fields
@@ -728,6 +732,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
         image: staff.image,
         createdAt: staff.createdAt,
         role: staff.role,
+        department: staff.department || "fuel",
         station: station
           ? {
               ...station.toObject(),

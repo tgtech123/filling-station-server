@@ -83,7 +83,7 @@ const getProductFromPump = async (pumpId: Types.ObjectId, stationId: Types.Objec
   }
 };
 
-// Start a shift
+// Start a shift — requires a supervisor-scheduled shift for today
 export const startShift = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -93,95 +93,57 @@ export const startShift = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const { pumpId, shiftType, openingMeterReading } = req.body;
+    const { openingMeterReading } = req.body;
 
-    // Validation
-    if (!pumpId || !shiftType || openingMeterReading === undefined) {
-      return res.status(400).json({
-        error: "Please provide pumpId, shiftType, and openingMeterReading",
-      });
-    }
-
-    if (!mongoose.isValidObjectId(pumpId)) {
-      return res.status(400).json({ error: "Invalid pumpId" });
+    if (openingMeterReading === undefined) {
+      return res.status(400).json({ error: "Opening meter reading is required" });
     }
 
     const openingReading = Number(openingMeterReading);
     if (isNaN(openingReading) || openingReading < 0) {
-      return res.status(400).json({ error: "openingMeterReading must be a valid non-negative number" });
+      return res.status(400).json({ error: "Opening meter reading must be a valid non-negative number" });
     }
 
-    const validShiftTypes = ["One-Day-Morning", "One-Day-Evening", "Day-Off", "Full-Time"];
-    if (!validShiftTypes.includes(shiftType)) {
-      return res.status(400).json({ error: "Invalid shiftType" });
-    }
-
-    // Check if attendant already has an active shift
-    const activeShift = await Shift.findOne({
+    // Guard: attendant must not already have an active shift
+    const alreadyActive = await Shift.findOne({
       fillingStation: new Types.ObjectId(fillingStation),
       attendant: new Types.ObjectId(attendantId),
       status: "Active",
     });
-
-    if (activeShift) {
+    if (alreadyActive) {
       return res.status(400).json({
         error: "You already have an active shift. Please end it before starting a new one.",
       });
     }
 
-    // Check if pump exists and is active
-    const pumpDoc = await Pump.findOne({
-      "pumps._id": pumpId,
-    }).lean();
+    // Gate: find today's supervisor-scheduled shift for this attendant
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    if (!pumpDoc) {
-      return res.status(404).json({ error: "Pump not found" });
-    }
-
-    const pump = pumpDoc.pumps.find((p: any) => p._id.toString() === pumpId);
-    if (!pump) {
-      return res.status(404).json({ error: "Pump not found" });
-    }
-
-    if (pump.status !== "Active") {
-      return res.status(400).json({ error: "Pump is not active. Only active pumps can be assigned to shifts." });
-    }
-
-    // Check if pump is already assigned to another active shift
-    const pumpActiveShift = await Shift.findOne({
+    const scheduledShift = await Shift.findOne({
       fillingStation: new Types.ObjectId(fillingStation),
-      pump: new Types.ObjectId(pumpId),
-      status: "Active",
+      attendant: new Types.ObjectId(attendantId),
+      status: "Scheduled",
+      shiftDate: { $gte: today, $lt: tomorrow },
     });
 
-    if (pumpActiveShift) {
+    if (!scheduledShift) {
       return res.status(400).json({
-        error: "This pump is already assigned to another active shift. Please wait for that shift to end.",
+        error: "No shift scheduled for you today. Contact your supervisor to schedule your shift first.",
+        noSchedule: true,
       });
     }
 
-    // Get product type from pump
-    const product = await getProductFromPump(new Types.ObjectId(pumpId), new Types.ObjectId(fillingStation));
+    // Transition Scheduled → Active
+    scheduledShift.openingMeterReading = openingReading;
+    scheduledShift.startTime = new Date();
+    scheduledShift.status = "Active";
 
-    // Create shift
-    const shiftDate = new Date();
-    shiftDate.setHours(0, 0, 0, 0);
+    await scheduledShift.save();
 
-    const newShift = new Shift({
-      fillingStation: new Types.ObjectId(fillingStation),
-      attendant: new Types.ObjectId(attendantId),
-      pump: new Types.ObjectId(pumpId),
-      pumpTitle: pump.title || "Pump 1",
-      product: product,
-      shiftType: shiftType,
-      shiftDate: shiftDate,
-      startTime: new Date(),
-      openingMeterReading: openingReading,
-      pricePerLtr: pump.pricePerLtr || 0,
-      status: "Active",
-    });
-
-    await newShift.save();
+    const newShift = scheduledShift;
 
     // Update staff onDuty status
     await Staff.findByIdAndUpdate(attendantId, { onDuty: true });
@@ -598,6 +560,64 @@ export const getActiveShifts = async (req: AuthenticatedRequest, res: Response) 
     });
   } catch (err: any) {
     console.error("Error in getActiveShifts:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+// Get today's scheduled shift for the attendant (with last pump closing meter reading)
+export const getTodaySchedule = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    const attendantId = req.user?.id;
+
+    if (!fillingStation || !attendantId) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const scheduledShift = await Shift.findOne({
+      fillingStation: new Types.ObjectId(fillingStation),
+      attendant: new Types.ObjectId(attendantId),
+      status: "Scheduled",
+      shiftDate: { $gte: today, $lt: tomorrow },
+    }).lean();
+
+    if (!scheduledShift) {
+      return res.status(200).json({ message: "No shift scheduled for today", data: null });
+    }
+
+    // Find last completed shift on this pump to prefill opening meter reading
+    const lastShift = await Shift.findOne({
+      fillingStation: new Types.ObjectId(fillingStation),
+      pump: scheduledShift.pump,
+      status: "Completed",
+    })
+      .sort({ endTime: -1 })
+      .select("closingMeterReading pumpTitle product endTime")
+      .lean();
+
+    return res.status(200).json({
+      message: "Today's schedule retrieved",
+      data: {
+        scheduledShift: {
+          _id: scheduledShift._id,
+          pumpTitle: scheduledShift.pumpTitle,
+          product: scheduledShift.product,
+          shiftType: scheduledShift.shiftType,
+          shiftDate: scheduledShift.shiftDate,
+          pricePerLtr: scheduledShift.pricePerLtr,
+          pump: scheduledShift.pump,
+        },
+        lastClosingMeterReading: lastShift?.closingMeterReading ?? null,
+        lastShiftEndTime: lastShift?.endTime ?? null,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in getTodaySchedule:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
 };
