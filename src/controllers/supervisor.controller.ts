@@ -312,6 +312,7 @@ export const getPendingShifts = async (req: AuthenticatedRequest, res: Response)
       return {
         _id: shift._id,
         attendant: {
+          _id: isPopulated(shift.attendant) ? shift.attendant._id : undefined,
           name: isPopulated(shift.attendant)
             ? `${shift.attendant.firstName} ${shift.attendant.lastName}`
             : "Unknown",
@@ -467,13 +468,32 @@ export const approveShift = async (req: AuthenticatedRequest, res: Response) => 
   return res.status(403).json({ message: "Unauthorized" });
 }
 
-    // Update reconciliation if one exists (not required for approval)
-    const reconciliation = await CashReconciliation.findOne({ shift: shiftId });
+    let reconciliation = await CashReconciliation.findOne({ shift: shiftId });
 
     if (reconciliation) {
-      reconciliation.status = reconciliation.discrepancy === 0 ? "Matched" : "Flagged";
+      // Update existing reconciliation — pre-save hook recalculates discrepancy + status
+      reconciliation.reconciledBy = new Types.ObjectId(userId);
       if (comment) reconciliation.notes = comment;
       await reconciliation.save();
+    } else {
+      // Cashier never submitted cash reconciliation — supervisor force-approves.
+      // Create a reconciliation with cashReceived = expectedAmount so the shift is
+      // excluded from pending (getPendingShifts filters by Matched/Flagged reconciliations).
+      reconciliation = await CashReconciliation.create({
+        fillingStation: stationId,
+        shift: shiftId,
+        attendant: shift.attendant,
+        pump: shift.pump,
+        pumpTitle: shift.pumpTitle,
+        shiftDate: shift.shiftDate,
+        product: shift.product,
+        litresSold: shift.litresSold || 0,
+        pricePerLtr: shift.pricePerLtr || 0,
+        expectedAmount: shift.totalAmount || 0,
+        cashReceived: shift.totalAmount || 0,
+        reconciledBy: userId,
+        notes: comment || "Approved by supervisor",
+      });
     }
 
     // Log activity
@@ -774,24 +794,37 @@ export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response
     const start = new Date(startDate);
     const end = endDate ? new Date(endDate) : new Date(startDate);
 
-    // Create shifts for each day in the range
+    // Create one scheduled shift per day in the range
     const shifts = [];
     const currentDate = new Date(start);
     while (currentDate <= end) {
-      const shift = await Shift.create({
+      const shiftDate = new Date(currentDate);
+      shiftDate.setHours(0, 0, 0, 0);
+
+      // Prevent duplicate schedule for same attendant on same date
+      const existing = await Shift.findOne({
         fillingStation: stationId,
         attendant: attendantId,
-        pump: pumpId,
-        pumpTitle: pump.title,
-        product,
-        shiftType,
-        shiftDate: new Date(currentDate),
-        startTime: new Date(currentDate),
-        openingMeterReading: 0, // Will be set when shift starts
-        pricePerLtr: pump.pricePerLtr,
-        status: "Active",
+        shiftDate,
+        status: "Scheduled",
       });
-      shifts.push(shift);
+
+      if (!existing) {
+        const shift = await Shift.create({
+          fillingStation: stationId,
+          attendant: attendantId,
+          pump: pumpId,
+          pumpTitle: pump.title,
+          product,
+          shiftType,
+          shiftDate,
+          openingMeterReading: 0,
+          pricePerLtr: pump.pricePerLtr,
+          status: "Scheduled",
+        });
+        shifts.push(shift);
+      }
+
       currentDate.setDate(currentDate.getDate() + 1);
     }
 

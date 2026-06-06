@@ -16,7 +16,7 @@ export interface IShift extends Document {
   litresSold?: number; // Calculated: closingMeterReading - openingMeterReading
   pricePerLtr: number;
   totalAmount?: number; // Calculated: litresSold * pricePerLtr
-  status: "Active" | "Completed" | "Cancelled";
+  status: "Scheduled" | "Active" | "Completed" | "Cancelled";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -88,7 +88,7 @@ const shiftSchema = new Schema<IShift>(
     },
     status: {
       type: String,
-      enum: ["Active", "Completed", "Cancelled"],
+      enum: ["Scheduled", "Active", "Completed", "Cancelled"],
       default: "Active",
     },
   },
