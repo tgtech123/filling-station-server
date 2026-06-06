@@ -40,6 +40,7 @@ import financialEntryRoutes from "./routes/financialEntry.route";
 import gasRoutes from "./routes/gas.route";
 import gasPublicRoutes from "./routes/gasPublic.route";
 import supplierRoutes from "./routes/supplier.route";
+import fuelLoyaltyRoutes from "./routes/fuelLoyalty.route";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -263,6 +264,7 @@ app.use("/api/financial-entries", financialEntryRoutes);
 app.use("/api/gas", gasRoutes);
 app.use("/api/gas-public", gasPublicRoutes);
 app.use("/api/suppliers", supplierRoutes);
+app.use("/api/fuel-loyalty", fuelLoyaltyRoutes);
 
 // ── Health check 
 app.get("/api/health", (_, res) => {
