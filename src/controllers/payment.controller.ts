@@ -49,7 +49,7 @@ const calculateTax = (
   return { baseAmount: amount, tax, totalAmount };
 };
 
-// â”€â”€ Initialize Payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Initialize Payment â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export const initializePayment = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { planSlug, billingCycle, country = "NG" } = req.body;
@@ -141,7 +141,7 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// â”€â”€ Initialize Guest Payment (no auth) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Initialize Guest Payment (no auth) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export const initializeGuestPayment = async (req: any, res: Response) => {
   try {
     const { email, name, planSlug, billingCycle, country = "NG" } = req.body;
@@ -152,7 +152,7 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
       });
     }
 
-    // Block payment before Paystack is opened â€” if the email already belongs to a
+    // Block payment before Paystack is opened â€" if the email already belongs to a
     // registered manager, the payer must log in and upgrade from their dashboard.
     const existingManager = await Staff.findOne({
       email: email.toLowerCase().trim(),
@@ -245,13 +245,13 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
   }
 };
 
-// â”€â”€ Verify Payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Verify Payment â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export const verifyPayment = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { reference } = req.params;
 
     // For guest payments (reference starts with "FS_GUEST_") the webhook marks the payment
-    // "success" but deliberately skips the plan upgrade â€” that logic lives here so we can
+    // "success" but deliberately skips the plan upgrade â€" that logic lives here so we can
     // determine isExistingUser and handle the two guest sub-cases correctly.
     // Only use the early exit for authenticated (non-guest) payments where the webhook has
     // already done the full plan upgrade.
@@ -426,7 +426,7 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// â”€â”€ Paystack Webhook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Paystack Webhook â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export const paystackWebhook = async (req: any, res: Response) => {
   // Respond 200 immediately to prevent Paystack retries
   res.status(200).json({ received: true });
@@ -448,14 +448,14 @@ export const paystackWebhook = async (req: any, res: Response) => {
     }
 
     const event = req.body;
-    console.log("ðŸ“¦ Paystack webhook event:", event.event);
+    console.log("[webhook] Paystack webhook event:", event.event);
 
     if (event.event === "charge.success") {
       const { reference, metadata, amount, customer } = event.data;
 
       const existingPayment = await Payment.findOne({ transactionRef: reference });
       if (existingPayment?.status === "success") {
-        console.log("â­ï¸ Webhook already processed:", reference);
+        console.log("[webhook] Already processed:", reference);
         return;
       }
 
@@ -492,7 +492,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
         });
 
         await deleteCachePattern(`dashboard:*:${stationId}`);
-        console.log(`âœ… Station ${stationId} upgraded to ${planSlug}`);
+        console.log("[webhook] Station " + stationId + " upgraded to " + planSlug);
       }
 
       await Payment.findOneAndUpdate(
@@ -508,7 +508,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
 
       AdminLog.create({
         eventType: "subscription_payment",
-        description: `Payment confirmed via webhook: ${meta?.planName} (${billingCycle}) â€” ₦${(amount / 100).toLocaleString()}`,
+        description: `Payment confirmed via webhook: ${meta?.planName} (${billingCycle}) â€" ₦${(amount / 100).toLocaleString()}`,
         stationOrUser: (station as any)?.name || meta?.guestName || customer?.email || "Unknown",
         status: "success",
       }).catch(console.error);
@@ -533,7 +533,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
         });
       }
 
-      console.log(`âœ… Webhook processed: ${reference}`);
+        console.log("[webhook] Processed:", reference);
     }
 
     if (event.event === "charge.failed") {
@@ -542,7 +542,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
         { transactionRef: reference },
         { status: "failed" }
       );
-      console.log(`âŒ Payment failed: ${reference}`);
+        console.log("[webhook] Payment failed:", reference);
     }
 
     if (event.event === "subscription.disable") {
@@ -553,22 +553,28 @@ export const paystackWebhook = async (req: any, res: Response) => {
           await FillingStation.findByIdAndUpdate(staffMember.station, {
             planStatus: "cancelled",
           });
-          console.log(`âš ï¸ Subscription cancelled: ${email}`);
+        console.log("[webhook] Subscription cancelled:", email);
         }
       }
     }
   } catch (err: any) {
     console.error("âŒ Webhook processing error:", err.message);
-    // Do NOT throw â€” already responded 200
+    // Do NOT throw â€" already responded 200
   }
 };
 
-// â”€â”€ Get Current Plan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Get Current Plan â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export const getCurrentPlan = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
 
-    const station = await FillingStation.findById(stationId).populate("planId").lean();
+    const [station, latestPayment] = await Promise.all([
+      FillingStation.findById(stationId).populate("planId").lean(),
+      Payment.findOne({ fillingStation: stationId, status: "success" })
+        .sort({ paidAt: -1 })
+        .select("billingCycle")
+        .lean(),
+    ]);
 
     if (!station) {
       return res.status(404).json({ error: "Station not found" });
@@ -584,20 +590,56 @@ export const getCurrentPlan = async (req: AuthenticatedRequest, res: Response) =
         )
       : null;
 
+    const planDoc = (station as any).planId as any;
+
     return res.status(200).json({
       message: "Current plan retrieved",
       data: {
         plan: (station as any).plan || "free",
-        planName: ((station as any).planId as any)?.name || "Free Plan",
+        planName: planDoc?.name || "Free Plan",
         planStatus: (station as any).planStatus || "active",
         planStartDate: (station as any).planStartDate,
         planExpiryDate: (station as any).planExpiryDate,
+        billingCycle: latestPayment?.billingCycle || null,
+        monthlyPrice: planDoc?.monthlyPrice ?? 0,
+        yearlyPrice: planDoc?.yearlyPrice ?? 0,
         daysRemaining,
         staffLimits: (station as any).staffLimits,
         isExpired: (station as any).planExpiryDate
           ? new Date() > new Date((station as any).planExpiryDate)
           : false,
       },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// â"€â"€ Get Payment History â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+export const getPaymentHistory = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+
+    const payments = await Payment.find({
+      fillingStation: stationId,
+      status: "success",
+    })
+      .sort({ paidAt: -1 })
+      .limit(12)
+      .lean();
+
+    return res.status(200).json({
+      message: "Payment history retrieved",
+      data: payments.map((p) => ({
+        id: (p._id as any).toString(),
+        date: p.paidAt || p.createdAt,
+        amount: p.amount,
+        currency: p.currency || "NGN",
+        status: p.status,
+        planName: p.planName,
+        billingCycle: p.billingCycle,
+        transactionRef: p.transactionRef,
+      })),
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

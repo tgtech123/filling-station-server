@@ -232,6 +232,24 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
 
     const stations = await FillingStation.find(query).sort({ createdAt: -1 }).lean();
 
+    // Batch-fetch parent managers for branch stations in a single query
+    const parentIds = [
+      ...new Set(
+        stations
+          .filter((s: any) => s.parentStation)
+          .map((s: any) => s.parentStation.toString())
+      ),
+    ];
+    const parentManagers = parentIds.length
+      ? await Staff.find({ station: { $in: parentIds }, role: "manager" }).lean()
+      : [];
+    const parentManagerMap = new Map<string, string>(
+      parentManagers.map((m: any) => [
+        m.station.toString(),
+        `${m.firstName} ${m.lastName}`.trim(),
+      ])
+    );
+
     const stationsWithDetails = await Promise.all(
       stations.map(async (station) => {
         const [manager, staffCount] = await Promise.all([
@@ -239,14 +257,16 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
           Staff.countDocuments({ station: station._id }),
         ]);
 
+        const isBranch = !!(station as any).parentStation;
+
         const managerName = manager
           ? `${(manager as any).firstName} ${(manager as any).lastName}`.trim()
           : null;
 
-        const ownerName =
-          (station as any).ownerName ||
-          managerName ||
-          null;
+        // For branches use parent's manager name; fall back to own manager
+        const ownerName = isBranch
+          ? parentManagerMap.get((station as any).parentStation.toString()) || managerName || null
+          : (station as any).ownerName || managerName || null;
 
         return {
           id: station._id,
@@ -257,6 +277,7 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
           country: station.country,
           phone: station.phone,
           isActive: station.isActive ?? true,
+          isBranch,
           createdAt: station.createdAt,
           staffCount,
           ownerName,
@@ -331,11 +352,17 @@ export const getStationById = async (req: AuthenticatedRequest, res: Response) =
       timeZone: "Africa/Lagos",
     });
 
-    const subscriptionStartDate = new Date(station.createdAt).toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
+    const fmtSubscriptionDate = (raw: Date | null | undefined): string => {
+      if (!raw) return "Not set";
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return "Not set";
+      return d.toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "Africa/Lagos",
+      });
+    };
 
     return res.status(200).json({
       message: "Station detail retrieved",
@@ -363,6 +390,7 @@ export const getStationById = async (req: AuthenticatedRequest, res: Response) =
           additionalServices: station.additionalServices || [],
           image: station.image || null,
           isActive: station.isActive,
+          isDeleted: station.isDeleted,
           status: station.isActive ? "Active" : "Suspended",
           registeredAt,
         },
@@ -384,10 +412,13 @@ export const getStationById = async (req: AuthenticatedRequest, res: Response) =
             }
           : null,
         subscription: {
-          currentPlan: (station as any).plan || "Free",
+          currentPlan: (station as any).plan || "free",
+          planStatus: (station as any).planStatus || "active",
           status: station.isActive ? "Active" : "Suspended",
-          startDate: subscriptionStartDate,
-          expiryDate: "Not set",
+          startDate: fmtSubscriptionDate((station as any).planStartDate),
+          expiryDate: fmtSubscriptionDate((station as any).planExpiryDate),
+          rawStartDate: (station as any).planStartDate || null,
+          rawExpiryDate: (station as any).planExpiryDate || null,
         },
         operational: {
           businessType: station.businessType,

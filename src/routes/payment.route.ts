@@ -6,6 +6,7 @@ import {
   verifyPayment,
   paystackWebhook,
   getCurrentPlan,
+  getPaymentHistory,
 } from "../controllers/payment.controller";
 
 const router = express.Router();
@@ -21,5 +22,6 @@ router.post("/initialize", requireAuth, initializePayment);
 // Public endpoint — reference proves payment
 router.get("/verify/:reference", verifyPayment);
 router.get("/current-plan", requireAuth, getCurrentPlan);
+router.get("/history", requireAuth, getPaymentHistory);
 
 export default router;
