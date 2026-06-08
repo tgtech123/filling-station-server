@@ -4,6 +4,7 @@ import { AuthenticatedRequest } from "../interfaces";
 import CashReconciliation from "../models/cashReconciliation.model";
 import Shift from "../models/shift.model";
 import Notification from "../models/notification.model";
+import { emitToStation } from "../services/socket.service";
 
 // Helper function to check if populated field is an object
 const isPopulated = (field: any): field is { _id: any; firstName?: string; lastName?: string; email?: string } => {
@@ -207,6 +208,13 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           updatedAt: reconciliation.updatedAt,
         },
       });
+
+      const rawStationId = req.user?.station;
+      if (rawStationId !== undefined) {
+        const sid = String(rawStationId);
+        emitToStation(sid, "reconciliation:done", {});
+        emitToStation(sid, "dashboard:refresh", { reason: "reconciliation" });
+      }
     }
   } catch (err: any) {
     console.error("Error in reconcileCash:", err);

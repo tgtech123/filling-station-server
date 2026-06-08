@@ -7,6 +7,7 @@ import LubricantTransaction from "../models/lubricant-transaction.model";
 import mongoose from "mongoose";
 import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
+import { emitToStation } from "../services/socket.service";
 
 export const addLubricant = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1025,6 +1026,12 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
     })
       .then(() => console.log("âœ… Activity created successfully"))
       .catch((err) => console.error("Activity log error (addLubricantTransaction):", err));
+
+    const stationId = req.user?.station?.toString();
+    if (stationId) {
+      emitToStation(stationId, "lubricant:sold", { totalAmount, itemCount: processedItems.length });
+      emitToStation(stationId, "dashboard:refresh", { reason: "lubricant_sold" });
+    }
 
     return res.status(201).json({
       success: true,

@@ -8,6 +8,9 @@ import FuelLoyaltyRedemption from "../models/fuelLoyaltyRedemption.model";
 import FuelLoyaltySettings from "../models/fuelLoyaltySettings.model";
 import FillingStation from "../models/fillingStation.model";
 import Shift from "../models/shift.model";
+import { sendSms } from "../utils/smsHelper";
+
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://filling-station-system.vercel.app";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +109,24 @@ export const registerCustomer = async (req: AuthenticatedRequest, res: Response)
       registeredBy: staffId,
     });
 
+    // Fire-and-forget SMS — does not block or fail the registration response
+    if (customer.phone) {
+      FillingStation.findById(station).select("smsCreditBalance smsLoyaltyEnabled name").lean()
+        .then(async (st: any) => {
+          if (st?.smsLoyaltyEnabled && (st?.smsCreditBalance ?? 0) > 0) {
+            const portalUrl  = `${FRONTEND_URL}/loyalty?station=${station}`;
+            const stName     = (st.name || "your station").substring(0, 25);
+            const firstName  = (customer.name || "").split(" ")[0] || "Customer";
+            const msg        = `Hi ${firstName}! You've joined ${stName} Loyalty. View your points: ${portalUrl}`;
+            const sent       = await sendSms(customer.phone as string, msg);
+            if (sent) {
+              await FillingStation.findByIdAndUpdate(station, { $inc: { smsCreditBalance: -1 } });
+            }
+          }
+        })
+        .catch((e: any) => console.error("[SMS dispatch]", e.message));
+    }
+
     return res.status(201).json({ message: "Customer registered successfully", data: customer });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
@@ -187,6 +208,24 @@ export const getCustomer = async (req: AuthenticatedRequest, res: Response) => {
     ]);
 
     return res.status(200).json({ data: { customer, transactions, redemptions } });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+export const deleteCustomer = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return res.status(403).json({ message: "Unauthorized" });
+
+    const customer = await FuelLoyaltyCustomer.findOneAndUpdate(
+      { _id: req.params.id, fillingStation: station },
+      { isActive: false },
+      { new: true }
+    );
+    if (!customer) return res.status(404).json({ message: "Customer not found" });
+
+    return res.status(200).json({ message: "Customer removed from loyalty program" });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
@@ -571,6 +610,26 @@ export const getAuditReport = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+// ─── SMS Credits ─────────────────────────────────────────────────────────────
+
+export const getSmsCreditsStatus = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    if (!stationId) return res.status(403).json({ message: "Unauthorized" });
+    const station = await FillingStation.findById(stationId)
+      .select("smsCreditBalance smsLoyaltyEnabled")
+      .lean();
+    return res.status(200).json({
+      data: {
+        smsCreditBalance:  (station as any)?.smsCreditBalance  ?? 0,
+        smsLoyaltyEnabled: (station as any)?.smsLoyaltyEnabled ?? false,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
 // ─── Public Portal ────────────────────────────────────────────────────────────
 
 const PORTAL_JWT_SECRET = process.env.JWT_SECRET + "_portal";
@@ -699,7 +758,10 @@ export const portalGetMe = [
   requirePortalAuth,
   async (req: any, res: Response) => {
     try {
-      const customer = await FuelLoyaltyCustomer.findById(req.portalUser.customerId).lean();
+      const [customer, station] = await Promise.all([
+        FuelLoyaltyCustomer.findById(req.portalUser.customerId).lean(),
+        FillingStation.findById(req.portalUser.stationId).select("name city state image").lean(),
+      ]);
       if (!customer) return res.status(404).json({ message: "Customer not found" });
 
       const settings = await getOrCreateSettings(req.portalUser.stationId);
@@ -715,6 +777,12 @@ export const portalGetMe = [
           litresPerRedemptionPoint: settings.litresPerRedemptionPoint,
           minPointsToRedeem: settings.minPointsToRedeem,
           redeemableFor: parseFloat((customer.totalPoints * settings.litresPerRedemptionPoint).toFixed(3)),
+          station: station ? {
+            name:  (station as any).name,
+            city:  (station as any).city,
+            state: (station as any).state,
+            image: (station as any).image || null,
+          } : null,
         },
       });
     } catch (err: any) {

@@ -11,18 +11,27 @@ import Staff from "../models/staff.model";
 import { deleteCachePattern } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
 
+// Role → staffLimits key mapping
+const ROLE_LIMIT_MAP: Record<string, string> = {
+  attendant:  "attendants",
+  cashier:    "cashiers",
+  accountant: "accountants",
+  supervisor: "supervisors",
+  manager:    "managers",
+};
+
 const PAYSTACK_API = "https://api.paystack.co";
 
-const FRONTEND_URL =
+const getFrontendUrl = () =>
   process.env.FRONTEND_URL ||
   (process.env.NODE_ENV === "production"
     ? "https://filling-station-system.vercel.app"
     : "http://localhost:3000");
 
-const paystackHeaders = {
+const getPaystackHeaders = () => ({
   Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
   "Content-Type": "application/json",
-};
+});
 
 const TAX_RATES: Record<string, number> = {
   NG: 0.075, // Nigeria 7.5%
@@ -98,9 +107,9 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
           totalAmount,
           taxPercentage: (TAX_RATES[country] || 0) * 100,
         },
-        callback_url: `${FRONTEND_URL}/payment/verify?reference=${reference}`,
+        callback_url: `${getFrontendUrl()}/payment/verify?reference=${reference}`,
       },
-      { headers: paystackHeaders }
+      { headers: getPaystackHeaders() }
     );
 
     if (!paystackResponse.data.status) {
@@ -202,9 +211,9 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
           totalAmount,
           taxPercentage: (TAX_RATES[country] || 0) * 100,
         },
-        callback_url: `${FRONTEND_URL}/payment/verify?reference=${reference}&guest=true`,
+        callback_url: `${getFrontendUrl()}/payment/verify?reference=${reference}&guest=true`,
       },
-      { headers: paystackHeaders }
+      { headers: getPaystackHeaders() }
     );
 
     if (!paystackResponse.data.status) {
@@ -271,7 +280,7 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
 
     const verification = await axios.get(
       `${PAYSTACK_API}/transaction/verify/${reference}`,
-      { headers: paystackHeaders }
+      { headers: getPaystackHeaders() }
     );
 
     if (!verification.data.status || verification.data.data.status !== "success") {
@@ -473,26 +482,33 @@ export const paystackWebhook = async (req: any, res: Response) => {
       }
 
       if (!isGuest && stationId) {
-        // Apply mapLimit so 999 (unlimited sentinel in plan doc) becomes 999999,
-        // matching the same conversion done in verifyPayment.
-        const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
-        await FillingStation.findByIdAndUpdate(stationId, {
-          plan: planSlug,
-          planId,
-          planStatus: "active",
-          planStartDate: now,
-          planExpiryDate: expiryDate,
-          staffLimits: {
-            attendants:  mapLimit(plan?.staffLimits?.attendants),
-            cashiers:    mapLimit(plan?.staffLimits?.cashiers),
-            accountants: mapLimit(plan?.staffLimits?.accountants),
-            supervisors: mapLimit(plan?.staffLimits?.supervisors),
-            managers:    mapLimit(plan?.staffLimits?.managers),
-          },
-        });
-
-        await deleteCachePattern(`dashboard:*:${stationId}`);
-        console.log("[webhook] Station " + stationId + " upgraded to " + planSlug);
+        if (meta.type === "sms_credits") {
+          // Top up prepaid SMS credits
+          await FillingStation.findByIdAndUpdate(stationId, {
+            $inc: { smsCreditBalance: Number(meta.credits) },
+            smsLoyaltyEnabled: true,
+          });
+          console.log(`[webhook] SMS credits +${meta.credits} for station ${stationId}`);
+        } else {
+          // Subscription plan upgrade
+          const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
+          await FillingStation.findByIdAndUpdate(stationId, {
+            plan: planSlug,
+            planId,
+            planStatus: "active",
+            planStartDate: now,
+            planExpiryDate: expiryDate,
+            staffLimits: {
+              attendants:  mapLimit(plan?.staffLimits?.attendants),
+              cashiers:    mapLimit(plan?.staffLimits?.cashiers),
+              accountants: mapLimit(plan?.staffLimits?.accountants),
+              supervisors: mapLimit(plan?.staffLimits?.supervisors),
+              managers:    mapLimit(plan?.staffLimits?.managers),
+            },
+          });
+          await deleteCachePattern(`dashboard:*:${stationId}`);
+          console.log("[webhook] Station " + stationId + " upgraded to " + planSlug);
+        }
       }
 
       await Payment.findOneAndUpdate(
@@ -508,12 +524,14 @@ export const paystackWebhook = async (req: any, res: Response) => {
 
       AdminLog.create({
         eventType: "subscription_payment",
-        description: `Payment confirmed via webhook: ${meta?.planName} (${billingCycle}) â€" ₦${(amount / 100).toLocaleString()}`,
-        stationOrUser: (station as any)?.name || meta?.guestName || customer?.email || "Unknown",
+        description: meta.type === "sms_credits"
+          ? `SMS credits purchased: ${meta.credits} credits — ₦${(amount / 100).toLocaleString()} (${webhookStationName})`
+          : `Payment confirmed via webhook: ${meta?.planName} (${billingCycle}) — ₦${(amount / 100).toLocaleString()}`,
+        stationOrUser: webhookStationName,
         status: "success",
       }).catch(console.error);
 
-      if (!isGuest && stationId) {
+      if (!isGuest && stationId && meta.type !== "sms_credits") {
         notifyStation(stationId, {
           type: "message",
           category: "system_update",
@@ -530,6 +548,18 @@ export const paystackWebhook = async (req: any, res: Response) => {
           severity: "info",
           stationId: stationId,
           stationName: webhookStationName,
+        });
+      }
+
+      if (!isGuest && stationId && meta.type === "sms_credits") {
+        notifyStation(stationId, {
+          type: "message",
+          category: "system_update",
+          title: "SMS Credits Activated",
+          body: `${meta.credits} SMS credits added. Customers will receive their loyalty portal link when enrolled.`,
+          severity: "info",
+          targetRole: "manager",
+          expiresInDays: 7,
         });
       }
 
@@ -560,6 +590,269 @@ export const paystackWebhook = async (req: any, res: Response) => {
   } catch (err: any) {
     console.error("âŒ Webhook processing error:", err.message);
     // Do NOT throw â€" already responded 200
+  }
+};
+
+// ── Verify SMS Credits Payment (frontend-initiated, works without webhook) ─────────────────────
+export const verifySmsCreditsPayment = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { reference } = req.params;
+    const stationId     = req.user?.station;
+
+    // Idempotency: already processed by webhook — just return current balance
+    const existing = await Payment.findOne({ transactionRef: reference });
+    if (existing?.status === "success") {
+      const station = await FillingStation.findById(stationId)
+        .select("smsCreditBalance smsLoyaltyEnabled").lean();
+      return res.status(200).json({
+        message: "Already activated",
+        data: {
+          smsCreditBalance:  (station as any)?.smsCreditBalance  ?? 0,
+          smsLoyaltyEnabled: (station as any)?.smsLoyaltyEnabled ?? false,
+        },
+      });
+    }
+
+    // Verify with Paystack directly
+    const verification = await axios.get(
+      `${PAYSTACK_API}/transaction/verify/${reference}`,
+      { headers: getPaystackHeaders() }
+    );
+
+    if (!verification.data.status || verification.data.data.status !== "success") {
+      await Payment.findOneAndUpdate({ transactionRef: reference }, { status: "failed" });
+      return res.status(400).json({ error: "Payment not completed" });
+    }
+
+    const rawMeta = verification.data.data.metadata;
+    const meta    = typeof rawMeta === "string" ? JSON.parse(rawMeta) : rawMeta;
+
+    if (meta.type !== "sms_credits" || meta.stationId !== stationId?.toString()) {
+      return res.status(400).json({ error: "Invalid payment reference" });
+    }
+
+    // Apply credits
+    await FillingStation.findByIdAndUpdate(stationId, {
+      $inc: { smsCreditBalance: Number(meta.credits) },
+      smsLoyaltyEnabled: true,
+    });
+
+    await Payment.findOneAndUpdate(
+      { transactionRef: reference },
+      { status: "success", paidAt: new Date() }
+    );
+
+    const station = await FillingStation.findById(stationId)
+      .select("smsCreditBalance smsLoyaltyEnabled").lean();
+
+    AdminLog.create({
+      eventType: "subscription_payment",
+      description: `SMS credits verified: ${meta.credits} credits activated for station ${stationId}`,
+      stationOrUser: meta.stationName || stationId?.toString(),
+      status: "success",
+    }).catch(console.error);
+
+    return res.status(200).json({
+      message: `${meta.credits} SMS credits activated`,
+      data: {
+        smsCreditBalance:  (station as any)?.smsCreditBalance  ?? 0,
+        smsLoyaltyEnabled: (station as any)?.smsLoyaltyEnabled ?? false,
+        credits: meta.credits,
+      },
+    });
+  } catch (err: any) {
+    console.error("verifySmsCreditsPayment:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// ── Initialize SMS Credits Payment ─────────────────────────────────────────────────────────────
+export const initializeSmsCreditsPayment = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    const userEmail = req.user?.email;
+    const { customerCount } = req.body;
+
+    if (!customerCount || Number(customerCount) < 1) {
+      return res.status(400).json({ error: "customerCount must be at least 1" });
+    }
+
+    const count      = Math.floor(Number(customerCount));
+    const SMS_PRICE  = 6; // ₦6 per credit
+    const amount     = count * SMS_PRICE;
+    const amountKobo = amount * 100;
+    const reference  = `FS_SMS_${stationId}_${Date.now()}`;
+
+    const station = await FillingStation.findById(stationId).select("name").lean();
+
+    const paystackResp = await axios.post(
+      `${PAYSTACK_API}/transaction/initialize`,
+      {
+        email: userEmail,
+        amount: amountKobo,
+        reference,
+        currency: "NGN",
+        metadata: {
+          type:           "sms_credits",
+          stationId:      stationId?.toString(),
+          stationName:    (station as any)?.name,
+          credits:        count,
+          pricePerCredit: SMS_PRICE,
+          totalAmount:    amount,
+        },
+        callback_url: `${getFrontendUrl()}/dashboard/loyalty/settings?sms_ref=${reference}`,
+      },
+      { headers: getPaystackHeaders() }
+    );
+
+    if (!paystackResp.data.status) {
+      console.error("Paystack SMS credits init failed:", paystackResp.data);
+      return res.status(500).json({ error: "Failed to initialize payment" });
+    }
+
+    await Payment.create({
+      fillingStation: stationId,
+      plan:           new Types.ObjectId("000000000000000000000000"),
+      planName:       `SMS Credits x${count}`,
+      stationName:    (station as any)?.name || "Unknown",
+      amount,
+      currency:       "NGN",
+      paymentMethod:  "Paystack",
+      status:         "pending",
+      transactionRef: reference,
+      billingCycle:   "free",
+    });
+
+    return res.status(200).json({
+      message: "Payment initialized",
+      data: {
+        authorizationUrl: paystackResp.data.data.authorization_url,
+        reference,
+        credits:        count,
+        amount,
+        pricePerCredit: SMS_PRICE,
+      },
+    });
+  } catch (err: any) {
+    console.error("initializeSmsCreditsPayment:", err.message);
+    return res.status(500).json({ error: err.message || "Failed to initialize payment" });
+  }
+};
+
+// ── Downgrade: Check compatibility ──────────────────────────────────────────
+export const checkDowngrade = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId  = req.user?.station;
+    const targetSlug = req.query.targetPlan as string;
+    if (!targetSlug) return res.status(400).json({ error: "targetPlan query param required" });
+
+    const [station, targetPlan] = await Promise.all([
+      FillingStation.findById(stationId).lean(),
+      SubscriptionPlan.findOne({ slug: targetSlug, isActive: true }).lean(),
+    ]);
+
+    if (!station) return res.status(404).json({ error: "Station not found" });
+    if (!targetPlan) return res.status(404).json({ error: "Target plan not found" });
+
+    // Count active staff by role
+    const staffCounts = await Staff.aggregate([
+      { $match: { station: new Types.ObjectId(String(stationId)), isActive: true } },
+      { $group: { _id: "$role", count: { $sum: 1 } } },
+    ]);
+    const byRole: Record<string, number> = {};
+    staffCounts.forEach((s: any) => { byRole[s._id] = s.count; });
+
+    const conflicts: { role: string; limitKey: string; current: number; allowed: number; excess: number }[] = [];
+    const limits = (targetPlan as any).staffLimits || {};
+
+    for (const [role, limitKey] of Object.entries(ROLE_LIMIT_MAP)) {
+      const allowed  = limitKey === "managers" ? 999999 : (limits[limitKey] ?? 999999);
+      const current  = byRole[role] || 0;
+      if (allowed !== 999999 && current > allowed) {
+        conflicts.push({ role, limitKey, current, allowed, excess: current - allowed });
+      }
+    }
+
+    return res.status(200).json({
+      data: {
+        canDowngrade:  conflicts.length === 0,
+        conflicts,
+        targetPlan: {
+          slug:         (targetPlan as any).slug,
+          name:         (targetPlan as any).name,
+          monthlyPrice: (targetPlan as any).monthlyPrice,
+          yearlyPrice:  (targetPlan as any).yearlyPrice,
+          features:     (targetPlan as any).features,
+        },
+        effectiveDate: (station as any).planExpiryDate || null,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// ── Downgrade: Schedule ──────────────────────────────────────────────────────
+export const scheduleDowngrade = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId  = req.user?.station;
+    const { targetPlan } = req.body;
+    if (!targetPlan) return res.status(400).json({ error: "targetPlan is required" });
+
+    const [station, plan] = await Promise.all([
+      FillingStation.findById(stationId).lean(),
+      SubscriptionPlan.findOne({ slug: targetPlan, isActive: true }).lean(),
+    ]);
+    if (!station) return res.status(404).json({ error: "Station not found" });
+    if (!plan)    return res.status(404).json({ error: "Target plan not found" });
+
+    await FillingStation.findByIdAndUpdate(stationId, {
+      pendingDowngrade:   true,
+      pendingDowngradeTo: targetPlan,
+      downgradeAt:        (station as any).planExpiryDate || null,
+    });
+
+    AdminLog.create({
+      eventType:    "subscription_payment",
+      description:  `Downgrade scheduled: ${(station as any).plan} → ${targetPlan}, effective ${(station as any).planExpiryDate}`,
+      stationOrUser: (station as any).name || String(stationId),
+      status:       "success",
+    }).catch(console.error);
+
+    notifyStation(String(stationId), {
+      type:        "message",
+      category:    "system_update",
+      title:       "Downgrade Scheduled",
+      body:        `Your plan will change to ${(plan as any).name} on ${new Date((station as any).planExpiryDate).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" })}.`,
+      severity:    "info",
+      targetRole:  "manager",
+      expiresInDays: 30,
+    });
+
+    return res.status(200).json({
+      message:  "Downgrade scheduled successfully",
+      data: {
+        pendingDowngradeTo: targetPlan,
+        downgradeAt:        (station as any).planExpiryDate,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// ── Downgrade: Cancel pending ────────────────────────────────────────────────
+export const cancelDowngrade = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    await FillingStation.findByIdAndUpdate(stationId, {
+      pendingDowngrade:   false,
+      pendingDowngradeTo: "",
+      downgradeAt:        null,
+    });
+    return res.status(200).json({ message: "Pending downgrade cancelled" });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -608,6 +901,9 @@ export const getCurrentPlan = async (req: AuthenticatedRequest, res: Response) =
         isExpired: (station as any).planExpiryDate
           ? new Date() > new Date((station as any).planExpiryDate)
           : false,
+        pendingDowngrade:   (station as any).pendingDowngrade   || false,
+        pendingDowngradeTo: (station as any).pendingDowngradeTo || null,
+        downgradeAt:        (station as any).downgradeAt        || null,
       },
     });
   } catch (err: any) {

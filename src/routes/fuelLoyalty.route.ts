@@ -4,7 +4,8 @@ import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
 import {
   getSettings, updateSettings,
-  registerCustomer, listCustomers, searchCustomer, getCustomer, updateCustomer,
+  getSmsCreditsStatus,
+  registerCustomer, listCustomers, searchCustomer, getCustomer, updateCustomer, deleteCustomer,
   recordEarn, listTransactions, getCustomerTransactions,
   requestRedemption, listRedemptions, approveRedemption, rejectRedemption,
   getAuditReport,
@@ -30,12 +31,14 @@ router.use("/staff", requireAuth);
 
 router.get("/staff/settings",         mgrAcct,     getSettings);
 router.patch("/staff/settings",       mgr,         updateSettings);
+router.get("/staff/sms-credits",      mgr,         getSmsCreditsStatus);
 
 router.post("/staff/customers",       staff,        registerCustomer);
 router.get("/staff/customers/search", staff,        searchCustomer);
 router.get("/staff/customers",        staff,        listCustomers);
 router.get("/staff/customers/:id",    staff,        getCustomer);
 router.patch("/staff/customers/:id",  mgr,          updateCustomer);
+router.delete("/staff/customers/:id", mgr,          deleteCustomer);
 
 router.get("/staff/customers/:id/transactions", staff, getCustomerTransactions);
 

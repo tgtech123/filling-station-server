@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import Notification, { INotification } from "../models/notification.model";
 import AdminNotification, { AdminNotifType } from "../models/adminNotification.model";
+import { emitToStation } from "../services/socket.service";
 
 /**
  * Fire-and-forget: create a station-scoped notification visible to station staff.
@@ -31,7 +32,16 @@ export const notifyStation = (
     severity: opts.severity ?? null,
     targetRole: opts.targetRole ?? "manager",
     expiresAt,
-  }).catch((err: any) => console.error("[notifyStation] error:", err?.message));
+  })
+    .then(() => {
+      emitToStation(fillingStation.toString(), "notification:new", {
+        title: opts.title,
+        body: opts.body,
+        severity: opts.severity ?? null,
+        targetRole: opts.targetRole ?? "manager",
+      });
+    })
+    .catch((err: any) => console.error("[notifyStation] error:", err?.message));
 };
 
 /**

@@ -51,6 +51,13 @@ export interface IFillingStation extends Document {
   gasLoyaltyPointsPerK:    number;  // points earned per ₦1,000 spent
   gasLoyaltyMinRedeem:     number;  // minimum points balance before customer can redeem
   gasLoyaltyNairaPerPoint: number;  // ₦ value of each point when redeeming
+  // SMS loyalty notifications
+  smsCreditBalance:   number;  // prepaid SMS credits remaining
+  smsLoyaltyEnabled:  boolean; // true only after first successful SMS credit purchase
+  // Scheduled downgrade
+  pendingDowngrade:   boolean;
+  pendingDowngradeTo: string;
+  downgradeAt:        Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -121,6 +128,11 @@ const FillingStationSchema = new Schema<IFillingStation>(
     gasLoyaltyPointsPerK:     { type: Number, default: 10,  min: 1 },
     gasLoyaltyMinRedeem:      { type: Number, default: 500, min: 1 },
     gasLoyaltyNairaPerPoint:  { type: Number, default: 1,   min: 0.01 },
+    smsCreditBalance:         { type: Number, default: 0,   min: 0 },
+    smsLoyaltyEnabled:        { type: Boolean, default: false },
+    pendingDowngrade:         { type: Boolean, default: false },
+    pendingDowngradeTo:       { type: String,  default: "" },
+    downgradeAt:              { type: Date,    default: null },
     createdAt: { type: Date },
     updatedAt: { type: Date },
   },
