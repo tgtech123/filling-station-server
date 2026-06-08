@@ -9,6 +9,7 @@ import Activity from "../models/activity.model";
 import SalesTarget from "../models/salesTarget.model";
 import Notification from "../models/notification.model";
 import { deleteCachePattern } from "../config/redis";
+import { emitToStation } from "../services/socket.service";
 
 // Get all active pumps for a station
 const getActivePumps = async (stationId: Types.ObjectId) => {
@@ -163,6 +164,12 @@ export const startShift = async (req: AuthenticatedRequest, res: Response) => {
         });
       })
       .catch((err) => console.error("Activity log error (startShift):", err));
+
+    emitToStation(fillingStation, "shift:started", {
+      shiftId: newShift._id.toString(),
+      pumpTitle: newShift.pumpTitle,
+      product: newShift.product,
+    });
 
     return res.status(201).json({
       message: "Shift started successfully",
@@ -377,6 +384,14 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
         })
         .catch((err) => console.error("Target progress error (endShift):", err));
     }
+
+    emitToStation(fillingStation, "shift:ended", {
+      shiftId: shift._id.toString(),
+      pumpTitle: shift.pumpTitle,
+      litresSold: shift.litresSold,
+      totalAmount: shift.totalAmount,
+    });
+    emitToStation(fillingStation, "dashboard:refresh", { reason: "shift_ended" });
 
     return res.status(200).json({
       message: "Shift ended successfully",

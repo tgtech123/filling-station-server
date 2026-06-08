@@ -22,7 +22,7 @@
 14. [Payroll & Commissions](#14-payroll--commissions)
 15. [Procurement & Supplier Management](#15-procurement--supplier-management)
 16. [Branches & Multi-Location Management](#16-branches--multi-location-management)
-17. [Subscription & Billing](#17-subscription--billing)
+17. [Subscription & Billing](#17-subscription--billing) — upgrade, renew, downgrade, billing history
 18. [Notifications & Alerts](#18-notifications--alerts)
 19. [System Settings & Your Profile](#19-system-settings--your-profile)
 20. [The Admin Panel (Platform Administrators Only)](#20-the-admin-panel-platform-administrators-only)
@@ -519,22 +519,119 @@ Customers can place orders for gas delivery:
 
 ### 11.6 Gas Customer Management & Loyalty Programme
 
-**Registering a New Gas Customer:**
-1. Go to **Gas Customers**
+The Loyalty Programme lets you reward repeat gas customers with points they can redeem for discounts. The section below explains every part of the loyalty dashboard — from enrolling a customer to setting up automatic SMS notifications.
+
+> **Who can use the Loyalty Programme?** The full dashboard (settings, delete, audit) is for **Managers** only. Viewing customers and their points is available to all staff.
+
+---
+
+**Opening the Loyalty Dashboard:**
+1. In the left sidebar, click **Loyalty Programme**
+2. The dashboard shows a summary: total customers enrolled, points issued today, and recent activity
+3. From here you can jump to **Customers**, **Settings**, or **Audit Trail**
+
+> **Back arrow tip:** On every Loyalty sub-page (Customers, Settings, Audit Trail), there is a **← back arrow** at the top left. Click it at any time to return to the Loyalty Dashboard without losing your place.
+
+---
+
+**Enrolling a New Customer:**
+1. Go to **Loyalty** > **Customers**
 2. Click **Add Customer**
-3. Enter their **Name** and **Phone Number**
+3. Enter the customer's **Name** and **Phone Number**
 4. Click **Register**
 
-**How the Loyalty Programme Works:**
-- Every time a registered customer buys gas, they earn points based on the amount spent
-- The Manager sets the **points per ₦1,000 spent** (e.g., 10 points per ₦1,000)
-- When a customer has enough points (above the minimum threshold), they can redeem them for a discount
-- The Manager sets the **naira value of each point** (e.g., ₦1 per point)
+The customer now has a loyalty account. If you have SMS Portal Notifications active (see below), they will automatically receive an SMS on their phone with a link to view their points balance — no extra steps needed.
 
-**Checking a Customer's Points:**
-1. Go to **Gas Customers**
-2. Search by phone number
-3. Click the customer's name to see their points balance and transaction history
+---
+
+**Viewing a Customer's Profile:**
+1. Go to **Loyalty** > **Customers**
+2. Find the customer using the search box (search by name or phone number)
+3. Click their name to open their profile
+4. You will see:
+   - Current points balance
+   - Total amount spent
+   - Complete transaction history (every purchase that added or removed points)
+   - Date of enrolment
+
+---
+
+**Deleting a Loyalty Customer:**
+
+> Only Managers can delete customers. A deleted customer's transaction history is **not** lost — it stays in the audit trail for record-keeping. Only their active loyalty account is deactivated.
+
+1. Open the customer's profile (see above)
+2. Click the **trash / delete icon** in the action buttons at the top of the profile
+3. A red confirmation strip appears below the buttons asking you to confirm
+4. Click **Yes, Remove** to permanently deactivate the customer
+5. Click **Cancel** if you changed your mind — nothing changes
+
+---
+
+**Viewing the Audit Trail:**
+
+The audit trail is a time-stamped log of every loyalty event across all customers.
+
+1. Go to **Loyalty** > **Audit Trail**
+2. Entries appear newest first
+3. Each row shows: date and time, customer name, event (points earned / redeemed / customer deleted), points value, and who performed the action
+4. Use the date filter at the top to search a specific period
+
+---
+
+**Loyalty Settings:**
+
+> Done by the Manager only
+
+1. Go to **Loyalty** > **Settings**
+2. Configure the three core loyalty rules:
+
+| Setting | What it means | Example |
+|---------|--------------|---------|
+| **Points per ₦1,000 spent** | How many points a customer earns for every ₦1,000 of gas purchased | Set to 10 → spending ₦5,000 earns 50 points |
+| **Minimum points to redeem** | The minimum balance a customer must reach before they can cash in points | Set to 500 → customer needs at least 500 points saved up |
+| **Naira value per point** | How much each point is worth as a discount when redeeming | Set to ₦1 → 500 points = ₦500 off their next purchase |
+
+3. Click **Save Settings** after making any change
+
+---
+
+**SMS Portal Notifications (Optional — Paid Feature):**
+
+This feature sends each newly enrolled customer an automatic SMS the moment they are registered. The SMS contains a personalised link they can tap on their phone to view their own points balance online — no app download needed.
+
+*Cost: ₦6 per SMS (₦6 per customer notified). You buy credits upfront and the system spends them automatically.*
+
+**How to purchase SMS credits (first time):**
+
+1. Go to **Loyalty** > **Settings**
+2. Scroll to the **SMS Portal Notifications** card
+3. In the **Number of credits to purchase** field, enter how many SMS credits you want
+   - The total cost updates automatically as you type
+   - Example: type **100** → total shown is **₦600**
+4. Click **Pay & Activate**
+5. You are redirected to Paystack — pay with your debit card
+6. After payment succeeds, Paystack sends you back to the Settings page
+7. Your credit balance updates immediately on the card
+
+**How to top up later:**
+
+Repeat the same steps above. The button now shows **Top Up** instead of **Pay & Activate**. New credits are added on top of your remaining balance.
+
+**What the customer receives (automatically):**
+
+Within seconds of being enrolled, the customer's phone receives an SMS like this:
+
+> *"Hi [First Name]! You've joined [Your Station Name] Loyalty. View your points: [link]"*
+
+They tap the link to see their balance and transaction history — it works in any mobile browser.
+
+**Checking your credit balance:**
+
+- The current balance is shown on the **SMS Portal Notifications** card in Loyalty Settings: *"X credits remaining"*
+- Credits are only deducted when an SMS is successfully sent
+- If the balance reaches 0, new customers are still enrolled normally — they just do not receive the SMS
+- Top up at any time to resume automatic SMS sending
 
 ### 11.7 Gas Procurement (Ordering Gas Supply)
 
@@ -814,38 +911,104 @@ Your dashboard will reload showing data for that station.
 2. Scroll down to the **Subscription & Billing** section
 
 You will see:
-- **Current Plan Name** (e.g., Free Plan, Pro Plan)
+- **Current Plan Name** (e.g., Free Plan, Pro Plan, Enterprise Max)
 - **Price** per month or year
 - **Started** — the date your current plan became active
 - **Expires** — when your plan runs out
 - **Days Remaining** (shown in red when 7 days or fewer remain)
 
+If you have requested a plan downgrade, an **amber notice** will appear on the plan card showing which plan you are moving to and when the change takes effect (at the end of your billing period). There is a **Cancel Downgrade** button if you change your mind.
+
 ### 17.2 Upgrading Your Plan
 
+The upgrade window only shows plans that are **higher than your current plan** — you will never see your own plan or lower plans listed there.
+
 1. In **System Settings** > **Subscription & Billing**, click **Upgrade Plan**
-2. A window appears showing available plans
-3. Choose **Monthly** or **Yearly** billing (yearly saves you 16%)
-4. Click the plan you want to upgrade to
+2. A window appears showing the plans available above your current tier
+3. Choose **Monthly** or **Yearly** billing (yearly saves you ~16%)
+4. Click the plan you want to move to
 5. Click **Proceed to Payment**
 6. You are redirected to **Paystack** — enter your card details there
 7. After successful payment, you are returned to FuelDesk
-8. Your plan upgrades immediately and the new expiry date is set
+8. Your plan upgrades immediately and a new expiry date is set
 
-> **Monthly plan:** Expires exactly 1 calendar month from today
+> **Monthly plan:** Expires exactly 1 calendar month from today  
 > **Yearly plan:** Expires exactly 1 year from today
 
-### 17.3 Billing History
+### 17.3 Renewing Your Plan (Highest Tier Users)
+
+If you are already on the highest available plan (e.g., Enterprise Max), there is no plan above you to upgrade to. Instead of the **Upgrade Plan** button, you will see a **Renew Plan** button.
+
+1. Click **Renew Plan**
+2. The same payment window opens, showing your current plan with a blue **"You are renewing your current plan"** notice
+3. Choose **Monthly** or **Yearly**
+4. Click **Proceed to Payment** and complete payment through Paystack
+5. Your plan expiry extends by the period you chose — your plan and limits do not change
+
+> Renewing before your current period ends does **not** waste the remaining days. The new period starts from the moment of payment and your expiry date is pushed forward accordingly.
+
+### 17.4 Downgrading Your Plan
+
+> **Who can do this:** Manager only
+
+You can move to a lower-priced plan if your station's usage fits within that plan's limits (staff count, branch count, etc.). The downgrade does **not** happen immediately — it is scheduled for the end of your current billing period so you keep all your current features until you have paid for.
+
+**There are no refunds for early downgrade requests.**
+
+**Step 1 — Open the downgrade wizard:**
+1. Go to **System Settings** > **Subscription & Billing**
+2. Click the **Downgrade Plan** button (amber coloured, below the plan card)
+   - This button only appears if you are on a paid plan and there are lower-tier plans available
+
+**Step 2 — Select the target plan:**
+1. A wizard opens showing all plans below your current tier
+2. Select the plan you want to move to
+3. Click **Next**
+
+**Step 3 — Compatibility check:**
+The system automatically checks whether your current usage fits within the new plan's limits. This takes a few seconds. Two outcomes are possible:
+
+*Outcome A — Compatible (no conflicts):*
+- You see a green summary: "Your station fits within [Plan Name]"
+- The effective date is shown (your current billing period end date)
+- Scroll down to confirm
+
+*Outcome B — Conflicts detected:*
+- The system shows exactly what is over the new plan's limit
+- For example: *"Attendants: 8 active / 5 allowed — remove 3 before downgrading"*
+- You **cannot proceed** until you resolve the conflicts
+- Click the X to close the wizard, reduce staff in the affected role (go to Staff Management), and then try again
+
+**Step 4 — Confirm the downgrade:**
+1. Review the summary table: plan name, effective date, refund policy
+2. Tick the confirmation checkbox
+3. Click **Schedule Downgrade**
+
+**Step 5 — Success:**
+- A confirmation screen appears with an animated checkmark
+- You will also receive an in-app notification confirming the scheduled change
+- The amber downgrade notice now appears on your plan card (Section 17.1)
+
+**Cancelling a scheduled downgrade:**
+
+If you change your mind before the effective date:
+1. Go to **System Settings** > **Subscription & Billing**
+2. Find the amber downgrade notice on your plan card
+3. Click **Cancel Downgrade**
+4. The downgrade is removed immediately — your plan stays as is
+
+### 17.5 Billing History
 
 In **System Settings** > **Subscription & Billing**, scroll past the plan card to see your **Billing History** — a table of every payment you have made, with date, amount, plan name, and billing cycle (Monthly/Annual).
 
-### 17.4 Cancelling a Subscription
+### 17.6 Cancelling a Subscription
 
 Cancellations are handled through FuelDesk support:
 1. Click **Cancel Subscription** in the Subscription section
 2. A window will appear with a **Contact Support** option
 3. Send an email requesting cancellation — your plan stays active until the end of the current period
 
-### 17.5 What Happens When a Plan Expires?
+### 17.7 What Happens When a Plan Expires?
 
 When your plan expires, your access is restricted:
 - You can still log in and view existing data
@@ -853,7 +1016,7 @@ When your plan expires, your access is restricted:
 - Certain report exports may be disabled
 - A banner on your dashboard will remind you to renew
 
-To restore full access, simply upgrade your plan (Section 17.2).
+To restore full access, simply renew or upgrade your plan (Sections 17.2 and 17.3).
 
 ---
 
@@ -1130,7 +1293,28 @@ Billing history only shows **successful** payments made through Paystack. If you
 **Q: What is the difference between a Dip Reading and a Shift Reading?**
 A **Shift Reading** is recorded by an attendant at the pump (opening and closing meter values). It tracks litres sold per pump per shift. A **Dip Reading** is recorded by a supervisor with a physical measuring rod in the tank. It confirms the actual fuel level and catches any losses not recorded by the pump.
 
+**Q: How do SMS Portal Notifications work, and who pays for them?**
+The station (Manager) pays for SMS credits upfront at ₦6 per credit. When a new customer is enrolled in the Loyalty Programme, the system automatically sends them one SMS with a link to view their points — that uses one credit. The customer pays nothing. If your credit balance reaches 0, new customers are still enrolled normally but do not receive the SMS. Go to **Loyalty** > **Settings** > **SMS Portal Notifications** to top up at any time.
+
+**Q: I purchased SMS credits through Paystack and was returned to the app, but the balance still shows 0. What happened?**
+After paying, Paystack redirects you back to the Loyalty Settings page. If the balance has not updated within a few seconds, try refreshing the page — the system verifies your payment on return and updates the balance automatically. If it still shows 0 after refreshing, contact FuelDesk support with your Paystack payment reference number.
+
+**Q: Can I downgrade my plan immediately?**
+No. Downgrades are **scheduled** — they take effect at the end of your current billing period. This means you keep all your current features and staff limits until the day you have already paid for. The effective date is shown clearly before you confirm the downgrade.
+
+**Q: The Downgrade Plan button is not showing. Why?**
+The downgrade button only appears when: (1) you are on a paid plan (not free), (2) there are lower-tier plans available, and (3) you do not already have a downgrade scheduled. If you are on the free plan or the lowest paid tier, there is nothing to downgrade to.
+
+**Q: The system says I have a "conflict" and cannot downgrade. What does that mean?**
+It means your current staff count exceeds what the target plan allows. For example, if you have 8 active attendants but the target plan only supports 5, you must remove (deactivate) at least 3 attendants from **Staff Management** before the downgrade can proceed. The conflict screen tells you exactly which roles are over-limit and by how many.
+
+**Q: I scheduled a downgrade but changed my mind. Can I cancel it?**
+Yes. Go to **System Settings** > **Subscription & Billing**, find the amber downgrade notice on your plan card, and click **Cancel Downgrade**. The scheduled downgrade is removed instantly and your plan stays unchanged.
+
+**Q: I am on the highest plan and the Upgrade button is missing. Is this a bug?**
+No, this is correct. If you are on the highest available plan, there is nothing to upgrade to — so the button changes to **Renew Plan** instead. Click it to extend your current plan by another month or year.
+
 ---
 
-*FuelDesk User Guide — Version 1.0*
+*FuelDesk User Guide — Version 2.0*
 *For support, contact the FuelDesk team through the Help section inside the application.*

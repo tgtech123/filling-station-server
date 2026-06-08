@@ -9,6 +9,7 @@ import Tank from "../models/tanks.model";
 import Lubricant from "../models/lubricant.model";
 import ActivityLog from "../models/activityLog.model";
 import DipReading from "../models/dipReading.model";
+import { emitToStation } from "../services/socket.service";
 
 // Helper function to check if a field is populated
 const isPopulated = (field: any): field is { firstName: string; lastName: string; [key: string]: any } => {
@@ -507,6 +508,9 @@ export const approveShift = async (req: AuthenticatedRequest, res: Response) => 
       status: "Success",
       metadata: { shiftId, comment },
     });
+
+    emitToStation(stationId, "shift:approved", { shiftId });
+    emitToStation(stationId, "dashboard:refresh", { reason: "shift_approved" });
 
     res.json({
       success: true,
