@@ -218,10 +218,8 @@ export const deleteCustomer = async (req: AuthenticatedRequest, res: Response) =
     const station = req.user?.station;
     if (!station) return res.status(403).json({ message: "Unauthorized" });
 
-    const customer = await FuelLoyaltyCustomer.findOneAndUpdate(
-      { _id: req.params.id, fillingStation: station },
-      { isActive: false },
-      { new: true }
+    const customer = await FuelLoyaltyCustomer.findOneAndDelete(
+      { _id: req.params.id, fillingStation: station }
     );
     if (!customer) return res.status(404).json({ message: "Customer not found" });
 
