@@ -14,7 +14,9 @@
       "Bash(dir /s /b src\\\\*.ts)",
       "Bash(findstr /i procurement)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\src\\\\app\" -Recurse -Directory -Filter \"*contact*\" -ErrorAction SilentlyContinue)",
-      "Bash(powershell -File -)"
+      "Bash(powershell -File -)",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npm uninstall *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",

@@ -10,15 +10,11 @@ import AdminLog from "../models/adminLog.model";
 import Staff from "../models/staff.model";
 import { deleteCachePattern } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
-
-// Role → staffLimits key mapping
-const ROLE_LIMIT_MAP: Record<string, string> = {
-  attendant:  "attendants",
-  cashier:    "cashiers",
-  accountant: "accountants",
-  supervisor: "supervisors",
-  manager:    "managers",
-};
+import {
+  computeDowngradeConflicts,
+  buildStaffLimits,
+  syncPlanToBranches,
+} from "../services/planLifecycle.service";
 
 const PAYSTACK_API = "https://api.paystack.co";
 
@@ -85,7 +81,16 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
 
     const reference = `FS_${stationId}_${Date.now()}_${planSlug}`;
 
-    const station = await FillingStation.findById(stationId).select("name").lean();
+    const station = await FillingStation.findById(stationId).select("name parentStation").lean();
+
+    // Branches run on the parent station's subscription. A branch buying its own
+    // plan would be silently overwritten on the parent's next renewal (plan fields
+    // are synced to branches) — taking the customer's money for nothing.
+    if ((station as any)?.parentStation) {
+      return res.status(400).json({
+        error: "Branch stations inherit the parent station's plan. Subscriptions are managed and paid from the parent station.",
+      });
+    }
 
     const paystackResponse = await axios.post(
       `${PAYSTACK_API}/transaction/initialize`,
@@ -291,6 +296,28 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
+    // ── Integrity gate ─────────────────────────────────────────────────────
+    // Only honor references this server initialized (a pending Payment record
+    // exists) and only when Paystack confirms the full expected amount in NGN.
+    // Without both checks, anyone could create their own Paystack transaction
+    // with the public key, a ₦100 charge and forged metadata, then hit this
+    // public endpoint to get any plan applied.
+    if (!existingPayment) {
+      return res.status(400).json({ error: "Unknown payment reference" });
+    }
+    const paidKobo     = Number(verification.data.data.amount) || 0;
+    const paidCurrency = verification.data.data.currency;
+    const expectedKobo = Math.round(existingPayment.amount * 100);
+    if (paidCurrency !== "NGN" || paidKobo < expectedKobo) {
+      await Payment.findOneAndUpdate({ transactionRef: reference }, { status: "failed" });
+      console.error(
+        `verifyPayment: amount mismatch for ${reference} — expected ${expectedKobo} kobo NGN, got ${paidKobo} ${paidCurrency}`
+      );
+      return res.status(400).json({
+        error: "Payment amount mismatch. Contact support if you were charged.",
+      });
+    }
+
     const metadata = verification.data.data.metadata;
     const {
       stationId, planSlug, planId, planName,
@@ -298,6 +325,25 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
     } = metadata;
 
     if (isGuest === true) {
+      // Replay guard: guest Payment records are created with a placeholder
+      // station id. Once the upgrade is applied (here) or the reference is
+      // consumed by registration, fillingStation points at a real station —
+      // re-verifying then must NOT re-apply (it would extend the plan from
+      // "now" on every call, i.e. free perpetual renewal).
+      const GUEST_PLACEHOLDER = "000000000000000000000000";
+      if (String(existingPayment.fillingStation) !== GUEST_PLACEHOLDER) {
+        return res.status(200).json({
+          message: "Payment already verified",
+          data: {
+            isGuest: true,
+            alreadyProcessed: true,
+            plan: existingPayment.planName,
+            billingCycle: existingPayment.billingCycle,
+            amount: existingPayment.amount,
+          },
+        });
+      }
+
       await Payment.findOneAndUpdate(
         { transactionRef: reference },
         { status: "success", paidAt: new Date() }
@@ -320,26 +366,34 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
           expiryDate.setMonth(expiryDate.getMonth() + 1);
         }
 
-        const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
+        const planFields = {
+          plan: planSlug,
+          planId: plan?._id,
+          planStatus: "active",
+          planStartDate: now,
+          planExpiryDate: expiryDate,
+          staffLimits: buildStaffLimits(plan),
+          // A paid plan change supersedes any scheduled downgrade
+          pendingDowngrade: false,
+          pendingDowngradeTo: "",
+          downgradeAt: null,
+        };
 
         const station = await FillingStation.findByIdAndUpdate(
           existingManager.station,
-          {
-            plan: planSlug,
-            planId: plan?._id,
-            planStatus: "active",
-            planStartDate: now,
-            planExpiryDate: expiryDate,
-            staffLimits: {
-              attendants: mapLimit(plan?.staffLimits?.attendants),
-              cashiers: mapLimit(plan?.staffLimits?.cashiers),
-              accountants: mapLimit(plan?.staffLimits?.accountants),
-              supervisors: mapLimit(plan?.staffLimits?.supervisors),
-              managers: mapLimit(plan?.staffLimits?.managers),
-            },
-          },
+          planFields,
           { new: true }
         ).select("name").lean();
+
+        // Branches run on the parent's subscription — keep them in sync
+        await syncPlanToBranches(existingManager.station, planFields);
+
+        // Link the payment to the station — this is also the replay marker
+        // checked above, so this upgrade can never be applied twice.
+        await Payment.findOneAndUpdate(
+          { transactionRef: reference },
+          { fillingStation: existingManager.station, stationName: (station as any)?.name || "Unknown" }
+        );
 
         await deleteCachePattern(`dashboard:*:${existingManager.station}`);
 
@@ -392,22 +446,23 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
       expiryDate.setMonth(expiryDate.getMonth() + 1);
     }
 
-    const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
-
-    await FillingStation.findByIdAndUpdate(stationId, {
+    const planFields = {
       plan: planSlug,
       planId,
       planStatus: "active",
       planStartDate: now,
       planExpiryDate: expiryDate,
-      staffLimits: {
-        attendants: mapLimit(plan?.staffLimits?.attendants),
-        cashiers: mapLimit(plan?.staffLimits?.cashiers),
-        accountants: mapLimit(plan?.staffLimits?.accountants),
-        supervisors: mapLimit(plan?.staffLimits?.supervisors),
-        managers: mapLimit(plan?.staffLimits?.managers),
-      },
-    });
+      staffLimits: buildStaffLimits(plan),
+      // A paid plan change supersedes any scheduled downgrade
+      pendingDowngrade: false,
+      pendingDowngradeTo: "",
+      downgradeAt: null,
+    };
+
+    await FillingStation.findByIdAndUpdate(stationId, planFields);
+
+    // Branches run on the parent's subscription — keep them in sync
+    await syncPlanToBranches(stationId, planFields);
 
     await Payment.findOneAndUpdate(
       { transactionRef: reference },
@@ -441,11 +496,18 @@ export const paystackWebhook = async (req: any, res: Response) => {
   res.status(200).json({ received: true });
 
   try {
+    // An unset secret would mean HMAC-with-empty-key — trivially forgeable.
+    // Never process webhooks without a real key to verify against.
+    if (!process.env.PAYSTACK_SECRET_KEY) {
+      console.error("❌ PAYSTACK_SECRET_KEY not set — webhook rejected");
+      return;
+    }
+
     // Use the raw Buffer preserved in app.ts — re-stringifying a parsed object is not safe
     // because JSON.stringify can change whitespace/key order vs. what Paystack actually signed.
     const bodyForHmac: Buffer | string = req.rawBody ?? JSON.stringify(req.body);
     const hash = crypto
-      .createHmac("sha512", process.env.PAYSTACK_SECRET_KEY || "")
+      .createHmac("sha512", process.env.PAYSTACK_SECRET_KEY)
       .update(bodyForHmac)
       .digest("hex");
 
@@ -465,6 +527,39 @@ export const paystackWebhook = async (req: any, res: Response) => {
       const existingPayment = await Payment.findOne({ transactionRef: reference });
       if (existingPayment?.status === "success") {
         console.log("[webhook] Already processed:", reference);
+        return;
+      }
+
+      // Only honor references this server initialized. The HMAC proves the
+      // event came from Paystack, NOT that the transaction is one of ours —
+      // anyone can create a transaction against this Paystack account with
+      // the public key and forged metadata.
+      if (!existingPayment) {
+        console.error("[webhook] Unknown reference — ignored:", reference);
+        return;
+      }
+
+      // The paid amount must cover what we quoted at initialization, in NGN.
+      const paidKobo = Number(amount) || 0;
+      const currency = event.data.currency;
+      const expectedKobo = Math.round(existingPayment.amount * 100);
+      if ((currency && currency !== "NGN") || paidKobo < expectedKobo) {
+        await Payment.findOneAndUpdate({ transactionRef: reference }, { status: "failed" });
+        console.error(
+          `[webhook] Amount mismatch for ${reference} — expected ${expectedKobo} kobo NGN, got ${paidKobo} ${currency}`
+        );
+        return;
+      }
+
+      // Atomic claim BEFORE applying — prevents double-processing when this
+      // webhook races the frontend verify endpoints (plan re-applied or SMS
+      // credits incremented twice).
+      const claimedPayment = await Payment.findOneAndUpdate(
+        { transactionRef: reference, status: { $ne: "success" } },
+        { status: "success", paidAt: new Date(), amount: paidKobo / 100 }
+      );
+      if (!claimedPayment) {
+        console.log("[webhook] Already processed (race):", reference);
         return;
       }
 
@@ -491,31 +586,27 @@ export const paystackWebhook = async (req: any, res: Response) => {
           console.log(`[webhook] SMS credits +${meta.credits} for station ${stationId}`);
         } else {
           // Subscription plan upgrade
-          const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
-          await FillingStation.findByIdAndUpdate(stationId, {
+          const planFields = {
             plan: planSlug,
             planId,
             planStatus: "active",
             planStartDate: now,
             planExpiryDate: expiryDate,
-            staffLimits: {
-              attendants:  mapLimit(plan?.staffLimits?.attendants),
-              cashiers:    mapLimit(plan?.staffLimits?.cashiers),
-              accountants: mapLimit(plan?.staffLimits?.accountants),
-              supervisors: mapLimit(plan?.staffLimits?.supervisors),
-              managers:    mapLimit(plan?.staffLimits?.managers),
-            },
-          });
+            staffLimits: buildStaffLimits(plan),
+            // A paid plan change supersedes any scheduled downgrade
+            pendingDowngrade: false,
+            pendingDowngradeTo: "",
+            downgradeAt: null,
+          };
+          await FillingStation.findByIdAndUpdate(stationId, planFields);
+          // Branches run on the parent's subscription — keep them in sync
+          await syncPlanToBranches(stationId, planFields);
           await deleteCachePattern(`dashboard:*:${stationId}`);
           console.log("[webhook] Station " + stationId + " upgraded to " + planSlug);
         }
       }
 
-      await Payment.findOneAndUpdate(
-        { transactionRef: reference },
-        { status: "success", paidAt: now, amount: amount / 100 },
-        { upsert: false }
-      );
+      // Payment already marked success by the atomic claim above.
 
       const station = stationId
         ? await FillingStation.findById(stationId).select("name").lean()
@@ -624,6 +715,24 @@ export const verifySmsCreditsPayment = async (req: AuthenticatedRequest, res: Re
       return res.status(400).json({ error: "Payment not completed" });
     }
 
+    // Integrity gate: the reference must be one this server initialized, and
+    // the amount Paystack confirms must cover the credits being activated.
+    if (!existing) {
+      return res.status(400).json({ error: "Unknown payment reference" });
+    }
+    {
+      const paidKobo     = Number(verification.data.data.amount) || 0;
+      const paidCurrency = verification.data.data.currency;
+      const expectedKobo = Math.round(existing.amount * 100);
+      if (paidCurrency !== "NGN" || paidKobo < expectedKobo) {
+        await Payment.findOneAndUpdate({ transactionRef: reference }, { status: "failed" });
+        console.error(
+          `verifySmsCreditsPayment: amount mismatch for ${reference} — expected ${expectedKobo} kobo NGN, got ${paidKobo} ${paidCurrency}`
+        );
+        return res.status(400).json({ error: "Payment amount mismatch. Contact support if you were charged." });
+      }
+    }
+
     const rawMeta = verification.data.data.metadata;
     const meta    = typeof rawMeta === "string" ? JSON.parse(rawMeta) : rawMeta;
 
@@ -631,16 +740,29 @@ export const verifySmsCreditsPayment = async (req: AuthenticatedRequest, res: Re
       return res.status(400).json({ error: "Invalid payment reference" });
     }
 
+    // Atomic claim BEFORE applying — if the webhook processed this reference
+    // between our early check and here, we must not $inc the credits twice.
+    const claimed = await Payment.findOneAndUpdate(
+      { transactionRef: reference, status: { $ne: "success" } },
+      { status: "success", paidAt: new Date() }
+    );
+    if (!claimed) {
+      const station = await FillingStation.findById(stationId)
+        .select("smsCreditBalance smsLoyaltyEnabled").lean();
+      return res.status(200).json({
+        message: "Already activated",
+        data: {
+          smsCreditBalance:  (station as any)?.smsCreditBalance  ?? 0,
+          smsLoyaltyEnabled: (station as any)?.smsLoyaltyEnabled ?? false,
+        },
+      });
+    }
+
     // Apply credits
     await FillingStation.findByIdAndUpdate(stationId, {
       $inc: { smsCreditBalance: Number(meta.credits) },
       smsLoyaltyEnabled: true,
     });
-
-    await Payment.findOneAndUpdate(
-      { transactionRef: reference },
-      { status: "success", paidAt: new Date() }
-    );
 
     const station = await FillingStation.findById(stationId)
       .select("smsCreditBalance smsLoyaltyEnabled").lean();
@@ -754,29 +876,22 @@ export const checkDowngrade = async (req: AuthenticatedRequest, res: Response) =
     if (!station) return res.status(404).json({ error: "Station not found" });
     if (!targetPlan) return res.status(404).json({ error: "Target plan not found" });
 
-    // Count active staff by role
-    const staffCounts = await Staff.aggregate([
-      { $match: { station: new Types.ObjectId(String(stationId)), isActive: true } },
-      { $group: { _id: "$role", count: { $sum: 1 } } },
-    ]);
-    const byRole: Record<string, number> = {};
-    staffCounts.forEach((s: any) => { byRole[s._id] = s.count; });
+    const conflicts = await computeDowngradeConflicts(
+      String(stationId),
+      (targetPlan as any).staffLimits
+    );
 
-    const conflicts: { role: string; limitKey: string; current: number; allowed: number; excess: number }[] = [];
-    const limits = (targetPlan as any).staffLimits || {};
-
-    for (const [role, limitKey] of Object.entries(ROLE_LIMIT_MAP)) {
-      const allowed  = limitKey === "managers" ? 999999 : (limits[limitKey] ?? 999999);
-      const current  = byRole[role] || 0;
-      if (allowed !== 999999 && current > allowed) {
-        conflicts.push({ role, limitKey, current, allowed, excess: current - allowed });
-      }
-    }
+    // Mirror the rules scheduleDowngrade enforces, so the wizard can explain upfront
+    const expiry = (station as any).planExpiryDate;
+    const hasActiveBillingPeriod = !!expiry && new Date(expiry) > new Date();
+    const isBranch = !!(station as any).parentStation;
 
     return res.status(200).json({
       data: {
-        canDowngrade:  conflicts.length === 0,
+        canDowngrade: conflicts.length === 0 && hasActiveBillingPeriod && !isBranch,
         conflicts,
+        hasActiveBillingPeriod,
+        isBranch,
         targetPlan: {
           slug:         (targetPlan as any).slug,
           name:         (targetPlan as any).name,
@@ -806,15 +921,78 @@ export const scheduleDowngrade = async (req: AuthenticatedRequest, res: Response
     if (!station) return res.status(404).json({ error: "Station not found" });
     if (!plan)    return res.status(404).json({ error: "Target plan not found" });
 
-    await FillingStation.findByIdAndUpdate(stationId, {
-      pendingDowngrade:   true,
-      pendingDowngradeTo: targetPlan,
-      downgradeAt:        (station as any).planExpiryDate || null,
-    });
+    // Branches run on the parent station's subscription — plan changes happen there
+    if ((station as any).parentStation) {
+      return res.status(400).json({
+        error: "Branch stations inherit the parent station's plan. Manage the subscription from the parent station.",
+      });
+    }
+
+    if ((station as any).plan === targetPlan) {
+      return res.status(400).json({ error: "You are already on this plan" });
+    }
+
+    // Must be a genuine downgrade. Upgrades go through the payment flow —
+    // otherwise this endpoint would hand out plan upgrades without payment.
+    const currentPlanDoc = await SubscriptionPlan.findOne({ slug: (station as any).plan })
+      .select("monthlyPrice")
+      .lean();
+    const currentPrice = (currentPlanDoc as any)?.monthlyPrice ?? 0;
+    if (((plan as any).monthlyPrice ?? 0) >= currentPrice) {
+      return res.status(400).json({
+        error: "Target plan is not a downgrade. To move to a higher plan, use the upgrade/payment flow.",
+      });
+    }
+
+    // Needs a live billing period to schedule against — otherwise there is no
+    // valid future fire date (and an expired station should renew, not downgrade).
+    const expiry = (station as any).planExpiryDate;
+    if (!expiry || new Date(expiry) <= new Date()) {
+      return res.status(400).json({
+        error: "No active billing period. Renew your plan, or simply subscribe to the plan you want.",
+      });
+    }
+
+    // Enforce staff limits server-side — the client wizard's check is advisory only
+    const conflicts = await computeDowngradeConflicts(
+      String(stationId),
+      (plan as any).staffLimits
+    );
+    if (conflicts.length > 0) {
+      return res.status(409).json({
+        error: "Your current staff exceeds the target plan's limits. Remove the excess staff first.",
+        conflicts,
+      });
+    }
+
+    // Atomic write: downgradeAt is anchored to planExpiryDate at write time via an
+    // update pipeline, so a renewal landing between our read and this write can't
+    // freeze a stale date. The filter re-asserts the billing period is still live.
+    const updated = await FillingStation.findOneAndUpdate(
+      { _id: stationId, planExpiryDate: { $ne: null, $gt: new Date() } },
+      [
+        {
+          $set: {
+            pendingDowngrade:   true,
+            pendingDowngradeTo: targetPlan,
+            downgradeAt:        "$planExpiryDate",
+          },
+        },
+      ],
+      { new: true }
+    ).select("name plan downgradeAt").lean();
+
+    if (!updated) {
+      return res.status(409).json({
+        error: "Your billing period changed while scheduling. Please try again.",
+      });
+    }
+
+    const effectiveDate = (updated as any).downgradeAt as Date;
 
     AdminLog.create({
       eventType:    "subscription_payment",
-      description:  `Downgrade scheduled: ${(station as any).plan} → ${targetPlan}, effective ${(station as any).planExpiryDate}`,
+      description:  `Downgrade scheduled: ${(station as any).plan} → ${targetPlan}, effective ${effectiveDate}`,
       stationOrUser: (station as any).name || String(stationId),
       status:       "success",
     }).catch(console.error);
@@ -823,7 +1001,7 @@ export const scheduleDowngrade = async (req: AuthenticatedRequest, res: Response
       type:        "message",
       category:    "system_update",
       title:       "Downgrade Scheduled",
-      body:        `Your plan will change to ${(plan as any).name} on ${new Date((station as any).planExpiryDate).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" })}.`,
+      body:        `Your plan will change to ${(plan as any).name} on ${new Date(effectiveDate).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" })}.`,
       severity:    "info",
       targetRole:  "manager",
       expiresInDays: 30,
@@ -833,7 +1011,7 @@ export const scheduleDowngrade = async (req: AuthenticatedRequest, res: Response
       message:  "Downgrade scheduled successfully",
       data: {
         pendingDowngradeTo: targetPlan,
-        downgradeAt:        (station as any).planExpiryDate,
+        downgradeAt:        effectiveDate,
       },
     });
   } catch (err: any) {
@@ -845,12 +1023,20 @@ export const scheduleDowngrade = async (req: AuthenticatedRequest, res: Response
 export const cancelDowngrade = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
-    await FillingStation.findByIdAndUpdate(stationId, {
-      pendingDowngrade:   false,
-      pendingDowngradeTo: "",
-      downgradeAt:        null,
+    // Conditional update: a no-op if the downgrade was already applied or never
+    // scheduled, so cancel can never resurrect or mask an applied plan change.
+    const cancelled = await FillingStation.findOneAndUpdate(
+      { _id: stationId, pendingDowngrade: true },
+      {
+        pendingDowngrade:   false,
+        pendingDowngradeTo: "",
+        downgradeAt:        null,
+      }
+    ).lean();
+    return res.status(200).json({
+      message: cancelled ? "Pending downgrade cancelled" : "No pending downgrade to cancel",
+      data: { cancelled: !!cancelled },
     });
-    return res.status(200).json({ message: "Pending downgrade cancelled" });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
