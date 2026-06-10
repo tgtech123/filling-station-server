@@ -1,5 +1,6 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
+import { checkRole } from "../middlewares/checkRole";
 import {
   initializePayment,
   initializeGuestPayment,
@@ -23,15 +24,17 @@ router.post("/webhook", paystackWebhook);
 router.post("/initialize-guest", initializeGuestPayment);
 
 // Protected routes
-router.post("/initialize", requireAuth, initializePayment);
-router.post("/sms-credits/initialize", requireAuth, initializeSmsCreditsPayment);
-router.get("/sms-credits/verify/:reference", requireAuth, verifySmsCreditsPayment);
+// Plan changes (upgrade payments and downgrades) are strictly manager-only —
+// attendants/cashiers must never be able to alter the station's subscription.
+router.post("/initialize", requireAuth, checkRole("manager"), initializePayment);
+router.post("/sms-credits/initialize", requireAuth, checkRole("manager"), initializeSmsCreditsPayment);
+router.get("/sms-credits/verify/:reference", requireAuth, checkRole("manager"), verifySmsCreditsPayment);
 // Public endpoint — reference proves payment
 router.get("/verify/:reference", verifyPayment);
 router.get("/current-plan",        requireAuth, getCurrentPlan);
-router.get("/history",             requireAuth, getPaymentHistory);
-router.get("/downgrade/check",     requireAuth, checkDowngrade);
-router.post("/downgrade/schedule", requireAuth, scheduleDowngrade);
-router.post("/downgrade/cancel",   requireAuth, cancelDowngrade);
+router.get("/history",             requireAuth, checkRole("manager"), getPaymentHistory);
+router.get("/downgrade/check",     requireAuth, checkRole("manager"), checkDowngrade);
+router.post("/downgrade/schedule", requireAuth, checkRole("manager"), scheduleDowngrade);
+router.post("/downgrade/cancel",   requireAuth, checkRole("manager"), cancelDowngrade);
 
 export default router;
