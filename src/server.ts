@@ -1,10 +1,10 @@
-import dotenv from "dotenv";
+// Must be the FIRST import — modules loaded below (controllers, config/redis)
+// read process.env at module-load time, before any code in this file runs.
+import "dotenv/config";
 import http from "http";
 import { connectDB } from "./config/db";
 import app from "./app";
 import { initSocket } from "./services/socket.service";
-
-dotenv.config();
 
 // Fail fast on missing critical env — a server that boots without these would
 // 500 on every login (JWT) or refuse every DB operation, which is worse than

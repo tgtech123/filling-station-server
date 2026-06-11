@@ -321,8 +321,11 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
     const metadata = verification.data.data.metadata;
     const {
       stationId, planSlug, planId, planName,
-      billingCycle, amountNaira, isGuest, guestName, guestEmail,
+      billingCycle, isGuest, guestName, guestEmail,
     } = metadata;
+    // Initialization stores baseAmount/totalAmount in metadata (never "amountNaira").
+    // totalAmount (base + tax) is what the customer was actually charged.
+    const chargedAmount = metadata.totalAmount ?? existingPayment.amount;
 
     if (isGuest === true) {
       // Replay guard: guest Payment records are created with a placeholder
@@ -412,7 +415,7 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
             planSlug,
             planName,
             billingCycle,
-            amount: amountNaira,
+            amount: chargedAmount,
             reference,
             guestEmail,
             guestName,
@@ -428,7 +431,7 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
           planSlug,
           planName,
           billingCycle,
-          amount: amountNaira,
+          amount: chargedAmount,
           reference,
           guestEmail,
           guestName,
@@ -482,7 +485,7 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
 
     return res.status(200).json({
       message: "Payment successful! Plan upgraded.",
-      data: { plan: planSlug, planName, billingCycle, expiryDate, amount: amountNaira },
+      data: { plan: planSlug, planName, billingCycle, expiryDate, amount: chargedAmount },
     });
   } catch (err: any) {
     console.error("verifyPayment:", err.message);

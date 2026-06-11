@@ -3,14 +3,28 @@ import mongoose, { Document, Schema, Types } from "mongoose";
 export type AssetCategory = "Land & Building" | "Fuel Dispenser" | "Other Equipment";
 export type DepreciationMethod = "Straight-line" | "Declining Balance";
 
+export type AssetStatus = "active" | "fully_depreciated" | "disposed";
+
 export interface IFixedAsset extends Document {
   fillingStation: Types.ObjectId;
   name: string;
   category: AssetCategory;
   purchaseDate: Date;
   purchasePrice: number;
+  salvageValue: number;
   usefulLifeYears: number;
   depreciationMethod: DepreciationMethod;
+  status: AssetStatus;
+  // Months already posted to the GL via DepreciationRun — keeps the register
+  // and the ledger in agreement even if runs are skipped or backfilled.
+  depreciationPostedThrough?: string | null;  // "YYYY-MM" of the last posted run
+  disposal?: {
+    date: Date;
+    proceeds: number;
+    gainLoss: number;          // proceeds − net book value at disposal
+    journalEntry?: Types.ObjectId | null;
+    notes?: string;
+  } | null;
   notes?: string;
   createdBy: Types.ObjectId;
   createdAt: Date;
@@ -28,7 +42,24 @@ const FixedAssetSchema = new Schema<IFixedAsset>(
     },
     purchaseDate: { type: Date, required: true },
     purchasePrice: { type: Number, required: true, min: 0 },
+    salvageValue: { type: Number, default: 0, min: 0 },
     usefulLifeYears: { type: Number, required: true, min: 1 },
+    status: {
+      type: String,
+      enum: ["active", "fully_depreciated", "disposed"],
+      default: "active",
+    },
+    depreciationPostedThrough: { type: String, default: null },
+    disposal: {
+      type: {
+        date: { type: Date, required: true },
+        proceeds: { type: Number, required: true, min: 0 },
+        gainLoss: { type: Number, required: true },
+        journalEntry: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
+        notes: { type: String, trim: true },
+      },
+      default: null,
+    },
     depreciationMethod: {
       type: String,
       required: true,
