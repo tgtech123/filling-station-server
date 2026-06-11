@@ -107,6 +107,9 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
         }).catch((err) => console.error("Notification error (reconciliation flagged - attendant):", err));
       }
 
+      emitToStation(String(fillingStation), "reconciliation:done", {});
+      emitToStation(String(fillingStation), "dashboard:refresh", { reason: "reconciliation" });
+
       return res.status(200).json({
         message: "Cash reconciliation updated successfully",
         data: {
@@ -187,6 +190,9 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
         }).catch((err) => console.error("Notification error (reconciliation flagged - attendant):", err));
       }
 
+      emitToStation(String(fillingStation), "reconciliation:done", {});
+      emitToStation(String(fillingStation), "dashboard:refresh", { reason: "reconciliation" });
+
       return res.status(201).json({
         message: "Cash reconciled successfully",
         data: {
@@ -208,13 +214,6 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           updatedAt: reconciliation.updatedAt,
         },
       });
-
-      const rawStationId = req.user?.station;
-      if (rawStationId !== undefined) {
-        const sid = String(rawStationId);
-        emitToStation(sid, "reconciliation:done", {});
-        emitToStation(sid, "dashboard:refresh", { reason: "reconciliation" });
-      }
     }
   } catch (err: any) {
     console.error("Error in reconcileCash:", err);

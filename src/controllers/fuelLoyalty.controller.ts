@@ -630,7 +630,9 @@ export const getSmsCreditsStatus = async (req: AuthenticatedRequest, res: Respon
 
 // ─── Public Portal ────────────────────────────────────────────────────────────
 
-const PORTAL_JWT_SECRET = process.env.JWT_SECRET + "_portal";
+// Read lazily — a module-load-time read could run before dotenv loads .env,
+// silently producing the predictable secret "undefined_portal".
+const getPortalJwtSecret = () => process.env.JWT_SECRET + "_portal";
 
 export const portalLookup = async (req: any, res: Response) => {
   try {
@@ -730,7 +732,7 @@ export const portalLogin = async (req: any, res: Response) => {
 
     const token = jwt.sign(
       { customerId: customer._id.toString(), stationId: String((station as any)._id) },
-      PORTAL_JWT_SECRET,
+      getPortalJwtSecret(),
       { expiresIn: "7d" }
     );
 
@@ -744,7 +746,7 @@ const requirePortalAuth = (req: any, res: Response, next: any) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ message: "Unauthorized" });
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], PORTAL_JWT_SECRET) as any;
+    const decoded = jwt.verify(authHeader.split(" ")[1], getPortalJwtSecret()) as any;
     req.portalUser = decoded;
     next();
   } catch {

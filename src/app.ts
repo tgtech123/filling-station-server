@@ -2,7 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 import authRoutes from "./routes/auth.route";
 import fillinStation from "./routes/fillinStation.route";
@@ -41,6 +41,8 @@ import gasRoutes from "./routes/gas.route";
 import gasPublicRoutes from "./routes/gasPublic.route";
 import supplierRoutes from "./routes/supplier.route";
 import fuelLoyaltyRoutes from "./routes/fuelLoyalty.route";
+import reportRoutes from "./routes/report.route";
+import accountingRoutes from "./routes/accounting.route";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -147,7 +149,9 @@ const generalLimiter = rateLimit({
     req.headers.authorization?.startsWith("Bearer ") ? 300 : 100,
   keyGenerator: (req: any) => {
     const auth = req.headers.authorization as string | undefined;
-    return auth?.startsWith("Bearer ") ? auth : (req.ip ?? req.socket?.remoteAddress ?? "unknown");
+    // ipKeyGenerator collapses IPv6 to its /64 subnet — raw req.ip would let
+    // IPv6 users rotate addresses within their subnet to bypass the limit.
+    return auth?.startsWith("Bearer ") ? auth : ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? "unknown");
   },
   message: { error: "Too many requests. Please try again later.", retryAfter: "15 minutes" },
   standardHeaders: true,
@@ -161,7 +165,7 @@ const generalLimiter = rateLimit({
 const activityLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 240,
-  keyGenerator: (req) => (req.headers.authorization as string | undefined) || req.ip || req.socket?.remoteAddress || "unknown",
+  keyGenerator: (req) => (req.headers.authorization as string | undefined) || ipKeyGenerator(req.ip || req.socket?.remoteAddress || "unknown"),
   message: { error: "Too many activity requests. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -172,7 +176,7 @@ const activityLimiter = rateLimit({
 const dashboardLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
-  keyGenerator: (req) => (req.headers.authorization as string | undefined) || req.ip || req.socket?.remoteAddress || "unknown",
+  keyGenerator: (req) => (req.headers.authorization as string | undefined) || ipKeyGenerator(req.ip || req.socket?.remoteAddress || "unknown"),
   message: { error: "Too many dashboard requests. Please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -265,6 +269,8 @@ app.use("/api/gas", gasRoutes);
 app.use("/api/gas-public", gasPublicRoutes);
 app.use("/api/suppliers", supplierRoutes);
 app.use("/api/fuel-loyalty", fuelLoyaltyRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/accounting", accountingRoutes);
 
 // ── Health check 
 app.get("/api/health", (_, res) => {

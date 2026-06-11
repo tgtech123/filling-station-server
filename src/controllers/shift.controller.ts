@@ -455,7 +455,7 @@ export const getShifts = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     if (status) {
-      const validStatuses = ["Active", "Completed", "Cancelled"];
+      const validStatuses = ["Scheduled", "Active", "Completed", "Cancelled"];
       if (validStatuses.includes(status as string)) {
         matchFilter.status = status;
       }

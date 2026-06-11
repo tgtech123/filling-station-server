@@ -61,7 +61,9 @@ router.patch("/cylinder-sizes/:id",   mgr,     toggleCylinderSize);
 router.get("/settings",          mgr,    getGasSettings);
 router.patch("/settings",        mgr,    updateGasSettings);
 router.get("/loyalty-config",   allGas, getLoyaltyConfig);
-router.get("/inventory",        allGas, getInventory);
+// Physical stock is operational, not financial — accountants see gas revenue,
+// procurement and reconciliation instead of the inventory screen.
+router.get("/inventory",        checkRole("manager", "admin", "cashier", "attendant"), getInventory);
 
 // ─── Tanks ──────────────────────────────────────────────────────────────────
 router.get("/tanks",         allGas, listTanks);

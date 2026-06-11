@@ -16,7 +16,18 @@
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\DELL\\\\Desktop\\\\filling-station-client\\\\src\\\\app\" -Recurse -Directory -Filter \"*contact*\" -ErrorAction SilentlyContinue)",
       "Bash(powershell -File -)",
       "PowerShell(npx tsc --noEmit)",
-      "PowerShell(npm uninstall *)"
+      "PowerShell(npm uninstall *)",
+      "Bash(git -C /c/Users/TGTECH/Desktop/filling-station-server diff --stat)",
+      "Bash(git -C /c/Users/TGTECH/Desktop/filling-station-server status --short)",
+      "PowerShell(Get-ChildItem -Recurse src -File | ForEach-Object { $_.FullName.Replace\\(\"$PWD\\\\\", ''\\) })",
+      "PowerShell(npx tsc --noEmit 2>$null; \"EXIT: $LASTEXITCODE\")",
+      "PowerShell(\\(Get-Content src\\\\controllers\\\\fuelLoyalty.controller.ts | Measure-Object -Line\\).Lines; \\(Get-Content src\\\\controllers\\\\shift.controller.ts | Measure-Object -Line\\).Lines; \\(Get-Content src\\\\controllers\\\\payment.controller.ts | Measure-Object -Line\\).Lines; \\(Get-Content src\\\\controllers\\\\reconciliation.controller.ts | Measure-Object -Line\\).Lines; \\(Get-Content src\\\\services\\\\planLifecycle.service.ts | Measure-Object -Line\\).Lines; \\(Get-Content src\\\\services\\\\socket.service.ts | Measure-Object -Line\\).Lines)",
+      "PowerShell(Set-Content *)",
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\TGTECH\\\\Desktop\\\\filling-station-client\\\\src\\\\app\\\\dashboard\\\\accountant\" -Recurse -File | ForEach-Object { $_.FullName.Replace\\('C:\\\\Users\\\\TGTECH\\\\Desktop\\\\filling-station-client\\\\src\\\\app\\\\dashboard\\\\', ''\\) })",
+      "PowerShell(npx tsc --noEmit; \"EXIT: $LASTEXITCODE\")",
+      "PowerShell(npm run *)",
+      "PowerShell($env:PORT='5057'; node dist/server.js)",
+      "PowerShell(node scripts\\\\smoke-accounting.js)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",
