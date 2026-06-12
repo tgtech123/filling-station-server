@@ -41,10 +41,12 @@ import {
 const router = express.Router();
 router.use(requireAuth);
 
-// The accounting suite is the accountant's workspace; managers/admin retain oversight.
-const acct = checkRole("accountant", "manager", "admin");
-// Structural changes (period close, CoA import, tax config) need seniority
-const acctSenior = checkRole("accountant", "manager", "admin");
+// The accounting suite belongs to the accountant. Managers get the executive
+// overview ONLY (see /reports/dashboard below) — every working endpoint is
+// accountant-exclusive by product decision.
+const acct = checkRole("accountant");
+const acctSenior = checkRole("accountant");
+const overview = checkRole("accountant", "manager", "admin");
 
 // ─── Chart of Accounts ────────────────────────────────────────────────────────
 router.get("/accounts",            acct,       listAccounts);
@@ -147,6 +149,7 @@ router.get("/reports/general-ledger",   acct, getGeneralLedger);
 router.get("/reports/cash-flow",        acct, getCashFlowStatement);
 router.get("/reports/aging",            acct, getAgingReport);
 router.get("/reports/budget-vs-actual", acct, getBudgetVsActual);
-router.get("/reports/dashboard",        acct, getExecutiveDashboard);
+// Managers may view the executive overview — read-only aggregate, no documents
+router.get("/reports/dashboard",        overview, getExecutiveDashboard);
 
 export default router;
