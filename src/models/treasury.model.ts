@@ -299,6 +299,154 @@ export const FxRevaluationRun: Model<IFxRevaluationRun> = mongoose.model<IFxReva
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Perpetual inventory valuation — weighted average cost (AVCO) per product.
+// Receipts (deliveries/procurements) move the average; issues (sales) consume
+// at the current average and become COGS. AVCO, not FIFO: fuel is commingled
+// in tanks, so cost layers have no physical meaning in petroleum retail.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface IStockValuation extends Document {
+  fillingStation: Types.ObjectId;
+  productKey: string;          // PMS | AGO | KEROSENE | LUBRICANT | GAS
+  unit: string;                // litres | units | kg
+  qtyOnHand: number;
+  avgUnitCost: number;
+  totalValue: number;          // qtyOnHand × avgUnitCost (kept denormalized)
+  lastMovementAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const StockValuationSchema = new Schema<IStockValuation>(
+  {
+    fillingStation: { type: Schema.Types.ObjectId, ref: "FillingStation", required: true },
+    productKey:  { type: String, required: true },
+    unit:        { type: String, required: true },
+    qtyOnHand:   { type: Number, default: 0 },
+    avgUnitCost: { type: Number, default: 0, min: 0 },
+    totalValue:  { type: Number, default: 0 },
+    lastMovementAt: { type: Date, default: null },
+  },
+  { timestamps: true }
+);
+
+StockValuationSchema.index({ fillingStation: 1, productKey: 1 }, { unique: true });
+
+export const StockValuation: Model<IStockValuation> = mongoose.model<IStockValuation>(
+  "StockValuation",
+  StockValuationSchema
+);
+
+// Every receipt/issue is journaled here — the audit trail of the costing engine.
+export interface IStockMovement extends Document {
+  fillingStation: Types.ObjectId;
+  productKey: string;
+  direction: "receipt" | "issue";
+  date: Date;
+  period: string;              // "YYYY-MM"
+  qty: number;                 // always positive; direction carries the sign
+  unitCost: number;            // receipt: purchase cost · issue: avg cost consumed
+  value: number;               // qty × unitCost
+  balanceQty: number;          // qty on hand AFTER this movement
+  balanceAvgCost: number;      // avg cost AFTER this movement
+  negativeStock: boolean;      // issue exceeded recorded receipts (cost basis estimated)
+  sourceModel: string;         // Delivery | LubricantProcurement | GasProcurement | SalesPostingRun
+  sourceId: Types.ObjectId;
+  sourceRef: string;
+  createdBy?: Types.ObjectId;
+  createdAt: Date;
+}
+
+const StockMovementSchema = new Schema<IStockMovement>(
+  {
+    fillingStation: { type: Schema.Types.ObjectId, ref: "FillingStation", required: true },
+    productKey: { type: String, required: true },
+    direction:  { type: String, enum: ["receipt", "issue"], required: true },
+    date:       { type: Date, required: true },
+    period:     { type: String, required: true },
+    qty:        { type: Number, required: true, min: 0 },
+    unitCost:   { type: Number, required: true, min: 0 },
+    value:      { type: Number, required: true, min: 0 },
+    balanceQty:     { type: Number, required: true },
+    balanceAvgCost: { type: Number, required: true, min: 0 },
+    negativeStock:  { type: Boolean, default: false },
+    sourceModel: { type: String, required: true },
+    sourceId:    { type: Schema.Types.ObjectId, required: true },
+    sourceRef:   { type: String, required: true },
+    createdBy:   { type: Schema.Types.ObjectId, ref: "Staff" },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } }
+);
+
+// A source document is costed exactly once per product — re-running a period
+// can never double-count a delivery or procurement.
+StockMovementSchema.index(
+  { fillingStation: 1, sourceModel: 1, sourceId: 1, productKey: 1 },
+  { unique: true }
+);
+StockMovementSchema.index({ fillingStation: 1, productKey: 1, date: -1 });
+
+export const StockMovement: Model<IStockMovement> = mongoose.model<IStockMovement>(
+  "StockMovement",
+  StockMovementSchema
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sales posting runs — books a month's operational sales (fuel shifts,
+// lubricant POS, gas POS) into the GL, split per product. One run per
+// station per month; Dr Cash, Cr each product's revenue account, and the
+// matching COGS leg (Dr product cost account, Cr Inventory) from AVCO.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ISalesPostingLine {
+  product: string;          // PMS, AGO, Kerosene, Lubricant, Gas…
+  source: "fuel" | "lubricant" | "gas";
+  amount: number;
+  accountCode: string;      // revenue account the amount was credited to
+  count: number;            // number of underlying sales/shifts
+}
+
+export interface ISalesPostingRun extends Document {
+  fillingStation: Types.ObjectId;
+  period: string;           // "YYYY-MM"
+  runDate: Date;
+  lines: ISalesPostingLine[];
+  totalAmount: number;
+  journalEntry?: Types.ObjectId | null;
+  createdBy: Types.ObjectId;
+  createdAt: Date;
+}
+
+const SalesPostingRunSchema = new Schema<ISalesPostingRun>(
+  {
+    fillingStation: { type: Schema.Types.ObjectId, ref: "FillingStation", required: true },
+    period:  { type: String, required: true },
+    runDate: { type: Date, required: true },
+    lines: [
+      {
+        product:     { type: String, required: true },
+        source:      { type: String, enum: ["fuel", "lubricant", "gas"], required: true },
+        amount:      { type: Number, required: true, min: 0 },
+        accountCode: { type: String, required: true },
+        count:       { type: Number, default: 0 },
+      },
+    ],
+    totalAmount:  { type: Number, required: true, min: 0 },
+    journalEntry: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
+    createdBy:    { type: Schema.Types.ObjectId, ref: "Staff", required: true },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } }
+);
+
+// One sales posting per station per month — re-running must be blocked
+SalesPostingRunSchema.index({ fillingStation: 1, period: 1 }, { unique: true });
+
+export const SalesPostingRun: Model<ISalesPostingRun> = mongoose.model<ISalesPostingRun>(
+  "SalesPostingRun",
+  SalesPostingRunSchema
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Depreciation runs — one per station per month, posts a single JE
 // (Dr Depreciation Expense, Cr Accumulated Depreciation)
 // ─────────────────────────────────────────────────────────────────────────────

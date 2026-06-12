@@ -10,12 +10,17 @@ import {
   FxRate,
   FxRevaluationRun,
   DepreciationRun,
+  SalesPostingRun,
 } from "../models/treasury.model";
 import { LedgerAccount, JournalEntry } from "../models/accounting.model";
 import FixedAsset, { calcNetBookValue } from "../models/fixedAsset.model";
+import Shift from "../models/shift.model";
+import LubricantSale from "../models/lubricant-sale.models";
+import GasSale from "../models/gasSale.model";
 import {
   postJournal,
   sysAccount,
+  productAccount,
   assertPeriodOpen,
   audit,
   periodOf,
@@ -481,20 +486,15 @@ export const deleteMatchRule = async (req: AuthenticatedRequest, res: Response) 
 // Tax Engine
 // ═════════════════════════════════════════════════════════════════════════════
 
-const DEFAULT_TAXES = [
-  { code: "VAT-STD", name: "VAT (Standard 7.5%)", kind: "VAT", rate: 7.5, isActive: true },
-  { code: "WHT-5", name: "Withholding Tax 5%", kind: "WHT", rate: 5, isActive: true },
-  { code: "WHT-10", name: "Withholding Tax 10%", kind: "WHT", rate: 10, isActive: true },
-];
-
 export const getTaxConfig = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
     if (!station) return noStation(res);
 
+    // No defaults are seeded — the accountant defines every tax code themselves
     let cfg = await TaxConfig.findOne({ fillingStation: station }).lean();
     if (!cfg) {
-      await TaxConfig.create({ fillingStation: station, taxes: DEFAULT_TAXES });
+      await TaxConfig.create({ fillingStation: station, taxes: [] });
       cfg = await TaxConfig.findOne({ fillingStation: station }).lean();
     }
     return res.status(200).json({ data: cfg });
@@ -856,6 +856,196 @@ export const listFxRevaluations = async (req: AuthenticatedRequest, res: Respons
     const docs = await FxRevaluationRun.find({ fillingStation: station })
       .sort({ period: -1 }).limit(24).lean();
     return res.status(200).json({ data: docs });
+  } catch (e: any) {
+    return err500(res, e);
+  }
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Sales → GL posting: books a month's operational sales into the ledger,
+// split per product (PMS / AGO / Kerosene / Lubricant / Gas), so revenue is
+// accounted for cleanly per product. Dr Cash, Cr each product's revenue
+// account. One idempotent run per month.
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const runSalesPosting = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const { period } = req.body;
+    if (!period || !/^\d{4}-\d{2}$/.test(period)) {
+      return res.status(400).json({ message: "period (YYYY-MM) is required" });
+    }
+
+    const existing = await SalesPostingRun.findOne({ fillingStation: station, period });
+    if (existing) return res.status(409).json({ message: `Sales already posted for ${period}` });
+
+    const [yr, mo] = period.split("-").map(Number);
+    const from = new Date(yr, mo - 1, 1);
+    const to = new Date(yr, mo, 0, 23, 59, 59, 999);
+    const stationId = new Types.ObjectId(String(station));
+
+    // Fuel — completed shifts grouped by pump product
+    const fuelAgg = await Shift.aggregate([
+      { $match: { fillingStation: stationId, status: "Completed", shiftDate: { $gte: from, $lte: to } } },
+      { $group: { _id: "$product", amount: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
+    ]);
+
+    // Lubricant POS — qty × unit price, the codebase's canonical revenue formula
+    const lubAgg = await LubricantSale.aggregate([
+      { $match: { fillingStation: stationId, createdAt: { $gte: from, $lte: to } } },
+      { $group: { _id: null, amount: { $sum: { $multiply: ["$qtySold", "$priceSold"] } }, count: { $sum: 1 } } },
+    ]);
+
+    // Gas POS — confirmed/dispensed sales only (voided and pending excluded)
+    const gasAgg = await GasSale.aggregate([
+      { $match: { fillingStation: stationId, status: { $in: ["confirmed", "dispensed"] }, createdAt: { $gte: from, $lte: to } } },
+      { $group: { _id: null, amount: { $sum: "$amountPaid" }, count: { $sum: 1 } } },
+    ]);
+
+    interface Bucket { product: string; source: "fuel" | "lubricant" | "gas"; amount: number; count: number }
+    const buckets: Bucket[] = [];
+    for (const f of fuelAgg) {
+      const amount = round2(f.amount || 0);
+      if (amount > 0) buckets.push({ product: f._id || "Fuel", source: "fuel", amount, count: f.count });
+    }
+    if (round2(lubAgg[0]?.amount || 0) > 0) {
+      buckets.push({ product: "Lubricant", source: "lubricant", amount: round2(lubAgg[0].amount), count: lubAgg[0].count });
+    }
+    if (round2(gasAgg[0]?.amount || 0) > 0) {
+      buckets.push({ product: "Gas", source: "gas", amount: round2(gasAgg[0].amount), count: gasAgg[0].count });
+    }
+
+    if (buckets.length === 0) {
+      return res.status(400).json({ message: `No sales found for ${period}` });
+    }
+
+    // Resolve each bucket to its product revenue account (specific → generic fallback)
+    const cashAcc = await sysAccount(station, SYS.CASH);
+    const jeLines: any[] = [];
+    const runLines: any[] = [];
+    let total = 0;
+
+    // Merge buckets that resolve to the same account (e.g. two fuel products
+    // both falling back to 4000) so the JE stays clean
+    const byAccount = new Map<string, { account: any; amount: number; products: string[] }>();
+    for (const b of buckets) {
+      const acc = await productAccount(station, b.product, "revenue");
+      const key = String(acc._id);
+      const entry = byAccount.get(key) || { account: acc, amount: 0, products: [] };
+      entry.amount = round2(entry.amount + b.amount);
+      entry.products.push(b.product);
+      byAccount.set(key, entry);
+      total = round2(total + b.amount);
+      runLines.push({ product: b.product, source: b.source, amount: b.amount, accountCode: acc.code, count: b.count });
+    }
+
+    jeLines.push({ account: cashAcc._id, debit: total, description: `Sales receipts — ${period}` });
+    for (const { account, amount, products } of byAccount.values()) {
+      jeLines.push({ account: account._id, credit: amount, description: `${products.join(", ")} sales — ${period}` });
+    }
+
+    const entry = await postJournal({
+      stationId: station,
+      userId: req.user!.id,
+      date: to, // month end
+      memo: `Product sales posting — ${period}`,
+      lines: jeLines,
+      source: "sales_posting",
+      sourceRef: `SALES-${period}`,
+    });
+
+    const run = await SalesPostingRun.create({
+      fillingStation: station,
+      period,
+      runDate: new Date(),
+      lines: runLines,
+      totalAmount: total,
+      journalEntry: entry._id as Types.ObjectId,
+      createdBy: req.user!.id,
+    });
+
+    audit({
+      stationId: station, userId: req.user!.id, action: "sales.posting",
+      entity: "SalesPostingRun", entityId: run._id as Types.ObjectId,
+      summary: `Sales posted for ${period}: ₦${total.toLocaleString()} across ${runLines.length} product line(s) (${entry.entryNumber})`,
+    });
+
+    return res.status(200).json({
+      message: `₦${total.toLocaleString()} of sales posted for ${period} across ${runLines.length} product line(s)`,
+      data: { run, journal: entry },
+    });
+  } catch (e: any) {
+    return res.status(400).json({ message: e.message });
+  }
+};
+
+export const listSalesPostings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+    const docs = await SalesPostingRun.find({ fillingStation: station })
+      .sort({ period: -1 }).limit(24).lean();
+    return res.status(200).json({ data: docs });
+  } catch (e: any) {
+    return err500(res, e);
+  }
+};
+
+/**
+ * Preview what a sales posting for a period would book, per product —
+ * lets the accountant verify amounts before committing the journal.
+ */
+export const previewSalesPosting = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const { period } = req.query as any;
+    if (!period || !/^\d{4}-\d{2}$/.test(period)) {
+      return res.status(400).json({ message: "period (YYYY-MM) is required" });
+    }
+
+    const [yr, mo] = String(period).split("-").map(Number);
+    const from = new Date(yr, mo - 1, 1);
+    const to = new Date(yr, mo, 0, 23, 59, 59, 999);
+    const stationId = new Types.ObjectId(String(station));
+
+    const [fuelAgg, lubAgg, gasAgg, alreadyPosted] = await Promise.all([
+      Shift.aggregate([
+        { $match: { fillingStation: stationId, status: "Completed", shiftDate: { $gte: from, $lte: to } } },
+        { $group: { _id: "$product", amount: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
+      ]),
+      LubricantSale.aggregate([
+        { $match: { fillingStation: stationId, createdAt: { $gte: from, $lte: to } } },
+        { $group: { _id: null, amount: { $sum: { $multiply: ["$qtySold", "$priceSold"] } }, count: { $sum: 1 } } },
+      ]),
+      GasSale.aggregate([
+        { $match: { fillingStation: stationId, status: { $in: ["confirmed", "dispensed"] }, createdAt: { $gte: from, $lte: to } } },
+        { $group: { _id: null, amount: { $sum: "$amountPaid" }, count: { $sum: 1 } } },
+      ]),
+      SalesPostingRun.findOne({ fillingStation: station, period }).lean(),
+    ]);
+
+    const lines: any[] = fuelAgg
+      .filter((f) => round2(f.amount || 0) > 0)
+      .map((f) => ({ product: f._id || "Fuel", source: "fuel", amount: round2(f.amount), count: f.count }));
+    if (round2(lubAgg[0]?.amount || 0) > 0) {
+      lines.push({ product: "Lubricant", source: "lubricant", amount: round2(lubAgg[0].amount), count: lubAgg[0].count });
+    }
+    if (round2(gasAgg[0]?.amount || 0) > 0) {
+      lines.push({ product: "Gas", source: "gas", amount: round2(gasAgg[0].amount), count: gasAgg[0].count });
+    }
+
+    return res.status(200).json({
+      data: {
+        period,
+        lines,
+        total: round2(lines.reduce((s, l) => s + l.amount, 0)),
+        alreadyPosted: !!alreadyPosted,
+      },
+    });
   } catch (e: any) {
     return err500(res, e);
   }

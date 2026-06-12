@@ -93,6 +93,7 @@ export const createAPInvoice = async (req: AuthenticatedRequest, res: Response) 
       invoiceNumber, supplierName, supplier, invoiceDate, dueDate,
       lines, taxCode, currency = "NGN", fxRate = 1,
       poType = "none", poId, tolerancePct = 1, notes,
+      expenseAccountCode,
     } = req.body;
 
     if (!invoiceNumber || !supplierName || !invoiceDate || !dueDate || !Array.isArray(lines) || lines.length === 0) {
@@ -160,6 +161,7 @@ export const createAPInvoice = async (req: AuthenticatedRequest, res: Response) 
       subtotal, taxCode: appliedTaxCode, taxAmount, whtAmount, total, totalBase,
       match, matchStatus,
       status: "draft",
+      expenseAccountCode: poType === "none" ? expenseAccountCode : undefined,
       notes,
       createdBy: req.user!.id,
     });
@@ -234,10 +236,14 @@ export const bookAPInvoice = async (req: AuthenticatedRequest, res: Response) =>
     await assertPeriodOpen(station, invoice.invoiceDate, "ap");
 
     const apAcc = await sysAccount(station, SYS.AP);
-    // PO-backed purchases are inventory; pure expense invoices hit Other Expenses
+    // PO-backed purchases are inventory; expense invoices debit the account
+    // chosen at registration (e.g. a product's cost account) or Other Expenses
     const debitAcc = invoice.match.poType !== "none"
       ? await sysAccount(station, SYS.INVENTORY)
-      : await sysAccount(station, req.body.expenseAccountCode || SYS.OTHER_EXPENSES);
+      : await sysAccount(
+          station,
+          req.body.expenseAccountCode || invoice.expenseAccountCode || SYS.OTHER_EXPENSES
+        );
 
     const lines: any[] = [
       {

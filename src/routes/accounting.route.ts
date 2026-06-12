@@ -3,7 +3,7 @@ import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
 
 import {
-  listAccounts, seedAccounts, createAccount, updateAccount, deleteAccount,
+  listAccounts, createAccount, updateAccount, deleteAccount,
   exportAccounts, importAccounts,
   listJournals, getJournal, createJournal, approveJournal, rejectJournal, reverseJournal,
   listPeriods, closePeriodLedger, reopenPeriodLedger,
@@ -31,6 +31,7 @@ import {
   getTaxConfig, updateTaxConfig, calculateTax, getTaxLiabilityReport, markTaxFiled,
   listFxRates, addFxRate, fetchDailyFxRates, runFxRevaluation, listFxRevaluations,
   getDepreciationSchedule, runMonthlyDepreciation, listDepreciationRuns, disposeAsset,
+  runSalesPosting, listSalesPostings, previewSalesPosting,
 } from "../controllers/treasury.controller";
 
 import {
@@ -50,7 +51,6 @@ const overview = checkRole("accountant", "manager", "admin");
 
 // ─── Chart of Accounts ────────────────────────────────────────────────────────
 router.get("/accounts",            acct,       listAccounts);
-router.post("/accounts/seed",      acctSenior, seedAccounts);
 router.post("/accounts",           acct,       createAccount);
 router.patch("/accounts/:id",      acct,       updateAccount);
 router.delete("/accounts/:id",     acctSenior, deleteAccount);
@@ -134,6 +134,11 @@ router.post("/fx/rates",           acct,       addFxRate);
 router.post("/fx/rates/fetch",     acct,       fetchDailyFxRates);
 router.post("/fx/revaluation",     acctSenior, runFxRevaluation);
 router.get("/fx/revaluations",     acct,       listFxRevaluations);
+
+// ─── Sales → GL posting (per-product revenue) ────────────────────────────────
+router.get("/sales-postings",          acct,       listSalesPostings);
+router.get("/sales-postings/preview",  acct,       previewSalesPosting);
+router.post("/sales-postings/run",     acctSenior, runSalesPosting);
 
 // ─── Fixed Assets (depreciation + disposal) ──────────────────────────────────
 router.get("/assets/:id/schedule",     acct,       getDepreciationSchedule);

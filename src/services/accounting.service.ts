@@ -289,19 +289,7 @@ export async function computeBalances(
   return result;
 }
 
-// ─── Default Chart of Accounts ────────────────────────────────────────────────
-
-interface SeedAccount {
-  code: string;
-  name: string;
-  type: AccountType;
-  parent?: string;             // parent code
-  isControlAccount?: boolean;
-  controlType?: "AP" | "AR" | "Inventory" | "Bank";
-  isReconcilable?: boolean;
-  cashFlowCategory?: "operating" | "investing" | "financing";
-}
-
+// ─── System account codes ─────────────────────────────────────────────────────
 // Well-known codes the system posts to. Controllers look accounts up by code.
 export const SYS = {
   CASH: "1000",
@@ -317,10 +305,18 @@ export const SYS = {
   OWNERS_CAPITAL: "3000",
   RETAINED_EARNINGS: "3900",
   FUEL_SALES: "4000",
+  PMS_SALES: "4010",
+  AGO_SALES: "4020",
+  KEROSENE_SALES: "4030",
   LUBRICANT_SALES: "4100",
   GAS_SALES: "4200",
   OTHER_INCOME: "4900",
   COGS: "5000",
+  COGS_PMS: "5010",
+  COGS_AGO: "5020",
+  COGS_KEROSENE: "5030",
+  COGS_LUBRICANT: "5100",
+  COGS_GAS: "5200",
   SALARIES: "6000",
   RENT: "6100",
   UTILITIES: "6200",
@@ -335,90 +331,114 @@ export const SYS = {
   LOSS_ON_DISPOSAL: "8100",
 } as const;
 
-const DEFAULT_COA: SeedAccount[] = [
-  // Assets
-  { code: "1000", name: "Cash on Hand", type: "Asset", isReconcilable: true, cashFlowCategory: "operating" },
-  { code: "1100", name: "Bank Account", type: "Asset", isControlAccount: true, controlType: "Bank", isReconcilable: true, cashFlowCategory: "operating" },
-  { code: "1200", name: "Accounts Receivable", type: "Asset", isControlAccount: true, controlType: "AR" },
-  { code: "1300", name: "Inventory", type: "Asset", isControlAccount: true, controlType: "Inventory" },
-  { code: "1400", name: "Prepaid Expenses", type: "Asset" },
-  { code: "1500", name: "Fixed Assets", type: "Asset", cashFlowCategory: "investing" },
-  { code: "1510", name: "Accumulated Depreciation", type: "Asset" }, // contra-asset (credit balance)
-  // Liabilities
-  { code: "2100", name: "Accounts Payable", type: "Liability", isControlAccount: true, controlType: "AP" },
-  { code: "2200", name: "VAT Payable", type: "Liability" },
-  { code: "2210", name: "WHT Payable", type: "Liability" },
-  { code: "2220", name: "Sales Tax Payable", type: "Liability" },
-  { code: "2300", name: "Accrued Expenses", type: "Liability" },
-  { code: "2500", name: "Loans Payable", type: "Liability", cashFlowCategory: "financing" },
-  // Equity
-  { code: "3000", name: "Owner's Capital", type: "Equity", cashFlowCategory: "financing" },
-  { code: "3900", name: "Retained Earnings", type: "Equity" },
-  // Revenue
-  { code: "4000", name: "Fuel Sales", type: "Revenue" },
-  { code: "4100", name: "Lubricant Sales", type: "Revenue" },
-  { code: "4200", name: "Gas Sales", type: "Revenue" },
-  { code: "4900", name: "Other Income", type: "Revenue" },
-  // Expenses
-  { code: "5000", name: "Cost of Goods Sold", type: "Expense" },
-  { code: "6000", name: "Salaries & Wages", type: "Expense" },
-  { code: "6100", name: "Rent", type: "Expense" },
-  { code: "6200", name: "Utilities", type: "Expense" },
-  { code: "6300", name: "Depreciation Expense", type: "Expense" },
-  { code: "6400", name: "Bank Charges", type: "Expense" },
-  { code: "6900", name: "Other Expenses", type: "Expense" },
-  // Gains / Losses
-  { code: "7000", name: "Realized FX Gain", type: "Gain" },
-  { code: "7010", name: "Unrealized FX Gain", type: "Gain" },
-  { code: "7100", name: "Gain on Asset Disposal", type: "Gain" },
-  { code: "8000", name: "Realized FX Loss", type: "Loss" },
-  { code: "8010", name: "Unrealized FX Loss", type: "Loss" },
-  { code: "8100", name: "Loss on Asset Disposal", type: "Loss" },
-];
+// Names + types the error messages suggest when a required posting account is
+// missing. The user creates their own chart — nothing is seeded — so the error
+// must say exactly what to create.
+export const SYS_ACCOUNT_INFO: Record<string, { name: string; type: AccountType }> = {
+  "1000": { name: "Cash on Hand", type: "Asset" },
+  "1100": { name: "Bank Account", type: "Asset" },
+  "1200": { name: "Accounts Receivable", type: "Asset" },
+  "1300": { name: "Inventory", type: "Asset" },
+  "1500": { name: "Fixed Assets", type: "Asset" },
+  "1510": { name: "Accumulated Depreciation", type: "Asset" },
+  "2100": { name: "Accounts Payable", type: "Liability" },
+  "2200": { name: "VAT Payable", type: "Liability" },
+  "2210": { name: "WHT Payable", type: "Liability" },
+  "2220": { name: "Sales Tax Payable", type: "Liability" },
+  "3000": { name: "Owner's Capital", type: "Equity" },
+  "3900": { name: "Retained Earnings", type: "Equity" },
+  "4000": { name: "Fuel Sales", type: "Revenue" },
+  "4010": { name: "PMS (Petrol) Sales", type: "Revenue" },
+  "4020": { name: "AGO (Diesel) Sales", type: "Revenue" },
+  "4030": { name: "Kerosene (DPK) Sales", type: "Revenue" },
+  "4100": { name: "Lubricant Sales", type: "Revenue" },
+  "4200": { name: "Gas (LPG) Sales", type: "Revenue" },
+  "4900": { name: "Other Income", type: "Revenue" },
+  "5000": { name: "Cost of Goods Sold", type: "Expense" },
+  "5010": { name: "PMS Cost of Sales", type: "Expense" },
+  "5020": { name: "AGO (Diesel) Cost of Sales", type: "Expense" },
+  "5030": { name: "Kerosene Cost of Sales", type: "Expense" },
+  "5100": { name: "Lubricant Cost of Sales", type: "Expense" },
+  "5200": { name: "Gas Cost of Sales", type: "Expense" },
+  "6000": { name: "Salaries & Wages", type: "Expense" },
+  "6100": { name: "Rent", type: "Expense" },
+  "6200": { name: "Utilities", type: "Expense" },
+  "6300": { name: "Depreciation Expense", type: "Expense" },
+  "6400": { name: "Bank Charges", type: "Expense" },
+  "6900": { name: "Other Expenses", type: "Expense" },
+  "7000": { name: "Realized FX Gain", type: "Gain" },
+  "7010": { name: "Unrealized FX Gain", type: "Gain" },
+  "7100": { name: "Gain on Asset Disposal", type: "Gain" },
+  "8000": { name: "Realized FX Loss", type: "Loss" },
+  "8010": { name: "Unrealized FX Loss", type: "Loss" },
+  "8100": { name: "Loss on Asset Disposal", type: "Loss" },
+};
 
-/** Idempotent: only inserts codes that don't exist yet for the station. */
-export async function seedDefaultCoA(stationId: string | Types.ObjectId, userId: string | Types.ObjectId) {
-  const existing = await LedgerAccount.find({ fillingStation: stationId }).select("code").lean();
-  const have = new Set(existing.map((a: any) => a.code));
-  const toCreate = DEFAULT_COA.filter((a) => !have.has(a.code));
-  if (toCreate.length === 0) return { created: 0 };
+// ─── Per-product account resolution ──────────────────────────────────────────
+// Every product the station sells maps to its own revenue and COGS account so
+// the P&L breaks down cleanly per product. Resolution prefers the product-
+// specific account and falls back to the generic parent (4000 Fuel Sales /
+// 5000 COGS) so postings keep working while the accountant builds out the
+// detailed chart — but never invents an account.
 
-  const docs = await LedgerAccount.insertMany(
-    toCreate.map((a) => ({
-      fillingStation: stationId,
-      code: a.code,
-      name: a.name,
-      type: a.type,
-      isControlAccount: !!a.isControlAccount,
-      controlType: a.controlType ?? null,
-      isReconcilable: !!a.isReconcilable,
-      cashFlowCategory: a.cashFlowCategory ?? null,
-      isSystem: true,
-      createdBy: userId,
-    }))
-  );
+export type ProductKey = "PMS" | "AGO" | "KEROSENE" | "LUBRICANT" | "GAS" | "OTHER";
 
-  // Wire parents in a second pass (codes are stable, ids are not)
-  const byCode = new Map<string, any>();
-  const all = await LedgerAccount.find({ fillingStation: stationId }).lean();
-  all.forEach((a: any) => byCode.set(a.code, a));
-  for (const a of DEFAULT_COA) {
-    if (a.parent && byCode.has(a.code) && byCode.has(a.parent)) {
-      await LedgerAccount.updateOne(
-        { _id: byCode.get(a.code)._id },
-        { parent: byCode.get(a.parent)._id }
-      );
-    }
-  }
-  return { created: docs.length };
+export function productKey(product: string | undefined | null): ProductKey {
+  const p = String(product || "").toLowerCase();
+  if (p.includes("pms") || p.includes("petrol")) return "PMS";
+  if (p.includes("ago") || p.includes("diesel")) return "AGO";
+  if (p.includes("kero") || p.includes("dpk")) return "KEROSENE";
+  if (p.includes("lub") || p.includes("oil")) return "LUBRICANT";
+  if (p.includes("gas") || p.includes("lpg")) return "GAS";
+  return "OTHER";
 }
 
-/** Look up a system account by its well-known code; throws if CoA not seeded. */
+const PRODUCT_ACCOUNTS: Record<ProductKey, { revenue: string[]; cogs: string[] }> = {
+  // [specific, fallback] — first existing Active account wins
+  PMS:       { revenue: [SYS.PMS_SALES, SYS.FUEL_SALES],      cogs: [SYS.COGS_PMS, SYS.COGS] },
+  AGO:       { revenue: [SYS.AGO_SALES, SYS.FUEL_SALES],      cogs: [SYS.COGS_AGO, SYS.COGS] },
+  KEROSENE:  { revenue: [SYS.KEROSENE_SALES, SYS.FUEL_SALES], cogs: [SYS.COGS_KEROSENE, SYS.COGS] },
+  LUBRICANT: { revenue: [SYS.LUBRICANT_SALES, SYS.OTHER_INCOME], cogs: [SYS.COGS_LUBRICANT, SYS.COGS] },
+  GAS:       { revenue: [SYS.GAS_SALES, SYS.OTHER_INCOME],    cogs: [SYS.COGS_GAS, SYS.COGS] },
+  OTHER:     { revenue: [SYS.OTHER_INCOME],                   cogs: [SYS.COGS] },
+};
+
+export async function productAccount(
+  stationId: string | Types.ObjectId,
+  product: string | undefined | null,
+  kind: "revenue" | "cogs"
+) {
+  const candidates = PRODUCT_ACCOUNTS[productKey(product)][kind];
+  for (const code of candidates) {
+    const acc = await LedgerAccount.findOne({
+      fillingStation: stationId,
+      code,
+      status: "Active",
+    }).lean();
+    if (acc) return acc as any;
+  }
+  const specific = candidates[0];
+  const info = SYS_ACCOUNT_INFO[specific];
+  throw new Error(
+    `No ${kind} account for "${product}": create "${specific} — ${info?.name ?? kind}" ` +
+    `(type: ${info?.type ?? (kind === "revenue" ? "Revenue" : "Expense")}) in Chart of Accounts` +
+    (candidates[1] ? `, or the generic "${candidates[1]}" as a catch-all.` : ".")
+  );
+}
+
+/**
+ * Look up a system posting account by its well-known code. Nothing is seeded
+ * automatically — if the account doesn't exist, the error tells the accountant
+ * exactly which account to create in Chart of Accounts.
+ */
 export async function sysAccount(stationId: string | Types.ObjectId, code: string) {
   const acc = await LedgerAccount.findOne({ fillingStation: stationId, code }).lean();
   if (!acc) {
+    const info = SYS_ACCOUNT_INFO[code];
     throw new Error(
-      `System account ${code} not found. Open Chart of Accounts and seed the default chart first.`
+      info
+        ? `Required account missing: create "${code} — ${info.name}" (type: ${info.type}) in Chart of Accounts, then retry.`
+        : `Required account with code ${code} not found in Chart of Accounts.`
     );
   }
   return acc as any;
