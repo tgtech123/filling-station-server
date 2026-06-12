@@ -9,27 +9,24 @@ const BASE = `http://localhost:${process.env.SMOKE_PORT || 5057}`;
 
 (async () => {
   await mongoose.connect(process.env.MONGO_URI);
-  const staff = await mongoose.connection.db
-    .collection("staffs")
-    .findOne({ role: { $in: ["accountant", "manager"] } });
+  const col = mongoose.connection.db.collection("staffs");
+  const accountant = await col.findOne({ role: "accountant" });
+  const manager = await col.findOne({ role: "manager" });
+  const staff = accountant || manager;
   if (!staff) {
     console.log("NO_STAFF_FOUND");
     process.exit(1);
   }
 
-  const token = jwt.sign(
-    {
-      id: String(staff._id),
-      role: staff.role,
-      station: String(staff.station),
-      email: staff.email,
-    },
-    process.env.JWT_SECRET,
-    { expiresIn: "10m" }
-  );
+  const signFor = (s) =>
+    jwt.sign(
+      { id: String(s._id), role: s.role, station: String(s.station), email: s.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "10m" }
+    );
 
   console.log(`Testing as ${staff.role} (station ${staff.station})`);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = { Authorization: `Bearer ${signFor(staff)}` };
 
   const endpoints = [
     "/api/accounting/accounts",
@@ -69,9 +66,33 @@ const BASE = `http://localhost:${process.env.SMOKE_PORT || 5057}`;
       fail++;
     }
   }
-  console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
+  // Role gate check: a manager must get the overview (200) but be denied (403)
+  // on every working accounting endpoint.
+  let gateFail = 0;
+  if (manager) {
+    const mgrHeaders = { Authorization: `Bearer ${signFor(manager)}` };
+    const probe = async (ep, expect) => {
+      let code;
+      try {
+        code = (await axios.get(BASE + ep, { headers: mgrHeaders, timeout: 30000 })).status;
+      } catch (e) {
+        code = e.response?.status ?? "ERR";
+      }
+      const ok = code === expect;
+      if (!ok) gateFail++;
+      console.log(`${ok ? "PASS" : "FAIL"} [manager → ${code}, expected ${expect}] ${ep}`);
+    };
+    console.log("\nManager role-gate checks:");
+    await probe("/api/accounting/reports/dashboard", 200);
+    await probe("/api/accounting/accounts", 403);
+    await probe("/api/accounting/journals", 403);
+    await probe("/api/accounting/ap/invoices", 403);
+    await probe("/api/accounting/reports/trial-balance", 403);
+  }
+
+  console.log(`\nRESULT: ${pass} passed, ${fail} failed, ${gateFail} gate failures`);
   await mongoose.disconnect();
-  process.exit(fail ? 1 : 0);
+  process.exit(fail || gateFail ? 1 : 0);
 })().catch((e) => {
   console.error("SMOKE_ERROR:", e.message);
   process.exit(1);
