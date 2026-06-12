@@ -55,6 +55,7 @@ export type RecurringFrequency = "weekly" | "monthly" | "quarterly" | "yearly";
 
 export interface IARInvoiceLine {
   description: string;
+  product?: string;     // PMS | AGO | Kerosene | Lubricant | Gas | Other — drives the revenue account
   quantity: number;
   unitPrice: number;
   amount: number;
@@ -105,6 +106,7 @@ const ARInvoiceSchema = new Schema<IARInvoice>(
     lines: [
       {
         description: { type: String, required: true, trim: true },
+        product:     { type: String, trim: true },
         quantity:    { type: Number, required: true, min: 0 },
         unitPrice:   { type: Number, required: true, min: 0 },
         amount:      { type: Number, required: true, min: 0 },

@@ -8,25 +8,6 @@ import GasPump from "../models/gasPump.model";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
 
-const DEFAULT_CYLINDER_SIZES = [
-  { label: "3kg",    weightKg: 3    },
-  { label: "5kg",    weightKg: 5    },
-  { label: "6kg",    weightKg: 6    },
-  { label: "12.5kg", weightKg: 12.5 },
-  { label: "25kg",   weightKg: 25   },
-  { label: "50kg",   weightKg: 50   },
-];
-
-// Seed cylinder size defaults for a station on first use
-export const seedGasDefaults = async (fillingStationId: Types.ObjectId) => {
-  const existing = await GasCylinderSize.countDocuments({ fillingStation: fillingStationId });
-  if (existing === 0) {
-    await GasCylinderSize.insertMany(
-      DEFAULT_CYLINDER_SIZES.map((s) => ({ ...s, fillingStation: fillingStationId, isActive: true }))
-    );
-  }
-};
-
 // â”€â”€â”€ Gas Department Toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getGasStatus = async (req: AuthenticatedRequest, res: Response) => {
@@ -134,7 +115,7 @@ export const getCylinderSizes = async (req: AuthenticatedRequest, res: Response)
   try {
     const station = req.user?.station;
     if (!station) return res.status(403).json({ message: "Unauthorized" });
-    await seedGasDefaults(new Types.ObjectId(station));
+    // No defaults are seeded — sizes stay empty until the manager adds them
     const sizes = await GasCylinderSize.find({ fillingStation: station, isActive: true }).sort({ weightKg: 1 }).lean();
     return res.status(200).json({ data: sizes });
   } catch (err: any) {
@@ -245,7 +226,6 @@ export const getInventory = async (req: AuthenticatedRequest, res: Response) => 
   try {
     const station = req.user?.station;
     if (!station) return res.status(403).json({ message: "Unauthorized" });
-    await seedGasDefaults(new Types.ObjectId(station));
 
     const [pricing, tanks, pumps] = await Promise.all([
       GasPricing.findOne({ fillingStation: station }).sort({ effectiveFrom: -1 }).lean(),

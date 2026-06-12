@@ -2,7 +2,7 @@
 // dns.setServers(['8.8.8.8', '8.8.4.4']); // Force Google DNS for SRV lookups
 
 import mongoose from "mongoose";
-import { seedDefaultPlans, seedAdminLogs, seedPlatformSettings } from "../controllers/admin.controller";
+import { seedDefaultPlans, seedPlatformSettings } from "../controllers/admin.controller";
 
 export const connectDB = async () => {
   try {
@@ -16,10 +16,11 @@ export const connectDB = async () => {
     });
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
 
-    // Connection is already open after await — run seeders directly
+    // Platform config only (subscription plans + platform settings) — these are
+    // operational requirements for pricing/payments, NOT display data. No sample
+    // or station data is ever seeded; empty stays empty until users fill it.
     try {
       await seedDefaultPlans();
-      await seedAdminLogs();
       await seedPlatformSettings();
     } catch (seedErr: any) {
       console.error("❌ Seeder error:", seedErr.message);

@@ -5,7 +5,6 @@ import GasProcurement from "../models/gasProcurement.model";
 import GasTank from "../models/gasTank.model";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
-import { seedGasDefaults } from "./gasSettings.controller";
 import { transporter } from "../middlewares/transporter.middleware";
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -54,8 +53,6 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
     const price = Number(pricePerKg);
     if (isNaN(qty)   || qty   <= 0) return res.status(400).json({ message: "quantityKg must be > 0"   });
     if (isNaN(price) || price <= 0) return res.status(400).json({ message: "pricePerKg must be > 0"   });
-
-    await seedGasDefaults(new Types.ObjectId(station));
 
     const orderNumber = await genOrderNumber(String(station));
     const stationDoc  = await FillingStation.findById(station).select("name address phone").lean();

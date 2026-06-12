@@ -13,6 +13,7 @@ import {
   postJournal,
   nextDocNumber,
   sysAccount,
+  productAccount,
   assertPeriodOpen,
   audit,
   periodOf,
@@ -121,7 +122,13 @@ async function buildAndPostInvoice(opts: {
   const cleanLines = opts.lines.map((l: any) => {
     const quantity = Number(l.quantity) || 0;
     const unitPrice = Number(l.unitPrice) || 0;
-    return { description: String(l.description || "").trim(), quantity, unitPrice, amount: round2(quantity * unitPrice) };
+    return {
+      description: String(l.description || "").trim(),
+      product: l.product ? String(l.product).trim() : undefined,
+      quantity,
+      unitPrice,
+      amount: round2(quantity * unitPrice),
+    };
   });
   const subtotal = round2(cleanLines.reduce((s: number, l: any) => s + l.amount, 0));
 
@@ -147,14 +154,52 @@ async function buildAndPostInvoice(opts: {
 
   const invoiceNumber = await nextDocNumber(opts.station, "ar_invoice");
 
-  // Post: Dr AR, Cr Revenue (+ Cr VAT Payable)
+  // Post: Dr AR, Cr Revenue per product (+ Cr VAT Payable).
+  // Each line carries its product, so an invoice mixing PMS, Diesel and
+  // Lubricant credits each product's own revenue account — the P&L then
+  // reports revenue per product with no manual reclassification.
   const arAcc = await sysAccount(opts.station, SYS.AR);
-  const revAcc = await sysAccount(opts.station, opts.revenueAccountCode || SYS.OTHER_INCOME);
 
   const jeLines: any[] = [
     { account: arAcc._id, debit: totalBase, description: `AR — ${opts.customer.name} ${invoiceNumber}` },
-    { account: revAcc._id, credit: round2(subtotal * opts.fxRate), description: `Revenue — ${invoiceNumber}` },
   ];
+
+  if (opts.revenueAccountCode) {
+    // Explicit account override for the whole invoice (API callers)
+    const revAcc = await sysAccount(opts.station, opts.revenueAccountCode);
+    jeLines.push({ account: revAcc._id, credit: round2(subtotal * opts.fxRate), description: `Revenue — ${invoiceNumber}` });
+  } else {
+    // Group line amounts by resolved product revenue account
+    const byAccount = new Map<string, { account: any; amount: number; products: Set<string> }>();
+    for (const line of cleanLines) {
+      if (line.amount <= 0) continue;
+      const acc = await productAccount(opts.station, line.product, "revenue");
+      const key = String(acc._id);
+      const entry = byAccount.get(key) || { account: acc, amount: 0, products: new Set<string>() };
+      entry.amount = round2(entry.amount + line.amount * opts.fxRate);
+      entry.products.add(line.product || "Other");
+      byAccount.set(key, entry);
+    }
+    // Penny-rounding guard: per-account rounding can drift a kobo or two from
+    // round2(subtotal × fx) on multi-line FX invoices — absorb the difference
+    // into the largest revenue line so the entry always balances.
+    const entries = [...byAccount.values()];
+    const creditTotal = round2(entries.reduce((s, e) => s + e.amount, 0));
+    const target = round2(subtotal * opts.fxRate);
+    const drift = round2(target - creditTotal);
+    if (drift !== 0 && entries.length > 0) {
+      const largest = entries.reduce((a, b) => (b.amount > a.amount ? b : a));
+      largest.amount = round2(largest.amount + drift);
+    }
+
+    for (const { account, amount, products } of entries) {
+      jeLines.push({
+        account: account._id,
+        credit: amount,
+        description: `${[...products].join(", ")} revenue — ${invoiceNumber}`,
+      });
+    }
+  }
   if (taxAmount > 0) {
     const vatAcc = await sysAccount(
       opts.station,

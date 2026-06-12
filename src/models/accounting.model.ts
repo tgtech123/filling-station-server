@@ -114,6 +114,7 @@ export type JournalSource =
   | "year_end_close"
   | "bank_reconciliation"
   | "tax"
+  | "sales_posting"
   | "opening_balance";
 
 export type JournalStatus = "draft" | "pending_approval" | "approved" | "posted" | "rejected" | "reversed";
@@ -191,7 +192,8 @@ const JournalEntrySchema = new Schema<IJournalEntry>(
       enum: [
         "manual", "ap_invoice", "ap_payment", "ar_invoice", "ar_receipt",
         "ar_credit_note", "grn", "depreciation", "disposal", "fx_revaluation",
-        "period_close", "year_end_close", "bank_reconciliation", "tax", "opening_balance",
+        "period_close", "year_end_close", "bank_reconciliation", "tax",
+        "sales_posting", "opening_balance",
       ],
       default: "manual",
     },

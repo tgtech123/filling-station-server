@@ -11,7 +11,6 @@ import {
 } from "../models/accounting.model";
 import {
   postJournal,
-  seedDefaultCoA,
   computeBalances,
   getOrCreatePeriod,
   postYearEndClose,
@@ -55,21 +54,6 @@ export const listAccounts = async (req: AuthenticatedRequest, res: Response) => 
     }
 
     return res.status(200).json({ data: accounts });
-  } catch (e: any) {
-    return err500(res, e);
-  }
-};
-
-export const seedAccounts = async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const station = req.user?.station;
-    if (!station) return noStation(res);
-    const result = await seedDefaultCoA(station, req.user!.id);
-    audit({
-      stationId: station, userId: req.user!.id, action: "account.seed",
-      entity: "LedgerAccount", summary: `Seeded default chart of accounts (${result.created} accounts)`,
-    });
-    return res.status(200).json({ message: `${result.created} accounts created`, data: result });
   } catch (e: any) {
     return err500(res, e);
   }
@@ -171,10 +155,9 @@ export const deleteAccount = async (req: AuthenticatedRequest, res: Response) =>
 
     const account = await LedgerAccount.findOne({ _id: req.params.id, fillingStation: station });
     if (!account) return res.status(404).json({ message: "Account not found" });
-    if (account.isSystem) {
-      return res.status(400).json({ message: "System accounts cannot be deleted — archive instead" });
-    }
 
+    // The only real protections: an account with journal history or children
+    // must not vanish. Everything else is the accountant's to manage.
     const [hasPostings, hasChildren] = await Promise.all([
       JournalEntry.exists({ fillingStation: station, "lines.account": account._id }),
       LedgerAccount.exists({ fillingStation: station, parent: account._id }),

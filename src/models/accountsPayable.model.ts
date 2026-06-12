@@ -52,6 +52,9 @@ export interface IAPInvoice extends Document {
   matchStatus: APMatchStatus;
   status: APInvoiceStatus;
   amountPaid: number;
+  // GL account code the debit books to for non-PO invoices — lets a fuel
+  // purchase invoice hit its product's cost account (5010 PMS Cost of Sales…)
+  expenseAccountCode?: string;
   journalEntry?: Types.ObjectId | null;   // booking JE (Dr Expense/Inventory, Cr AP)
   notes?: string;
   createdBy: Types.ObjectId;
@@ -104,6 +107,7 @@ const APInvoiceSchema = new Schema<IAPInvoice>(
       default: "draft",
     },
     amountPaid:   { type: Number, default: 0, min: 0 },
+    expenseAccountCode: { type: String, trim: true },
     journalEntry: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
     notes:        { type: String, trim: true },
     createdBy:    { type: Schema.Types.ObjectId, ref: "Staff", required: true },
