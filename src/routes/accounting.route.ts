@@ -32,6 +32,7 @@ import {
   listFxRates, addFxRate, fetchDailyFxRates, runFxRevaluation, listFxRevaluations,
   getDepreciationSchedule, runMonthlyDepreciation, listDepreciationRuns, disposeAsset,
   runSalesPosting, listSalesPostings, previewSalesPosting,
+  getStockValuationReport, getStockMovements, recordOpeningStock,
 } from "../controllers/treasury.controller";
 
 import {
@@ -135,10 +136,15 @@ router.post("/fx/rates/fetch",     acct,       fetchDailyFxRates);
 router.post("/fx/revaluation",     acctSenior, runFxRevaluation);
 router.get("/fx/revaluations",     acct,       listFxRevaluations);
 
-// ─── Sales → GL posting (per-product revenue) ────────────────────────────────
+// ─── Sales → GL posting (per-product revenue + COGS) ─────────────────────────
 router.get("/sales-postings",          acct,       listSalesPostings);
 router.get("/sales-postings/preview",  acct,       previewSalesPosting);
 router.post("/sales-postings/run",     acctSenior, runSalesPosting);
+
+// ─── Inventory valuation (perpetual AVCO costing) ────────────────────────────
+router.get("/inventory/valuation",     acct,       getStockValuationReport);
+router.get("/inventory/movements",     acct,       getStockMovements);
+router.post("/inventory/opening",      acctSenior, recordOpeningStock);
 
 // ─── Fixed Assets (depreciation + disposal) ──────────────────────────────────
 router.get("/assets/:id/schedule",     acct,       getDepreciationSchedule);
