@@ -37,7 +37,9 @@
       "PowerShell(npx tsc --noEmit; \"TSC: $LASTEXITCODE\")",
       "PowerShell($env:PORT='5058'; node dist/server.js)",
       "PowerShell($env:SMOKE_PORT='5058'; node scripts\\\\smoke-accounting.js)",
-      "PowerShell(node scripts\\\\test-avco.js)"
+      "PowerShell(node scripts\\\\test-avco.js)",
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\TGTECH\\\\Desktop\\\\filling-station-client\\\\src\\\\app\\\\dashboard\\\\gas\\\\procurement\" -Recurse -File | Select-Object Name; \"--- store ---\"; Get-ChildItem \"c:\\\\Users\\\\TGTECH\\\\Desktop\\\\filling-station-client\\\\src\\\\store\" -File | Where-Object { $_.Name -match \"[Gg]as|[Pp]rocure\" } | Select-Object Name)",
+      "PowerShell(node scripts\\\\check-gas-procurement.js)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",

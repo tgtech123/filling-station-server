@@ -4,7 +4,7 @@ import { AuthenticatedRequest } from "../interfaces";
 import GasSale from "../models/gasSale.model";
 import GasOrder from "../models/gasOrder.model";
 import GasProcurement from "../models/gasProcurement.model";
-import GasInventory from "../models/gasInventory.model";
+import GasTank from "../models/gasTank.model";
 import GasReconciliation from "../models/gasReconciliation.model";
 import GasShift from "../models/gasShift.model";
 
@@ -77,8 +77,11 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
         { $group: { _id: null, totalRevenue: { $sum: "$amountPaid" }, totalKg: { $sum: "$quantityKg" } } },
       ]),
       GasProcurement.aggregate([
-        { $match: { fillingStation: station, ...(start || end ? { date: dateFilter } : {}) } },
-        { $group: { _id: null, totalCost: { $sum: "$totalCost" }, totalKgBought: { $sum: "$quantityKg" } } },
+        // Only goods actually received count as cost — cancelled and
+        // not-yet-delivered orders are not a cost. Quantity field is
+        // delivered (falling back to ordered); the model has no "quantityKg".
+        { $match: { fillingStation: station, status: { $in: ["delivered", "validated"] }, ...(start || end ? { date: dateFilter } : {}) } },
+        { $group: { _id: null, totalCost: { $sum: "$totalCost" }, totalKgBought: { $sum: { $ifNull: ["$deliveredQuantityKg", "$orderedQuantityKg"] } } } },
       ]),
     ]);
 
@@ -105,14 +108,26 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
 export const getInventoryMovement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = stationId(req);
-    const inv = await GasInventory.findOne({ fillingStation: station }).lean();
+
+    // Stock lives in the gas tanks (the validate flow tops them up), not the
+    // unused GasInventory model — aggregate the active tanks for a live total.
+    const tanks = await GasTank.find({ fillingStation: station, isActive: true })
+      .select("name capacityKg currentStockKg totalProcuredKg totalSoldKg")
+      .lean();
+    const inv = {
+      tanks,
+      totalCapacityKg:  tanks.reduce((s, t) => s + (t.capacityKg ?? 0), 0),
+      currentStockKg:   tanks.reduce((s, t) => s + (t.currentStockKg ?? 0), 0),
+      totalProcuredKg:  tanks.reduce((s, t) => s + (t.totalProcuredKg ?? 0), 0),
+      totalSoldKg:      tanks.reduce((s, t) => s + (t.totalSoldKg ?? 0), 0),
+    };
 
     const last30 = new Date();
     last30.setDate(last30.getDate() - 30);
 
     const [procDocs, saleDocs] = await Promise.all([
-      GasProcurement.find({ fillingStation: station, date: { $gte: last30 } })
-        .select("date quantityKg totalCost supplierName")
+      GasProcurement.find({ fillingStation: station, status: { $in: ["delivered", "validated"] }, date: { $gte: last30 } })
+        .select("date orderedQuantityKg deliveredQuantityKg totalCost supplierName status")
         .sort({ date: -1 })
         .lean(),
       GasSale.aggregate([
