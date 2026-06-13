@@ -404,6 +404,13 @@ export interface ISalesPostingLine {
   amount: number;
   accountCode: string;      // revenue account the amount was credited to
   count: number;            // number of underlying sales/shifts
+  // COGS leg (perpetual AVCO) — populated when a cost basis is available
+  qtySold: number;          // litres/units/kg sold this period
+  unitCost: number;         // weighted average cost consumed
+  cogs: number;             // qtySold × unitCost
+  cogsAccountCode?: string; // cost account the COGS was debited to
+  grossMargin: number;      // amount − cogs
+  costEstimated: boolean;   // true when stock went negative (no recorded receipts)
 }
 
 export interface ISalesPostingRun extends Document {
@@ -412,6 +419,8 @@ export interface ISalesPostingRun extends Document {
   runDate: Date;
   lines: ISalesPostingLine[];
   totalAmount: number;
+  totalCogs: number;
+  totalMargin: number;
   journalEntry?: Types.ObjectId | null;
   createdBy: Types.ObjectId;
   createdAt: Date;
@@ -429,9 +438,17 @@ const SalesPostingRunSchema = new Schema<ISalesPostingRun>(
         amount:      { type: Number, required: true, min: 0 },
         accountCode: { type: String, required: true },
         count:       { type: Number, default: 0 },
+        qtySold:         { type: Number, default: 0 },
+        unitCost:        { type: Number, default: 0 },
+        cogs:            { type: Number, default: 0 },
+        cogsAccountCode: { type: String },
+        grossMargin:     { type: Number, default: 0 },
+        costEstimated:   { type: Boolean, default: false },
       },
     ],
     totalAmount:  { type: Number, required: true, min: 0 },
+    totalCogs:    { type: Number, default: 0 },
+    totalMargin:  { type: Number, default: 0 },
     journalEntry: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
     createdBy:    { type: Schema.Types.ObjectId, ref: "Staff", required: true },
   },

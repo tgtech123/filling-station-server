@@ -34,7 +34,10 @@
       "PowerShell(Set-Location \"C:\\\\Users\\\\TGTECH\\\\Desktop\\\\filling-station-server\"; npx tsc --noEmit; \"TSC: $LASTEXITCODE\")",
       "PowerShell(Set-Location \"C:\\\\Users\\\\TGTECH\\\\Desktop\\\\filling-station-server\"; npx tsc --noEmit; \"SERVER TSC: $LASTEXITCODE\")",
       "PowerShell(Select-String -Path src\\\\models\\\\lubricant-sale.models.ts -Pattern \"totalAmount|saleDate|fillingStation|status|createdAt\" | Select-Object -First 8; \"--- GAS ---\"; Select-String -Path src\\\\models\\\\gasSale.model.ts -Pattern \"totalAmount|amount|status|fillingStation|soldAt|createdAt\" | Select-Object -First 10)",
-      "PowerShell(npx tsc --noEmit; \"TSC: $LASTEXITCODE\")"
+      "PowerShell(npx tsc --noEmit; \"TSC: $LASTEXITCODE\")",
+      "PowerShell($env:PORT='5058'; node dist/server.js)",
+      "PowerShell($env:SMOKE_PORT='5058'; node scripts\\\\smoke-accounting.js)",
+      "PowerShell(node scripts\\\\test-avco.js)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",

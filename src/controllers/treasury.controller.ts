@@ -11,6 +11,8 @@ import {
   FxRevaluationRun,
   DepreciationRun,
   SalesPostingRun,
+  StockValuation,
+  StockMovement,
 } from "../models/treasury.model";
 import { LedgerAccount, JournalEntry } from "../models/accounting.model";
 import FixedAsset, { calcNetBookValue } from "../models/fixedAsset.model";
@@ -21,12 +23,20 @@ import {
   postJournal,
   sysAccount,
   productAccount,
+  productKey,
   assertPeriodOpen,
   audit,
   periodOf,
   round2,
   SYS,
 } from "../services/accounting.service";
+import {
+  syncReceiptsUpTo,
+  recordIssue,
+  recordReceipt,
+  reversePeriodIssues,
+  getValuations,
+} from "../services/inventoryCosting.service";
 
 const err500 = (res: Response, e: any) => res.status(500).json({ message: e.message });
 const noStation = (res: Response) => res.status(403).json({ message: "Unauthorized" });
@@ -885,83 +895,135 @@ export const runSalesPosting = async (req: AuthenticatedRequest, res: Response) 
     const from = new Date(yr, mo - 1, 1);
     const to = new Date(yr, mo, 0, 23, 59, 59, 999);
     const stationId = new Types.ObjectId(String(station));
+    // Stable id linking each stock issue to the SalesPostingRun it belongs to
+    const entryPlaceholderId = new Types.ObjectId();
 
-    // Fuel — completed shifts grouped by pump product
+    // Fuel — completed shifts grouped by pump product (revenue + litres sold)
     const fuelAgg = await Shift.aggregate([
       { $match: { fillingStation: stationId, status: "Completed", shiftDate: { $gte: from, $lte: to } } },
-      { $group: { _id: "$product", amount: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
+      { $group: { _id: "$product", amount: { $sum: "$totalAmount" }, qty: { $sum: "$litresSold" }, count: { $sum: 1 } } },
     ]);
 
-    // Lubricant POS — qty × unit price, the codebase's canonical revenue formula
+    // Lubricant POS — qty × unit price; qtySold drives the COGS leg
     const lubAgg = await LubricantSale.aggregate([
       { $match: { fillingStation: stationId, createdAt: { $gte: from, $lte: to } } },
-      { $group: { _id: null, amount: { $sum: { $multiply: ["$qtySold", "$priceSold"] } }, count: { $sum: 1 } } },
+      { $group: { _id: null, amount: { $sum: { $multiply: ["$qtySold", "$priceSold"] } }, qty: { $sum: "$qtySold" }, count: { $sum: 1 } } },
     ]);
 
     // Gas POS — confirmed/dispensed sales only (voided and pending excluded)
     const gasAgg = await GasSale.aggregate([
       { $match: { fillingStation: stationId, status: { $in: ["confirmed", "dispensed"] }, createdAt: { $gte: from, $lte: to } } },
-      { $group: { _id: null, amount: { $sum: "$amountPaid" }, count: { $sum: 1 } } },
+      { $group: { _id: null, amount: { $sum: "$amountPaid" }, qty: { $sum: "$quantityKg" }, count: { $sum: 1 } } },
     ]);
 
-    interface Bucket { product: string; source: "fuel" | "lubricant" | "gas"; amount: number; count: number }
+    interface Bucket { product: string; source: "fuel" | "lubricant" | "gas"; amount: number; qty: number; count: number }
     const buckets: Bucket[] = [];
     for (const f of fuelAgg) {
       const amount = round2(f.amount || 0);
-      if (amount > 0) buckets.push({ product: f._id || "Fuel", source: "fuel", amount, count: f.count });
+      if (amount > 0) buckets.push({ product: f._id || "Fuel", source: "fuel", amount, qty: round2(f.qty || 0), count: f.count });
     }
     if (round2(lubAgg[0]?.amount || 0) > 0) {
-      buckets.push({ product: "Lubricant", source: "lubricant", amount: round2(lubAgg[0].amount), count: lubAgg[0].count });
+      buckets.push({ product: "Lubricant", source: "lubricant", amount: round2(lubAgg[0].amount), qty: round2(lubAgg[0].qty || 0), count: lubAgg[0].count });
     }
     if (round2(gasAgg[0]?.amount || 0) > 0) {
-      buckets.push({ product: "Gas", source: "gas", amount: round2(gasAgg[0].amount), count: gasAgg[0].count });
+      buckets.push({ product: "Gas", source: "gas", amount: round2(gasAgg[0].amount), qty: round2(gasAgg[0].qty || 0), count: gasAgg[0].count });
     }
 
     if (buckets.length === 0) {
       return res.status(400).json({ message: `No sales found for ${period}` });
     }
 
-    // Resolve each bucket to its product revenue account (specific → generic fallback)
+    // ── Perpetual costing: blend in all purchases up to month-end, then a
+    // partial-failure cleanup, so issues consume at the correct average ───────
+    await syncReceiptsUpTo(station, to, req.user!.id);
+    await reversePeriodIssues(station, period, `SALES-${period}`);
+
     const cashAcc = await sysAccount(station, SYS.CASH);
+    const inventoryAcc = await sysAccount(station, SYS.INVENTORY);
     const jeLines: any[] = [];
     const runLines: any[] = [];
     let total = 0;
+    let totalCogs = 0;
 
-    // Merge buckets that resolve to the same account (e.g. two fuel products
-    // both falling back to 4000) so the JE stays clean
-    const byAccount = new Map<string, { account: any; amount: number; products: string[] }>();
+    // Revenue side — merge buckets that resolve to the same revenue account
+    const byRevenue = new Map<string, { account: any; amount: number; products: string[] }>();
+    // COGS side — merge by cost account
+    const byCogs = new Map<string, { account: any; cogs: number; products: string[] }>();
+
     for (const b of buckets) {
-      const acc = await productAccount(station, b.product, "revenue");
-      const key = String(acc._id);
-      const entry = byAccount.get(key) || { account: acc, amount: 0, products: [] };
-      entry.amount = round2(entry.amount + b.amount);
-      entry.products.push(b.product);
-      byAccount.set(key, entry);
+      const revAcc = await productAccount(station, b.product, "revenue");
+      const revKey = String(revAcc._id);
+      const rev = byRevenue.get(revKey) || { account: revAcc, amount: 0, products: [] };
+      rev.amount = round2(rev.amount + b.amount);
+      rev.products.push(b.product);
+      byRevenue.set(revKey, rev);
       total = round2(total + b.amount);
-      runLines.push({ product: b.product, source: b.source, amount: b.amount, accountCode: acc.code, count: b.count });
+
+      // Consume inventory at weighted-average cost → COGS for this product
+      const issue = await recordIssue({
+        stationId: station,
+        productKey: productKey(b.product),
+        qty: b.qty,
+        date: to,
+        period,
+        sourceModel: "SalesPostingRun",
+        sourceId: entryPlaceholderId, // set below — kept stable per run
+        sourceRef: `SALES-${period}`,
+        userId: req.user!.id,
+      });
+
+      let cogsCode: string | undefined;
+      if (issue.cogs > 0) {
+        const cogsAcc = await productAccount(station, b.product, "cogs");
+        cogsCode = cogsAcc.code;
+        const cKey = String(cogsAcc._id);
+        const c = byCogs.get(cKey) || { account: cogsAcc, cogs: 0, products: [] };
+        c.cogs = round2(c.cogs + issue.cogs);
+        c.products.push(b.product);
+        byCogs.set(cKey, c);
+        totalCogs = round2(totalCogs + issue.cogs);
+      }
+
+      runLines.push({
+        product: b.product, source: b.source, amount: b.amount, accountCode: revAcc.code, count: b.count,
+        qtySold: b.qty, unitCost: issue.unitCost, cogs: issue.cogs,
+        cogsAccountCode: cogsCode, grossMargin: round2(b.amount - issue.cogs),
+        costEstimated: issue.costEstimated,
+      });
     }
 
+    // Revenue legs: Dr Cash (total), Cr each product's revenue account
     jeLines.push({ account: cashAcc._id, debit: total, description: `Sales receipts — ${period}` });
-    for (const { account, amount, products } of byAccount.values()) {
+    for (const { account, amount, products } of byRevenue.values()) {
       jeLines.push({ account: account._id, credit: amount, description: `${products.join(", ")} sales — ${period}` });
+    }
+    // COGS legs: Dr each product's cost account, Cr Inventory (total)
+    for (const { account, cogs, products } of byCogs.values()) {
+      jeLines.push({ account: account._id, debit: cogs, description: `${products.join(", ")} cost of sales — ${period}` });
+    }
+    if (totalCogs > 0) {
+      jeLines.push({ account: inventoryAcc._id, credit: totalCogs, description: `Inventory consumed — ${period}` });
     }
 
     const entry = await postJournal({
       stationId: station,
       userId: req.user!.id,
       date: to, // month end
-      memo: `Product sales posting — ${period}`,
+      memo: `Product sales & cost of sales — ${period}`,
       lines: jeLines,
       source: "sales_posting",
       sourceRef: `SALES-${period}`,
     });
 
     const run = await SalesPostingRun.create({
+      _id: entryPlaceholderId,
       fillingStation: station,
       period,
       runDate: new Date(),
       lines: runLines,
       totalAmount: total,
+      totalCogs,
+      totalMargin: round2(total - totalCogs),
       journalEntry: entry._id as Types.ObjectId,
       createdBy: req.user!.id,
     });
@@ -969,11 +1031,11 @@ export const runSalesPosting = async (req: AuthenticatedRequest, res: Response) 
     audit({
       stationId: station, userId: req.user!.id, action: "sales.posting",
       entity: "SalesPostingRun", entityId: run._id as Types.ObjectId,
-      summary: `Sales posted for ${period}: ₦${total.toLocaleString()} across ${runLines.length} product line(s) (${entry.entryNumber})`,
+      summary: `Sales posted for ${period}: revenue ₦${total.toLocaleString()}, COGS ₦${totalCogs.toLocaleString()}, margin ₦${round2(total - totalCogs).toLocaleString()} (${entry.entryNumber})`,
     });
 
     return res.status(200).json({
-      message: `₦${total.toLocaleString()} of sales posted for ${period} across ${runLines.length} product line(s)`,
+      message: `₦${total.toLocaleString()} sales / ₦${totalCogs.toLocaleString()} cost posted for ${period} (gross margin ₦${round2(total - totalCogs).toLocaleString()})`,
       data: { run, journal: entry },
     });
   } catch (e: any) {
@@ -1012,30 +1074,42 @@ export const previewSalesPosting = async (req: AuthenticatedRequest, res: Respon
     const to = new Date(yr, mo, 0, 23, 59, 59, 999);
     const stationId = new Types.ObjectId(String(station));
 
-    const [fuelAgg, lubAgg, gasAgg, alreadyPosted] = await Promise.all([
+    const [fuelAgg, lubAgg, gasAgg, alreadyPosted, valuations] = await Promise.all([
       Shift.aggregate([
         { $match: { fillingStation: stationId, status: "Completed", shiftDate: { $gte: from, $lte: to } } },
-        { $group: { _id: "$product", amount: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
+        { $group: { _id: "$product", amount: { $sum: "$totalAmount" }, qty: { $sum: "$litresSold" }, count: { $sum: 1 } } },
       ]),
       LubricantSale.aggregate([
         { $match: { fillingStation: stationId, createdAt: { $gte: from, $lte: to } } },
-        { $group: { _id: null, amount: { $sum: { $multiply: ["$qtySold", "$priceSold"] } }, count: { $sum: 1 } } },
+        { $group: { _id: null, amount: { $sum: { $multiply: ["$qtySold", "$priceSold"] } }, qty: { $sum: "$qtySold" }, count: { $sum: 1 } } },
       ]),
       GasSale.aggregate([
         { $match: { fillingStation: stationId, status: { $in: ["confirmed", "dispensed"] }, createdAt: { $gte: from, $lte: to } } },
-        { $group: { _id: null, amount: { $sum: "$amountPaid" }, count: { $sum: 1 } } },
+        { $group: { _id: null, amount: { $sum: "$amountPaid" }, qty: { $sum: "$quantityKg" }, count: { $sum: 1 } } },
       ]),
       SalesPostingRun.findOne({ fillingStation: station, period }).lean(),
+      getValuations(station),
     ]);
+
+    // Estimated cost uses the CURRENT average cost per product. The actual run
+    // first blends in any unrecorded purchases up to month-end, so booked COGS
+    // can differ — this is a best-effort preview.
+    const avgByKey = new Map<string, number>();
+    for (const v of valuations as any[]) avgByKey.set(v.productKey, v.avgUnitCost);
+    const estLine = (product: string, source: string, amount: number, qty: number, count: number) => {
+      const avg = avgByKey.get(productKey(product)) ?? 0;
+      const cogs = round2(qty * avg);
+      return { product, source, amount, qty: round2(qty), count, estUnitCost: avg, estCogs: cogs, estMargin: round2(amount - cogs) };
+    };
 
     const lines: any[] = fuelAgg
       .filter((f) => round2(f.amount || 0) > 0)
-      .map((f) => ({ product: f._id || "Fuel", source: "fuel", amount: round2(f.amount), count: f.count }));
+      .map((f) => estLine(f._id || "Fuel", "fuel", round2(f.amount), f.qty || 0, f.count));
     if (round2(lubAgg[0]?.amount || 0) > 0) {
-      lines.push({ product: "Lubricant", source: "lubricant", amount: round2(lubAgg[0].amount), count: lubAgg[0].count });
+      lines.push(estLine("Lubricant", "lubricant", round2(lubAgg[0].amount), lubAgg[0].qty || 0, lubAgg[0].count));
     }
     if (round2(gasAgg[0]?.amount || 0) > 0) {
-      lines.push({ product: "Gas", source: "gas", amount: round2(gasAgg[0].amount), count: gasAgg[0].count });
+      lines.push(estLine("Gas", "gas", round2(gasAgg[0].amount), gasAgg[0].qty || 0, gasAgg[0].count));
     }
 
     return res.status(200).json({
@@ -1043,11 +1117,127 @@ export const previewSalesPosting = async (req: AuthenticatedRequest, res: Respon
         period,
         lines,
         total: round2(lines.reduce((s, l) => s + l.amount, 0)),
+        totalEstCogs: round2(lines.reduce((s, l) => s + l.estCogs, 0)),
+        totalEstMargin: round2(lines.reduce((s, l) => s + l.estMargin, 0)),
         alreadyPosted: !!alreadyPosted,
       },
     });
   } catch (e: any) {
     return err500(res, e);
+  }
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Inventory valuation (perpetual AVCO) — report, ledger, opening/adjustment
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const getStockValuationReport = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    // Sync purchases up to now so on-hand reflects every recorded delivery
+    await syncReceiptsUpTo(station, new Date(), req.user!.id);
+
+    const vals = await getValuations(station);
+    const totalValue = round2((vals as any[]).reduce((s, v) => s + v.totalValue, 0));
+    return res.status(200).json({ data: { valuations: vals, totalValue } });
+  } catch (e: any) {
+    return err500(res, e);
+  }
+};
+
+export const getStockMovements = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const { productKey: pk, page = 1, limit = 50 } = req.query as any;
+    const filter: any = { fillingStation: station };
+    if (pk) filter.productKey = pk;
+
+    const [docs, total] = await Promise.all([
+      StockMovement.find(filter)
+        .sort({ date: -1, _id: -1 })
+        .skip((Number(page) - 1) * Number(limit))
+        .limit(Number(limit))
+        .lean(),
+      StockMovement.countDocuments(filter),
+    ]);
+    return res.status(200).json({ data: docs, total, page: Number(page) });
+  } catch (e: any) {
+    return err500(res, e);
+  }
+};
+
+/**
+ * Record opening inventory or a manual stock adjustment as a receipt. This is
+ * how a station starting mid-stream tells the costing engine what stock (and at
+ * what cost) it already holds, so the first COGS run is accurate rather than
+ * estimated. Books Dr Inventory, Cr Owner's Capital (opening) — no fake data,
+ * the accountant enters the real figures.
+ */
+export const recordOpeningStock = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const { product, qty, unitCost, date, postToGL } = req.body;
+    const pk = productKey(product);
+    const q = Number(qty), c = Number(unitCost);
+    if (!product || pk === "OTHER") {
+      return res.status(400).json({ message: "product must be one of PMS, AGO, Kerosene, Lubricant, Gas" });
+    }
+    if (!q || q <= 0 || !c || c < 0) {
+      return res.status(400).json({ message: "qty (>0) and unitCost (>=0) are required" });
+    }
+
+    const when = date ? new Date(date) : new Date();
+    const adjustId = new Types.ObjectId();
+
+    await recordReceipt({
+      stationId: station,
+      productKey: pk,
+      qty: q,
+      unitCost: c,
+      date: when,
+      period: periodOf(when),
+      sourceModel: "OpeningStock",
+      sourceId: adjustId,
+      sourceRef: `Opening/adjust ${product}`,
+      userId: req.user!.id,
+    });
+
+    // Optionally book the value into the GL (Dr Inventory, Cr Owner's Capital)
+    let journal = null;
+    if (postToGL) {
+      const value = round2(q * c);
+      const invAcc = await sysAccount(station, SYS.INVENTORY);
+      const capAcc = await sysAccount(station, SYS.OWNERS_CAPITAL);
+      journal = await postJournal({
+        stationId: station,
+        userId: req.user!.id,
+        date: when,
+        memo: `Opening inventory — ${product} (${q} @ ₦${c})`,
+        lines: [
+          { account: invAcc._id, debit: value, description: `Opening stock ${product}` },
+          { account: capAcc._id, credit: value, description: `Opening stock ${product}` },
+        ],
+        source: "opening_balance",
+        sourceRef: `OPEN-${pk}`,
+      });
+    }
+
+    audit({
+      stationId: station, userId: req.user!.id, action: "inventory.opening",
+      entity: "StockValuation",
+      summary: `Opening/adjust ${product}: ${q} @ ₦${c}${journal ? ` (GL ${journal.entryNumber})` : ""}`,
+    });
+
+    const vals = await getValuations(station);
+    return res.status(200).json({ message: "Stock recorded", data: { valuations: vals, journal } });
+  } catch (e: any) {
+    return res.status(400).json({ message: e.message });
   }
 };
 
