@@ -615,6 +615,40 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
+    // If the role is changing, re-enforce the plan's limit for the TARGET role.
+    // Without this, promoting staff (e.g. attendant → manager) would bypass the
+    // same cap that createStaff enforces.
+    if (updates.role && updates.role !== staff.role) {
+      // Only the station owner may assign the manager role
+      if (updates.role === "manager" && !manager.isSuperManager) {
+        return res.status(403).json({ error: "Only the station owner can assign the manager role" });
+      }
+
+      const station = await FillingStation.findById(managerStation).select("staffLimits").lean();
+      const limits = (station as any)?.staffLimits || {};
+      const limitMap: Record<string, number> = {
+        attendant: limits.attendants ?? 3,
+        cashier: limits.cashiers ?? 1,
+        accountant: limits.accountants ?? 1,
+        supervisor: limits.supervisors ?? 1,
+        manager: limits.managers ?? 1,
+      };
+      const roleLimit = limitMap[updates.role];
+      if (roleLimit !== undefined) {
+        const existingCount = await Staff.countDocuments({ station: managerStation, role: updates.role });
+        if (existingCount >= roleLimit) {
+          return res.status(403).json({
+            error: `You have reached the ${updates.role} limit for your current plan (${roleLimit} max). Upgrade your plan to change this staff member's role.`,
+            limitReached: true,
+            currentCount: existingCount,
+            limit: roleLimit,
+            role: updates.role,
+            upgradeRequired: true,
+          });
+        }
+      }
+    }
+
     // If password is provided, hash it (not included in allowedFields above)
     if (req.body.password) {
       const plain = req.body.password;
