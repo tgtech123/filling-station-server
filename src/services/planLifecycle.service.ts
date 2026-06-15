@@ -35,8 +35,12 @@ export interface DowngradeConflict {
 
 /**
  * Count current staff per role and compare against a target plan's limits.
- * The super manager (station owner) is excluded from the manager count —
- * a downgrade must never require the owner to delete their own account.
+ *
+ * The manager limit INCLUDES the station owner — exactly how createStaff counts
+ * it, so the two paths agree (a "1 manager" plan means the owner only). The
+ * owner is never the staff member a conflict asks you to remove: every plan
+ * allows at least 1 manager, so the excess (current − allowed) can always be
+ * covered by the non-owner managers alone.
  */
 export async function computeDowngradeConflicts(
   stationId: string,
@@ -44,20 +48,12 @@ export async function computeDowngradeConflicts(
 ): Promise<DowngradeConflict[]> {
   const staffCounts = await Staff.aggregate([
     { $match: { station: new Types.ObjectId(String(stationId)) } },
-    {
-      $group: {
-        _id: "$role",
-        count: { $sum: 1 },
-        superManagers: {
-          $sum: { $cond: [{ $eq: ["$isSuperManager", true] }, 1, 0] },
-        },
-      },
-    },
+    { $group: { _id: "$role", count: { $sum: 1 } } },
   ]);
 
   const byRole: Record<string, number> = {};
   for (const s of staffCounts) {
-    byRole[s._id] = s._id === "manager" ? s.count - s.superManagers : s.count;
+    byRole[s._id] = s.count;
   }
 
   const conflicts: DowngradeConflict[] = [];

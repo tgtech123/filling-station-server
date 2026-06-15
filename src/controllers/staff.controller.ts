@@ -47,12 +47,19 @@ export const bulkImportStaff = async (req: AuthenticatedRequest, res: Response) 
           continue;
         }
 
+        // Only the station owner may create managers — same rule as createStaff
+        if (role.toLowerCase() === "manager" && !req.user?.isSuperManager) {
+          results.failed.push({ email, reason: "Only the station owner can create managers" });
+          continue;
+        }
+
+        // `??` not `||` so a legitimate limit of 0 is respected (not treated as missing)
         const limitMap: Record<string, number> = {
-          attendant: station?.staffLimits?.attendants || 3,
-          cashier: station?.staffLimits?.cashiers || 1,
-          accountant: station?.staffLimits?.accountants || 1,
-          supervisor: station?.staffLimits?.supervisors || 1,
-          manager: station?.staffLimits?.managers || 1,
+          attendant: station?.staffLimits?.attendants ?? 3,
+          cashier: station?.staffLimits?.cashiers ?? 1,
+          accountant: station?.staffLimits?.accountants ?? 1,
+          supervisor: station?.staffLimits?.supervisors ?? 1,
+          manager: station?.staffLimits?.managers ?? 1,
         };
 
         const currentCount = await Staff.countDocuments({
@@ -60,7 +67,7 @@ export const bulkImportStaff = async (req: AuthenticatedRequest, res: Response) 
           role: role.toLowerCase(),
         });
 
-        if (currentCount >= (limitMap[role.toLowerCase()] || 0)) {
+        if (currentCount >= (limitMap[role.toLowerCase()] ?? 0)) {
           results.failed.push({
             email,
             reason: `${role} limit reached for your plan`,

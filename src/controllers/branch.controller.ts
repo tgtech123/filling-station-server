@@ -14,21 +14,29 @@ import Tank from "../models/tanks.model";
 import { transporter } from "../middlewares/transporter.middleware";
 import { cascadeDeleteBranch } from "../utils/branchCleanup";
 
-// Resolves the root parent station and returns all accessible station IDs for a manager.
-// When the JWT station is a branch, we traverse up one level to the parent so the manager
-// can always see and switch back to the main station and any sibling branches.
+// Returns the set of station IDs a manager may access.
+//
+// Only the OWNER (super manager — whose HOME station is a root) gets the whole
+// tree: the root plus every branch. A branch (non-owner) manager is scoped
+// strictly to their own JWT station, so they can never see, switch to, or report
+// on the parent or sibling branches. Ownership is derived from the manager's
+// home station (Staff.station), which never changes on switch — not from the
+// JWT flag, which an old bug could set incorrectly.
 async function getAccessibleIds(stationId: any, manager: any): Promise<string[]> {
-  const station = await FillingStation.findById(stationId).lean() as any;
-  let rootStation: any = station;
-  if (station?.parentStation) {
-    const parent = await FillingStation.findById(station.parentStation).lean() as any;
-    if (parent) rootStation = parent;
+  const home = manager?.station
+    ? (await FillingStation.findById(manager.station).select("parentStation branches").lean()) as any
+    : null;
+  const isOwner = !!home && !home.parentStation;
+
+  if (!isOwner) {
+    return [stationId?.toString()].filter(Boolean) as string[];
   }
+
   const ids = new Set<string>([
+    home._id?.toString(),
     stationId?.toString(),
-    rootStation?._id?.toString(),
     ...(manager?.managedStations || []).map((id: any) => id.toString()),
-    ...(rootStation?.branches || []).map((id: any) => id.toString()),
+    ...(home?.branches || []).map((id: any) => id.toString()),
   ].filter(Boolean) as string[]);
   return [...ids];
 }
@@ -37,13 +45,21 @@ async function getAccessibleIds(stationId: any, manager: any): Promise<string[]>
 export const createBranch = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const managerId = req.user?._id || req.user?.id;
-    const parentStationId = req.user?.station;
 
-    const parentStation = await FillingStation.findById(parentStationId);
-
-    if (!parentStation) {
+    // Always create branches under the ROOT station. If the owner is currently
+    // switched into a branch (JWT station = branch), traverse up so we never
+    // nest a branch under another branch.
+    const jwtStation = await FillingStation.findById(req.user?.station);
+    if (!jwtStation) {
       return res.status(404).json({ error: "Station not found" });
     }
+    const parentStation = jwtStation.parentStation
+      ? await FillingStation.findById(jwtStation.parentStation)
+      : jwtStation;
+    if (!parentStation) {
+      return res.status(404).json({ error: "Parent station not found" });
+    }
+    const parentStationId = parentStation._id;
 
     const enterprisePlans = ["enterprise", "enterprise-pro", "enterprise-max"];
     if (!enterprisePlans.includes(parentStation.plan)) {
@@ -112,7 +128,9 @@ export const createBranch = async (req: AuthenticatedRequest, res: Response) => 
       averageMonthlyRevenue: parentStation.averageMonthlyRevenue || "0",
       fuelTypesOffered: fuelTypesOffered || parentStation.fuelTypesOffered || [],
       additionalServices: parentStation.additionalServices || [],
-      plan: "enterprise",
+      // Inherit the parent's actual tier (enterprise / enterprise-pro / -max),
+      // not a hardcoded "enterprise" — keeps branch plan state truthful.
+      plan: parentStation.plan,
       planId: parentStation.planId,
       planStatus: "active",
       planStartDate: parentStation.planStartDate,
@@ -278,6 +296,16 @@ export const switchStation = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(404).json({ error: "Station not found" });
     }
 
+    // Derive ownership from the manager's HOME station (Staff.station never changes
+    // on switch), NOT a hardcoded `true`. Otherwise a branch manager could switch to
+    // their own station and mint an isSuperManager token — a privilege-escalation
+    // trusted by createStaff/updateStaff/bulkImport/salary. Ownership is constant
+    // regardless of which station the owner is currently viewing.
+    const homeStation = manager?.station
+      ? (await FillingStation.findById(manager.station).select("parentStation").lean()) as any
+      : null;
+    const isOwner = req.user?.role === "manager" && !!homeStation && !homeStation.parentStation;
+
     const newToken = jwt.sign(
       {
         id: managerId,
@@ -286,7 +314,7 @@ export const switchStation = async (req: AuthenticatedRequest, res: Response) =>
         lastName: req.user?.lastName,
         station: targetStationId,
         email: req.user?.email,
-        isSuperManager: true,
+        isSuperManager: isOwner,
       },
       process.env.JWT_SECRET!,
       { expiresIn: "7d" }
@@ -727,6 +755,15 @@ export const getInvites = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { branchId } = req.params;
 
+    // Cross-owner isolation: the branch must belong to THIS owner's tree. Without
+    // this, an owner could read another company's pending invites by guessing a
+    // branchId (the route is owner-only, but ownership of *this* branch is separate).
+    const manager = await Staff.findById(req.user?._id || req.user?.id).lean();
+    const accessibleIds = await getAccessibleIds(req.user?.station, manager);
+    if (!accessibleIds.includes(branchId?.toString())) {
+      return res.status(403).json({ error: "You do not have access to this branch" });
+    }
+
     const invites = await InviteToken.find({
       station: branchId,
       used: false,
@@ -755,6 +792,19 @@ export const getInvites = async (req: AuthenticatedRequest, res: Response) => {
 export const revokeInvite = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { inviteId } = req.params;
+
+    const invite = await InviteToken.findById(inviteId).lean() as any;
+    if (!invite) {
+      return res.status(404).json({ error: "Invite not found" });
+    }
+
+    // Cross-owner isolation: the invite's target station must live in THIS owner's
+    // tree, otherwise an owner could revoke another company's invites by id.
+    const manager = await Staff.findById(req.user?._id || req.user?.id).lean();
+    const accessibleIds = await getAccessibleIds(req.user?.station, manager);
+    if (!accessibleIds.includes(invite.station?.toString())) {
+      return res.status(403).json({ error: "You do not have access to this invite" });
+    }
 
     await InviteToken.findByIdAndDelete(inviteId);
 
