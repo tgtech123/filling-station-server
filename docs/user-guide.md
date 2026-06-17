@@ -17,7 +17,7 @@
 9. [Fuel Management — Pumps, Tanks & Pricing](#9-fuel-management--pumps-tanks--pricing)
 10. [Lubricant Sales & Inventory](#10-lubricant-sales--inventory)
 11. [Gas Department (CNG / LPG)](#11-gas-department-cng--lpg)
-12. [Financial Reports & Cash Reconciliation](#12-financial-reports--cash-reconciliation)
+12. [Financial Reports & Cash Reconciliation](#12-financial-reports--cash-reconciliation) — reports, reconciliation & the Accounting Suite
 13. [Expense Management](#13-expense-management)
 14. [Payroll & Commissions](#14-payroll--commissions)
 15. [Procurement & Supplier Management](#15-procurement--supplier-management)
@@ -43,6 +43,7 @@ With FuelDesk you can:
 - Run a full gas department (CNG/LPG) including customer loyalty points
 - Handle payroll, commissions, and expenses from one place
 - Generate financial reports (income statements, cash reconciliation, P&L)
+- Run a full double-entry **Accounting Suite** — chart of accounts, payables, receivables, bank reconciliation, tax, and per-product profit (accountant role)
 - Manage multiple branch stations from a single account
 - Pay for your subscription and upgrade your plan through the platform
 - Receive real-time alerts for low stock, completed shifts, and critical events
@@ -60,7 +61,7 @@ Every person who uses FuelDesk is given a **role**. Your role decides what you c
 | **Manager** | The station owner | Full access to everything — staff, finances, reports, settings, subscriptions |
 | **Super Manager** | Owner of multiple branches | Same as Manager but across all branches at once |
 | **Supervisor** | Senior operations lead | Approve shifts, manage attendants, view reports, submit dip readings |
-| **Accountant** | Finance/accounting staff | View all financial data, run statements, manage payroll drafts, expenses |
+| **Accountant** | Finance/accounting staff | View all financial data, run statements, manage payroll drafts and expenses, and operate the full **Accounting Suite** (chart of accounts, journals, payables, receivables, tax, close) |
 | **Cashier** | POS operator | Record sales, manage daily reconciliation, handle lubricant transactions |
 | **Attendant** | Pump operator | Start and end shifts, record pump readings, view own performance |
 | **Admin** | FuelDesk platform team | Manage all stations, subscriptions, and platform settings (not your station staff) |
@@ -717,6 +718,38 @@ Go to **Analytics** to see:
 - **Staff performance** — who is selling the most
 - **Period comparison** — this month vs. last month
 
+### 12.6 The Accounting Suite (Accountant)
+
+> **Who can use it:** Accountant only. The Manager sees a single read-only **Accounting Overview** (headline totals) but cannot open the working screens.
+
+Beyond the simple reports above, FuelDesk includes a full **double-entry accounting system** — the kind a professional bookkeeper expects. Your accountant builds and runs it; nothing is pre-filled, so it is set up once at the start.
+
+**What it covers:**
+
+- **Chart of Accounts** — your list of financial accounts (cash, bank, sales, cost of goods, VAT, etc.), created once at setup.
+- **Journal Entries** — manual double-entry postings. Every entry must balance (debits = credits). Large entries (₦500,000+) need a second person to approve — you cannot approve your own.
+- **Accounts Payable (money you owe)** — register supplier invoices, match them to purchase orders, and pay them in approved batches (with EFT file or cheque-printing data).
+- **Accounts Receivable (money owed to you)** — set up credit customers, raise invoices (including recurring ones), record receipts, and issue credit notes.
+- **Bank Reconciliation** — import your bank statement (CSV) and auto-match it against your records.
+- **Tax Engine** — define VAT / WHT / Sales-Tax codes, preview tax, and produce a filing/liability report.
+- **Inventory Valuation** — fuel stock is valued automatically at weighted-average cost, so every sale's cost of goods is accurate.
+- **Fixed Assets** — track depreciation and record asset disposals.
+- **Foreign Currency (FX)** — revalue foreign-currency balances at month end.
+- **Reports** — Trial Balance, Balance Sheet, Income Statement (with **per-product profit margin**), General Ledger, Cash Flow, Aging, and Budget vs Actual.
+
+**The monthly routine (recommended order):**
+
+1. **Post Product Sales** for the month — records each product's revenue and cost of goods.
+2. **Run Depreciation** on fixed assets.
+3. **Run FX Revaluation** — only if you hold foreign-currency accounts.
+4. **Reconcile the bank.**
+5. **Close the sub-ledgers** (Payables, Receivables, Inventory).
+6. **Close the General Ledger** last. Closing December also runs the year-end close automatically.
+
+Each month-end task runs **once per month** and is recorded in the audit trail. Posted entries are never edited — to correct one, the accountant **reverses** it, which keeps a clean, auditable trail.
+
+> **For Managers:** open **Accounting** to see the **Executive Overview** — revenue, expenses, profit, and cash at a glance. The detailed working screens belong to the accountant.
+
 ---
 
 ## 13. Expense Management
@@ -900,6 +933,17 @@ Your dashboard will reload showing data for that station.
 1. Go to **Reports** or **Consolidated Payroll**
 2. Choose **All Branches**
 3. The report combines data from all your stations
+
+### 16.5 Who Can Do What Across Branches (Access Rules)
+
+FuelDesk separates the **station owner** from **branch managers**, and access is strictly enforced:
+
+- **Station Owner (Super Manager)** — the person who registered the main station. Only the owner can **create branches**, **invite or remove branch managers**, **transfer staff between branches**, **delete a branch**, and **see, switch between, and report on all branches** (including consolidated reports).
+- **Branch Manager** — invited to run a single branch. When a branch manager logs in, they see **only their own branch**. They cannot view, switch to, or report on the main station or any sibling branch, and they cannot create new branches.
+
+> This keeps each branch manager focused on their own location while the owner keeps the full picture. If a branch manager needs to work in another branch, the owner must invite them there.
+
+Note also: only the **owner** can assign the **Manager** role to a staff member, and every role remains capped by your plan's staff limits (see Section 7).
 
 ---
 
@@ -1226,6 +1270,19 @@ Click any notification to read the full details. Use **Mark All Read** to clear 
    - Public-facing station count and platform info
    - Support contact details shown to users
 
+### 20.10 Tax / VAT Rates (Admin)
+
+The VAT/tax that is added on top of subscription prices at checkout is set **per country** and is now editable from Platform Settings — you no longer need a developer to change it when a government rate changes.
+
+1. Open **Settings** in the admin sidebar and find the **Tax / VAT Rates** controls
+2. Each entry is a country with its current rate (for example, Nigeria — 7.5%)
+3. Update the rate for the country that changed and **Save**
+4. Only the country you edited is updated — every other country's rate stays exactly as it was
+
+> **When it applies:** the new rate is used on the **next** payment a customer starts after you save. Payments already in progress keep the rate they were originally quoted.
+
+> **Who remits this VAT?** It is collected from the customer at checkout and settles into the platform's own account along with the subscription fee — so the **platform business remits it to the tax authority**, not Paystack. Paystack only moves the money; it does not split out or forward the tax.
+
 ---
 
 ## 21. Getting Help & Support
@@ -1314,7 +1371,19 @@ Yes. Go to **System Settings** > **Subscription & Billing**, find the amber down
 **Q: I am on the highest plan and the Upgrade button is missing. Is this a bug?**
 No, this is correct. If you are on the highest available plan, there is nothing to upgrade to — so the button changes to **Renew Plan** instead. Click it to extend your current plan by another month or year.
 
+**Q: What is the difference between the Financial Reports and the Accounting Suite?**
+The **Financial Reports** (Section 12.3) are quick, ready-made summaries — income statement, cash flow, sales, and so on — that any accountant or manager can read. The **Accounting Suite** (Section 12.6) is a full double-entry bookkeeping system: chart of accounts, journals, payables, receivables, bank reconciliation, tax, fixed assets, and month-end close. The suite is **accountant-only**; the manager just sees a read-only overview.
+
+**Q: I am a branch manager and I cannot see the other branches or the main station. Why?**
+That is by design. A branch manager can only see and manage their **own** branch. Viewing all branches, switching between them, transferring staff, and consolidated reports are reserved for the **station owner** (super manager). If you need access to another branch, ask the owner to invite you there.
+
+**Q: Our country's VAT rate just changed. Do we need a developer to update it?**
+No. A FuelDesk platform administrator can change the VAT/tax rate per country directly in **Admin → Settings → Tax / VAT Rates** (Section 20.10). The new rate applies to the next payment a customer starts. Station owners do not set this themselves — it is a platform-level setting.
+
+**Q: Who pays the VAT shown on my subscription payment to the government?**
+The VAT is added at checkout, collected from you (the customer), and settled into the platform's account together with the subscription fee. The **platform business** then remits that VAT to the tax authority. Paystack only processes the payment — it does not forward the tax on anyone's behalf.
+
 ---
 
-*FuelDesk User Guide — Version 2.0*
+*FuelDesk User Guide — Version 2.1*
 *For support, contact the FuelDesk team through the Help section inside the application.*

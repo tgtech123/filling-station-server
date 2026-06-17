@@ -50,6 +50,7 @@ No query parameters or request body required.
     "contactAddress": "Km 2 Airport Road, Rukpokwu, Port Harcourt, Rivers State",
     "currency": "Nigerian Naira (NGN)",
     "currencyCode": "NGN",
+    "taxRates": { "NG": 0.075, "GH": 0.15, "KE": 0.16, "US": 0.08 },
     "termsAndConditions": "By using Flourish Station, you agree to our terms of service...",
     "planStatus": true,
     "emailNotifications": true,
@@ -77,6 +78,7 @@ No query parameters or request body required.
 | `contactAddress` | string | Physical office address |
 | `currency` | string | Full currency label (e.g. `"Nigerian Naira (NGN)"`) |
 | `currencyCode` | string | ISO currency code (e.g. `"NGN"`) — use this for formatting |
+| `taxRates` | object | Per-country VAT/tax rates as **decimal fractions** (`0.075` = 7.5%), keyed by 2-letter country code. Used by the payment flow to add VAT on top of the plan price |
 | `termsAndConditions` | string | Full terms and conditions text. Empty string if not set |
 | `planStatus` | boolean | Whether subscription plans are visible to customers on the pricing page |
 | `emailNotifications` | boolean | Master toggle for email alert delivery |
@@ -115,6 +117,7 @@ All fields are optional. Omitted fields are left unchanged.
 | `contactAddress` | string | `"Km 2 Airport Road..."` | Office address |
 | `currency` | string | `"Nigerian Naira (NGN)"` | Full currency label |
 | `currencyCode` | string | `"NGN"` | ISO currency code |
+| `taxRates` | object | per-country defaults | **Partial** map of `{ "<2-letter code>": <rate> }`. Rate is a decimal fraction (`0.075` = 7.5%), `0 ≤ rate ≤ 1`. Merged into existing rates — only the countries you send change; the rest are untouched |
 | `termsAndConditions` | string | `""` | Terms and conditions text |
 | `planStatus` | boolean | `true` | Show/hide plans on pricing page |
 | `emailNotifications` | boolean | `true` | Email alerts master toggle |
@@ -143,6 +146,18 @@ All fields are optional. Omitted fields are left unchanged.
   "systemAlerts": false
 }
 ```
+
+### Example — change the Nigeria VAT rate to 10%
+
+Send only the country you want to change — the others are preserved by the server-side merge. The rate is a **decimal fraction**, so 10% is `0.10` (the UI should let the admin type `10` and divide by 100 before sending).
+
+```json
+{
+  "taxRates": { "NG": 0.10 }
+}
+```
+
+Validation: each key must be a 2-letter country code and each value a number between `0` and `1`. An invalid entry returns `400` with a message naming the offending country, and **no** rates are changed.
 
 ### Response `200` — JSON
 
@@ -187,12 +202,13 @@ No query parameters, request body, or auth header required.
     "contactPhone": "+234 9030203547",
     "contactAddress": "Km 2 Airport Road, Rukpokwu, Port Harcourt, Rivers State",
     "currency": "Nigerian Naira (NGN)",
-    "currencyCode": "NGN"
+    "currencyCode": "NGN",
+    "taxRates": { "NG": 0.075, "GH": 0.15, "KE": 0.16, "US": 0.08 }
   }
 }
 ```
 
-If no settings document exists in the database yet, the server returns the hardcoded defaults above — the response shape is always the same.
+If no settings document exists in the database yet, the server returns the hardcoded defaults above — the response shape is always the same. `taxRates` (decimal fractions, e.g. `0.075` = 7.5%) is included so the pricing and upgrade screens can show **base + VAT = total** before the customer pays — the same total the payment API charges.
 
 ### Fields returned
 
@@ -204,6 +220,7 @@ If no settings document exists in the database yet, the server returns the hardc
 | `contactAddress` | Render on the contact page |
 | `currency` | Full label for display (e.g. `"Nigerian Naira (NGN)"`) |
 | `currencyCode` | Use for price formatting (e.g. `Intl.NumberFormat("en-NG", { currency: "NGN" })`) |
+| `taxRates` | Per-country VAT rates (decimal fractions). Use the relevant country's rate to show `base + VAT = total` on the pricing/checkout screens |
 
 Toggle fields (`planStatus`, `emailNotifications`, etc.) are **not** returned by this endpoint — they are internal admin controls.
 

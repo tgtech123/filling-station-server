@@ -1,5 +1,24 @@
 import mongoose, { Document, Schema } from "mongoose";
 
+// Default VAT/tax rate per ISO country code, stored as a DECIMAL fraction
+// (0.075 = 7.5%). These seed a new settings document and act as the fallback
+// when a country has no override configured — so payments never break if the
+// settings doc is missing or a country isn't listed.
+export const DEFAULT_TAX_RATES: Record<string, number> = {
+  NG: 0.075, // Nigeria 7.5%
+  GH: 0.15,  // Ghana 15%
+  KE: 0.16,  // Kenya 16%
+  ZA: 0.15,  // South Africa 15%
+  EG: 0.14,  // Egypt 14%
+  GB: 0.20,  // UK 20%
+  US: 0.08,  // US average 8%
+  CA: 0.13,  // Canada 13%
+  AU: 0.10,  // Australia 10%
+  IN: 0.18,  // India 18%
+  DE: 0.19,  // Germany 19%
+  FR: 0.20,  // France 20%
+};
+
 export interface IPlatformSettings extends Document {
   _id: mongoose.Types.ObjectId;
   platformName: string;
@@ -8,6 +27,7 @@ export interface IPlatformSettings extends Document {
   contactAddress: string;
   currency: string;
   currencyCode: string;
+  taxRates: Map<string, number>;
   termsAndConditions: string;
   planStatus: boolean;
   emailNotifications: boolean;
@@ -54,6 +74,13 @@ const PlatformSettingsSchema = new Schema<IPlatformSettings>(
       type: String,
       default: "NGN",
       trim: true,
+    },
+    // Editable per-country VAT/tax rates (decimal fraction, 0.075 = 7.5%).
+    // Admin-managed via PATCH /api/admin/settings; read by the payment flow.
+    taxRates: {
+      type: Map,
+      of: Number,
+      default: () => new Map(Object.entries(DEFAULT_TAX_RATES)),
     },
     termsAndConditions: {
       type: String,
