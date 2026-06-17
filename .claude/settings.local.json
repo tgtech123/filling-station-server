@@ -40,7 +40,9 @@
       "PowerShell(node scripts\\\\test-avco.js)",
       "PowerShell(Get-ChildItem \"c:\\\\Users\\\\TGTECH\\\\Desktop\\\\filling-station-client\\\\src\\\\app\\\\dashboard\\\\gas\\\\procurement\" -Recurse -File | Select-Object Name; \"--- store ---\"; Get-ChildItem \"c:\\\\Users\\\\TGTECH\\\\Desktop\\\\filling-station-client\\\\src\\\\store\" -File | Where-Object { $_.Name -match \"[Gg]as|[Pp]rocure\" } | Select-Object Name)",
       "PowerShell(node scripts\\\\check-gas-procurement.js)",
-      "PowerShell(node scripts\\\\check-plan-gating.js)"
+      "PowerShell(node scripts\\\\check-plan-gating.js)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\); console.log\\('eslint:', !!\\(p.devDependencies?.eslint||p.dependencies?.eslint\\)\\)\")",
+      "PowerShell(npm *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",

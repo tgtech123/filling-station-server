@@ -12,7 +12,7 @@ import SubscriptionPayment from "../models/subscriptionPayment.model";
 import AdminLog from "../models/adminLog.model";
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Payment from "../models/payment.model";
-import PlatformSettings from "../models/platformSettings.model";
+import PlatformSettings, { DEFAULT_TAX_RATES } from "../models/platformSettings.model";
 import { getCache, setCache, deleteCache } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
 import crypto from "crypto";
@@ -1069,10 +1069,13 @@ export const seedPlatformSettings = async () => {
 // GET /api/admin/settings
 export const getPlatformSettings = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let settings = await PlatformSettings.findOne().lean();
+    // No .lean() on purpose: the taxRates Map only serializes correctly (and
+    // schema defaults only backfill on older docs missing the field) when we
+    // return a hydrated document, not a lean POJO.
+    let settings = await PlatformSettings.findOne();
 
     if (!settings) {
-      settings = await PlatformSettings.create({ platformName: "FuelDesk" }) as any;
+      settings = await PlatformSettings.create({ platformName: "FuelDesk" });
     }
 
     return res.status(200).json({
@@ -1094,6 +1097,7 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
       contactAddress,
       currency,
       currencyCode,
+      taxRates,
       termsAndConditions,
       planStatus,
       emailNotifications,
@@ -1117,6 +1121,37 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
     if (contactAddress !== undefined) updates.contactAddress = contactAddress;
     if (currency !== undefined) updates.currency = currency;
     if (currencyCode !== undefined) updates.currencyCode = currencyCode;
+
+    // Per-country VAT/tax rates. Accepts a partial map { NG: 0.075, GH: 0.15 }
+    // where each rate is a DECIMAL fraction (0.075 = 7.5%). Validated then merged
+    // into the existing rates so editing one country never wipes the others.
+    if (taxRates !== undefined) {
+      if (typeof taxRates !== "object" || taxRates === null || Array.isArray(taxRates)) {
+        return res.status(400).json({
+          error: "taxRates must be an object mapping 2-letter country codes to rates, e.g. { \"NG\": 0.075 }",
+        });
+      }
+      for (const [code, val] of Object.entries(taxRates)) {
+        const num = Number(val);
+        if (!/^[A-Za-z]{2}$/.test(code) || !Number.isFinite(num) || num < 0 || num > 1) {
+          return res.status(400).json({
+            error: `Invalid tax rate for "${code}". Use a 2-letter country code and a rate between 0 and 1 (e.g. 0.075 for 7.5%).`,
+          });
+        }
+      }
+      // Seed from the current doc, or from defaults if none exists yet, so an
+      // upsert that sets only one country still carries the full rate table.
+      const current = await PlatformSettings.findOne().select("taxRates");
+      const merged: Record<string, number> =
+        current?.taxRates && current.taxRates.size
+          ? Object.fromEntries(current.taxRates)
+          : { ...DEFAULT_TAX_RATES };
+      for (const [code, val] of Object.entries(taxRates)) {
+        merged[code.toUpperCase()] = Number(val);
+      }
+      updates.taxRates = merged;
+    }
+
     if (termsAndConditions !== undefined) updates.termsAndConditions = termsAndConditions;
     if (planStatus !== undefined) updates.planStatus = planStatus;
     if (emailNotifications !== undefined) updates.emailNotifications = emailNotifications;
@@ -1153,9 +1188,18 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
 // GET /api/admin/settings/public â€" no auth needed
 export const getPublicSettings = async (req: Request, res: Response) => {
   try {
-    const settings = await PlatformSettings.findOne()
-      .select("platformName contactEmail contactPhone contactAddress currency currencyCode termsAndConditions supportWhatsApp logoUrl")
-      .lean();
+    // No .lean(): taxRates is a Map and only serializes correctly from a hydrated
+    // doc (and the schema default backfills it for docs created before the field).
+    const settings = await PlatformSettings.findOne().select(
+      "platformName contactEmail contactPhone contactAddress currency currencyCode termsAndConditions supportWhatsApp logoUrl taxRates"
+    );
+
+    // Per-country VAT rates (decimal fractions) so the pricing/upgrade screens can
+    // show the client base + VAT = total before they pay. Falls back to defaults.
+    const taxRates =
+      settings?.taxRates && settings.taxRates.size
+        ? Object.fromEntries(settings.taxRates)
+        : DEFAULT_TAX_RATES;
 
     return res.status(200).json({
       message: "Public settings retrieved",
@@ -1169,6 +1213,7 @@ export const getPublicSettings = async (req: Request, res: Response) => {
         termsAndConditions: settings?.termsAndConditions || "No terms available",
         supportWhatsApp: settings?.supportWhatsApp || "",
         logoUrl: settings?.logoUrl || "",
+        taxRates,
       },
     });
   } catch (err: any) {

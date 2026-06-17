@@ -5,6 +5,7 @@ import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Payment from "../models/payment.model";
 import FillingStation from "../models/fillingStation.model";
+import PlatformSettings, { DEFAULT_TAX_RATES } from "../models/platformSettings.model";
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import AdminLog from "../models/adminLog.model";
 import Staff from "../models/staff.model";
@@ -29,26 +30,25 @@ const getPaystackHeaders = () => ({
   "Content-Type": "application/json",
 });
 
-const TAX_RATES: Record<string, number> = {
-  NG: 0.075, // Nigeria 7.5%
-  GH: 0.15,  // Ghana 15%
-  KE: 0.16,  // Kenya 16%
-  ZA: 0.15,  // South Africa 15%
-  EG: 0.14,  // Egypt 14%
-  GB: 0.20,  // UK 20%
-  US: 0.08,  // US average 8%
-  CA: 0.13,  // Canada 13%
-  AU: 0.10,  // Australia 10%
-  IN: 0.18,  // India 18%
-  DE: 0.19,  // Germany 19%
-  FR: 0.20,  // France 20%
+// Resolve the live VAT/tax rate for a country. Reads the admin-editable rates
+// from PlatformSettings and falls back to DEFAULT_TAX_RATES (and finally 0) so a
+// missing settings doc or an unlisted country can never block a payment.
+const getTaxRate = async (countryCode: string): Promise<number> => {
+  const code = (countryCode || "").toUpperCase();
+  try {
+    const settings = await PlatformSettings.findOne().select("taxRates");
+    const fromDb = settings?.taxRates?.get(code);
+    if (typeof fromDb === "number" && fromDb >= 0) return fromDb;
+  } catch {
+    // Settings read failed — fall through to the compiled-in defaults.
+  }
+  return DEFAULT_TAX_RATES[code] ?? 0;
 };
 
 const calculateTax = (
   amount: number,
-  countryCode: string
+  rate: number
 ): { baseAmount: number; tax: number; totalAmount: number } => {
-  const rate = TAX_RATES[countryCode] || 0;
   const tax = Math.round(amount * rate);
   const totalAmount = amount + tax;
   return { baseAmount: amount, tax, totalAmount };
@@ -76,7 +76,8 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ error: "Cannot process payment for free plan" });
     }
 
-    const { baseAmount, tax, totalAmount } = calculateTax(amountNaira, country);
+    const taxRate = await getTaxRate(country);
+    const { baseAmount, tax, totalAmount } = calculateTax(amountNaira, taxRate);
     const amountKobo = totalAmount * 100;
 
     const reference = `FS_${stationId}_${Date.now()}_${planSlug}`;
@@ -110,7 +111,7 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
           baseAmount,
           taxAmount: tax,
           totalAmount,
-          taxPercentage: (TAX_RATES[country] || 0) * 100,
+          taxPercentage: taxRate * 100,
         },
         callback_url: `${getFrontendUrl()}/payment/verify?reference=${reference}`,
       },
@@ -143,7 +144,7 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
         baseAmount,
         tax,
         totalAmount,
-        taxPercentage: (TAX_RATES[country] || 0) * 100,
+        taxPercentage: taxRate * 100,
         plan: plan.name,
         billingCycle,
         country,
@@ -191,7 +192,8 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
       return res.status(400).json({ error: "Cannot process payment for free plan" });
     }
 
-    const { baseAmount, tax, totalAmount } = calculateTax(amountNaira, country);
+    const taxRate = await getTaxRate(country);
+    const { baseAmount, tax, totalAmount } = calculateTax(amountNaira, taxRate);
     const amountKobo = totalAmount * 100;
     const reference = `FS_GUEST_${Date.now()}_${planSlug}`;
 
@@ -214,7 +216,7 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
           baseAmount,
           taxAmount: tax,
           totalAmount,
-          taxPercentage: (TAX_RATES[country] || 0) * 100,
+          taxPercentage: taxRate * 100,
         },
         callback_url: `${getFrontendUrl()}/payment/verify?reference=${reference}&guest=true`,
       },
@@ -247,7 +249,7 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
         baseAmount,
         tax,
         totalAmount,
-        taxPercentage: (TAX_RATES[country] || 0) * 100,
+        taxPercentage: taxRate * 100,
         plan: plan.name,
         billingCycle,
         country,
