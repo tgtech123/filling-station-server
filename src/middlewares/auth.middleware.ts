@@ -5,6 +5,21 @@ import { Types } from "mongoose";
 import StationStatus from "../models/stationStatus.model";
 import FillingStation from "../models/fillingStation.model";
 import { applyDueDowngrade } from "../services/planLifecycle.service";
+import {
+  getCache,
+  setCache,
+  invalidateStationAuthCache,
+  stationAuthKey,
+  stationStatusKey,
+} from "../config/redis";
+
+// The auth gate runs on EVERY authenticated request and was doing 1–2 Mongo
+// reads each time (station + emergency status). Cache them for a few seconds:
+// at scale this is the hottest query path, and a short TTL keeps any staleness
+// (plan/suspend/emergency changes) tiny. Mutations that matter invalidate the
+// cache explicitly (see invalidateStationAuthCache call sites), so the TTL is
+// only a backstop.
+const STATION_AUTH_TTL = 20; // seconds
 
 // Paths where expired plans must NOT block access — so managers can still pay/renew
 // and all users can still view their notification alerts.
@@ -42,16 +57,31 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
       const stationId = new Types.ObjectId(decoded.station);
       const isNonManager = decoded.role !== "manager";
 
-      // Run station lookup and emergency-mode check in parallel.
+      // Station lookup + emergency-mode check, served from a short-lived cache
+      // (STATION_AUTH_TTL) so this per-request gate stays off the database at scale.
       // Managers skip StationStatus (they are never locked out by emergency mode).
-      const [station, status] = await Promise.all([
-        FillingStation.findById(stationId)
+      const stKey = stationAuthKey(decoded.station.toString());
+      const ssKey = stationStatusKey(decoded.station.toString());
+
+      let station: any = await getCache(stKey);
+      if (!station) {
+        station = await FillingStation.findById(stationId)
           .select("isActive isDeleted planExpiryDate pendingDowngrade pendingDowngradeTo downgradeAt")
-          .lean(),
-        isNonManager
-          ? StationStatus.findOne({ fillingStation: stationId }).lean()
-          : Promise.resolve(null),
-      ]);
+          .lean();
+        if (station) await setCache(stKey, station, STATION_AUTH_TTL);
+      }
+
+      let status: { emergencyMode: boolean } | null = null;
+      if (isNonManager) {
+        status = await getCache(ssKey);
+        if (!status) {
+          const statusDoc = await StationStatus.findOne({ fillingStation: stationId })
+            .select("emergencyMode")
+            .lean();
+          status = { emergencyMode: !!(statusDoc as any)?.emergencyMode };
+          await setCache(ssKey, status, STATION_AUTH_TTL);
+        }
+      }
 
       // Station suspended or deleted — block everyone
       if (!station || !(station as any).isActive || (station as any).isDeleted) {
@@ -79,8 +109,15 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
         new Date((station as any).downgradeAt) <= new Date()
       ) {
         try {
-          const applied = await applyDueDowngrade(stationId, station as any);
-          if (applied) effectiveStation = applied;
+          // No snapshot passed: applyDueDowngrade re-reads a fresh doc so its
+          // atomic, date-conditioned write is never fed a stale (string-dated)
+          // CACHED snapshot — which would silently fail to match and skip the
+          // downgrade. Invalidate after applying so the next request sees the new plan.
+          const applied = await applyDueDowngrade(stationId);
+          if (applied) {
+            effectiveStation = applied;
+            await invalidateStationAuthCache(decoded.station.toString());
+          }
         } catch (applyErr: any) {
           console.error("applyDueDowngrade:", applyErr.message);
         }

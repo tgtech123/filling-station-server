@@ -51,4 +51,23 @@ export const deleteCachePattern = async (pattern: string): Promise<void> => {
   }
 };
 
+// Keys for the per-request station data the auth middleware caches (the plan/
+// active/emergency gate). Explicit keys — never KEYS-scanned — so invalidation
+// is a cheap, exact delete.
+export const stationAuthKey = (stationId: string) => `auth:st:${stationId}`;
+export const stationStatusKey = (stationId: string) => `auth:ss:${stationId}`;
+
+/**
+ * Drop the cached auth gate for a station. Call this whenever something that the
+ * gate depends on changes — suspension/restore (isActive), emergency mode, or a
+ * plan change (expiry/downgrade) — so the new state takes effect immediately
+ * instead of waiting out the short TTL.
+ */
+export const invalidateStationAuthCache = async (
+  stationId: string | { toString(): string }
+): Promise<void> => {
+  const id = stationId.toString();
+  await Promise.all([deleteCache(stationAuthKey(id)), deleteCache(stationStatusKey(id))]);
+};
+
 export default redis;

@@ -327,76 +327,101 @@ export const createARInvoice = async (req: AuthenticatedRequest, res: Response) 
 };
 
 /**
- * Recurring billing sweep: generate the next instance of every recurring
- * invoice that has come due. Called from the UI ("Run recurring billing")
- * — this host has no cron worker, mirroring how scheduled downgrades work.
+ * Core recurring-billing sweep, decoupled from any HTTP request so the
+ * background scheduler can run it. Generates the next instance of every
+ * recurring invoice that has come due.
+ *   - No opts        → ALL stations (the scheduler). The actor recorded on each
+ *                       generated invoice/audit is the template's own createdBy.
+ *   - opts.station   → a single station on demand (the endpoint), with
+ *     + actorUserId    the requesting user as actor.
+ * Returns the invoice numbers generated. Idempotent: each template's nextRunAt
+ * is only advanced after its invoice posts, so a failed/closed period is retried
+ * next sweep and a re-run never double-bills.
+ */
+export async function generateDueRecurringInvoices(opts?: {
+  station?: any;
+  actorUserId?: string;
+}): Promise<string[]> {
+  const now = new Date();
+  const query: any = {
+    "recurring.enabled": true,
+    "recurring.nextRunAt": { $lte: now },
+    status: { $ne: "void" },
+  };
+  if (opts?.station) query.fillingStation = opts.station;
+
+  const due = await ARInvoice.find(query);
+  const generated: string[] = [];
+
+  for (const template of due) {
+    // Stop if past the end date
+    if (template.recurring.endDate && template.recurring.nextRunAt! > template.recurring.endDate) {
+      template.recurring.enabled = false;
+      await template.save();
+      continue;
+    }
+
+    const customer = await ARCustomer.findOne({ _id: template.customer, isActive: true });
+    if (!customer) continue;
+
+    const termDays = Math.max(
+      1,
+      Math.round((template.dueDate.getTime() - template.invoiceDate.getTime()) / 86400000)
+    );
+    const invDate = template.recurring.nextRunAt!;
+    const dueDate = new Date(invDate.getTime() + termDays * 86400000);
+    // In a scheduler run there is no request user — attribute the work to whoever
+    // set up the recurring template.
+    const actor = opts?.actorUserId ?? template.createdBy.toString();
+
+    let inv: any;
+    try {
+      inv = await buildAndPostInvoice({
+        station: template.fillingStation, userId: actor,
+        customer,
+        invoiceDate: invDate,
+        dueDate,
+        lines: template.lines,
+        taxCode: template.taxCode,
+        currency: template.currency,
+        fxRate: template.fxRate,
+        recurring: { enabled: false, parentInvoice: template._id },
+        notes: `Recurring from ${template.invoiceNumber}`,
+      });
+    } catch (genErr: any) {
+      console.error(`[recurring] ${template.invoiceNumber}:`, genErr.message);
+      continue; // period closed or other guard — leave nextRunAt for retry
+    }
+    generated.push(inv.invoiceNumber);
+
+    // Advance the template's schedule only after the invoice posted.
+    template.recurring.nextRunAt = nextRunDate(invDate, template.recurring.frequency!);
+    if (template.recurring.endDate && template.recurring.nextRunAt > template.recurring.endDate) {
+      template.recurring.enabled = false;
+    }
+    await template.save();
+
+    audit({
+      stationId: template.fillingStation, userId: actor, action: "ar.recurring.run",
+      entity: "ARInvoice",
+      summary: `Recurring billing generated ${inv.invoiceNumber} from ${template.invoiceNumber}`,
+    });
+  }
+
+  return generated;
+}
+
+/**
+ * Endpoint wrapper: run the recurring sweep for the caller's station on demand
+ * ("Run recurring billing" in the UI). The scheduler runs the same logic for
+ * every station automatically, so this is now a convenience/manual trigger.
  */
 export const runRecurringBilling = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
     if (!station) return noStation(res);
 
-    const now = new Date();
-    const due = await ARInvoice.find({
-      fillingStation: station,
-      "recurring.enabled": true,
-      "recurring.nextRunAt": { $lte: now },
-      status: { $ne: "void" },
-    });
-
-    const generated: any[] = [];
-    for (const template of due) {
-      // Stop if past the end date
-      if (template.recurring.endDate && template.recurring.nextRunAt! > template.recurring.endDate) {
-        template.recurring.enabled = false;
-        await template.save();
-        continue;
-      }
-
-      const customer = await ARCustomer.findOne({ _id: template.customer, isActive: true });
-      if (!customer) continue;
-
-      const termDays = Math.max(
-        1,
-        Math.round((template.dueDate.getTime() - template.invoiceDate.getTime()) / 86400000)
-      );
-      const invDate = template.recurring.nextRunAt!;
-      const dueDate = new Date(invDate.getTime() + termDays * 86400000);
-
-      try {
-        const inv = await buildAndPostInvoice({
-          station, userId: req.user!.id,
-          customer,
-          invoiceDate: invDate,
-          dueDate,
-          lines: template.lines,
-          taxCode: template.taxCode,
-          currency: template.currency,
-          fxRate: template.fxRate,
-          recurring: { enabled: false, parentInvoice: template._id },
-          notes: `Recurring from ${template.invoiceNumber}`,
-        });
-        generated.push(inv.invoiceNumber);
-      } catch (genErr: any) {
-        console.error(`[recurring] ${template.invoiceNumber}:`, genErr.message);
-        continue; // period closed or other guard — leave nextRunAt for retry
-      }
-
-      // Advance the template's schedule
-      template.recurring.nextRunAt = nextRunDate(invDate, template.recurring.frequency!);
-      if (template.recurring.endDate && template.recurring.nextRunAt > template.recurring.endDate) {
-        template.recurring.enabled = false;
-      }
-      await template.save();
-    }
-
-    if (generated.length > 0) {
-      audit({
-        stationId: station, userId: req.user!.id, action: "ar.recurring.run",
-        entity: "ARInvoice",
-        summary: `Recurring billing generated ${generated.length} invoice(s): ${generated.join(", ")}`,
-      });
-    }
+    const generated = await generateDueRecurringInvoices({ station, actorUserId: req.user!.id });
 
     return res.status(200).json({
       message: generated.length ? `${generated.length} recurring invoice(s) generated` : "Nothing due",
