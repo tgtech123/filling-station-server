@@ -5,6 +5,7 @@ import http from "http";
 import { connectDB } from "./config/db";
 import app from "./app";
 import { initSocket } from "./services/socket.service";
+import { startScheduler } from "./services/scheduler.service";
 
 // Fail fast on missing critical env — a server that boots without these would
 // 500 on every login (JWT) or refuse every DB operation, which is worse than
@@ -28,11 +29,15 @@ const startServer = async () => {
     await connectDB();
 
     const httpServer = http.createServer(app);
-    initSocket(httpServer);
+    await initSocket(httpServer);
 
     httpServer.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
+
+    // Time-based background jobs (due downgrades, recurring billing) — decoupled
+    // from user traffic, single-runner across instances via a Redis lock.
+    startScheduler();
   } catch (error) {
     console.error("❌ Failed to start server:", error);
     process.exit(1);

@@ -4,6 +4,7 @@ import { AuthenticatedRequest } from "../interfaces";
 import StationStatus from "../models/stationStatus.model";
 import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
+import { invalidateStationAuthCache } from "../config/redis";
 
 export const activateEmergency = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -27,6 +28,9 @@ export const activateEmergency = async (req: AuthenticatedRequest, res: Response
       },
       { upsert: true, new: true }
     );
+
+    // Lock staff out immediately — don't wait out the auth gate's cache TTL.
+    await invalidateStationAuthCache(stationObjectId);
 
     Activity.create({
       fillingStation: stationObjectId,
@@ -76,6 +80,9 @@ export const deactivateEmergency = async (req: AuthenticatedRequest, res: Respon
       },
       { upsert: true, new: true }
     );
+
+    // Let staff back in immediately rather than waiting out the cache TTL.
+    await invalidateStationAuthCache(stationObjectId);
 
     Activity.create({
       fillingStation: stationObjectId,

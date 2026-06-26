@@ -9,7 +9,7 @@ import PlatformSettings, { DEFAULT_TAX_RATES } from "../models/platformSettings.
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import AdminLog from "../models/adminLog.model";
 import Staff from "../models/staff.model";
-import { deleteCachePattern } from "../config/redis";
+import { deleteCachePattern, invalidateStationAuthCache } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
 import {
   computeDowngradeConflicts,
@@ -392,6 +392,8 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
 
         // Branches run on the parent's subscription — keep them in sync
         await syncPlanToBranches(existingManager.station, planFields);
+        // Unlock the (previously expired) station for the auth gate immediately.
+        await invalidateStationAuthCache(existingManager.station);
 
         // Link the payment to the station — this is also the replay marker
         // checked above, so this upgrade can never be applied twice.
@@ -468,6 +470,8 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
 
     // Branches run on the parent's subscription — keep them in sync
     await syncPlanToBranches(stationId, planFields);
+    // Unlock the (previously expired) station for the auth gate immediately.
+    await invalidateStationAuthCache(stationId);
 
     await Payment.findOneAndUpdate(
       { transactionRef: reference },
@@ -606,6 +610,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
           await FillingStation.findByIdAndUpdate(stationId, planFields);
           // Branches run on the parent's subscription — keep them in sync
           await syncPlanToBranches(stationId, planFields);
+          await invalidateStationAuthCache(stationId);
           await deleteCachePattern(`dashboard:*:${stationId}`);
           console.log("[webhook] Station " + stationId + " upgraded to " + planSlug);
         }

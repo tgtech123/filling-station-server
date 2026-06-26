@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import { makeRateLimitStore } from "./middlewares/rateLimitStore";
 
 import authRoutes from "./routes/auth.route";
 import fillinStation from "./routes/fillinStation.route";
@@ -142,6 +143,7 @@ const isPaystackWebhook = (req: any) =>
   req.path === "/api/payments/webhook" || req.originalUrl === "/api/payments/webhook";
 
 const generalLimiter = rateLimit({
+  store: makeRateLimitStore("general"),
   windowMs: 15 * 60 * 1000,
   // Authenticated users get their own per-token bucket (300).
   // Unauthenticated traffic still shares the IP bucket (100).
@@ -163,6 +165,7 @@ const generalLimiter = rateLimit({
 // Keyed by Authorization token so each user gets their own 240-request bucket
 // (16/min — well above the 2/min poll rate) instead of sharing an IP bucket.
 const activityLimiter = rateLimit({
+  store: makeRateLimitStore("activity"),
   windowMs: 15 * 60 * 1000,
   max: 240,
   keyGenerator: (req) => (req.headers.authorization as string | undefined) || ipKeyGenerator(req.ip || req.socket?.remoteAddress || "unknown"),
@@ -174,6 +177,7 @@ const activityLimiter = rateLimit({
 // Dedicated limiter for dashboard polling endpoints.
 // Same token-keyed approach — each authenticated user gets their own bucket.
 const dashboardLimiter = rateLimit({
+  store: makeRateLimitStore("dashboard"),
   windowMs: 15 * 60 * 1000,
   max: 300,
   keyGenerator: (req) => (req.headers.authorization as string | undefined) || ipKeyGenerator(req.ip || req.socket?.remoteAddress || "unknown"),
@@ -183,6 +187,7 @@ const dashboardLimiter = rateLimit({
 });
 
 const authLimiter = rateLimit({
+  store: makeRateLimitStore("auth"),
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: {
@@ -195,6 +200,7 @@ const authLimiter = rateLimit({
 });
 
 const registerLimiter = rateLimit({
+  store: makeRateLimitStore("register"),
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: { error: "Too many registration attempts. Please try again in 1 hour." },
@@ -203,6 +209,7 @@ const registerLimiter = rateLimit({
 });
 
 const paymentLimiter = rateLimit({
+  store: makeRateLimitStore("payment"),
   windowMs: 60 * 60 * 1000,
   max: 100,
   message: { error: "Too many payment attempts. Please try again later." },
@@ -213,6 +220,7 @@ const paymentLimiter = rateLimit({
 });
 
 const resetLimiter = rateLimit({
+  store: makeRateLimitStore("reset"),
   windowMs: 60 * 60 * 1000,
   max: 3,
   message: { error: "Too many password reset attempts. Please try again in 1 hour." },

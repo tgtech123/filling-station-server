@@ -13,7 +13,7 @@ import AdminLog from "../models/adminLog.model";
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Payment from "../models/payment.model";
 import PlatformSettings, { DEFAULT_TAX_RATES } from "../models/platformSettings.model";
-import { getCache, setCache, deleteCache } from "../config/redis";
+import { getCache, setCache, deleteCache, invalidateStationAuthCache } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
 import crypto from "crypto";
 import ResetPassword from "../models/resetPassword.model";
@@ -89,25 +89,19 @@ export const getOverview = async (req: AuthenticatedRequest, res: Response) => {
     const [
       totalRegisteredStations,
       thisMonthNewStations,
-      lastMonthNewStations,
       activeSubscriptions,
       thisMonthNewActive,
-      lastMonthNewActive,
       expiredSubscriptions,
       thisMonthNewExpired,
-      lastMonthNewExpired,
       thisMonthRevenueAgg,
       lastMonthRevenueAgg,
     ] = await Promise.all([
       FillingStation.countDocuments({ isDeleted: { $ne: true } }),
       FillingStation.countDocuments({ isDeleted: { $ne: true }, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
-      FillingStation.countDocuments({ isDeleted: { $ne: true }, createdAt: { $gte: lastMonthStart, $lte: lastMonthEnd } }),
       FillingStation.countDocuments({ isActive: true, isDeleted: { $ne: true } }),
       FillingStation.countDocuments({ isActive: true, isDeleted: { $ne: true }, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
-      FillingStation.countDocuments({ isActive: true, isDeleted: { $ne: true }, createdAt: { $gte: lastMonthStart, $lte: lastMonthEnd } }),
       FillingStation.countDocuments({ isActive: false, isDeleted: { $ne: true } }),
       FillingStation.countDocuments({ isActive: false, isDeleted: { $ne: true }, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
-      FillingStation.countDocuments({ isActive: false, isDeleted: { $ne: true }, createdAt: { $gte: lastMonthStart, $lte: lastMonthEnd } }),
       SubscriptionPayment.aggregate([
         { $match: { status: "paid", paidAt: { $gte: startOfMonth, $lte: endOfMonth } } },
         { $group: { _id: null, total: { $sum: "$amount" } } },
@@ -121,15 +115,22 @@ export const getOverview = async (req: AuthenticatedRequest, res: Response) => {
     const monthlyRevenue = thisMonthRevenueAgg[0]?.total ?? 0;
     const lastMonthRevenue = lastMonthRevenueAgg[0]?.total ?? 0;
 
+    // These three cards show a CUMULATIVE total, so their growth is how much the
+    // total grew this month vs. the base it started the month with (total minus
+    // this month's additions) — NOT a comparison of new-cohort sizes. The old
+    // "new this month vs new last month" made a slower month read as a big
+    // negative (e.g. 1 new vs 5 last month = -80%) even though the total only
+    // rose. With this, no additions this month = 0%, and it never goes negative
+    // for registrations. Revenue stays a true period-over-period comparison.
     const response = {
       message: "Overview retrieved",
       data: {
         totalRegisteredStations,
-        totalRegisteredStationsGrowth: calcGrowth(thisMonthNewStations, lastMonthNewStations),
+        totalRegisteredStationsGrowth: calcGrowth(totalRegisteredStations, totalRegisteredStations - thisMonthNewStations),
         activeSubscriptions,
-        activeSubscriptionsGrowth: calcGrowth(thisMonthNewActive, lastMonthNewActive),
+        activeSubscriptionsGrowth: calcGrowth(activeSubscriptions, activeSubscriptions - thisMonthNewActive),
         expiredSubscriptions,
-        expiredSubscriptionsGrowth: calcGrowth(thisMonthNewExpired, lastMonthNewExpired),
+        expiredSubscriptionsGrowth: calcGrowth(expiredSubscriptions, expiredSubscriptions - thisMonthNewExpired),
         monthlyRevenue,
         monthlyRevenueGrowth: calcGrowth(monthlyRevenue, lastMonthRevenue),
       },
@@ -621,6 +622,9 @@ export const updateStationStatus = async (req: AuthenticatedRequest, res: Respon
       return res.status(404).json({ error: "Station not found" });
     }
 
+    // Suspend/reactivate is security-relevant — apply it to the auth gate now.
+    await invalidateStationAuthCache(stationId);
+
     if (isActive) {
       AdminLog.create({
         eventType: "station_reactivated",
@@ -773,6 +777,7 @@ export const restoreStation = async (req: AuthenticatedRequest, res: Response) =
     }
 
     await FillingStation.findByIdAndUpdate(stationId, { isDeleted: false, isActive: true });
+    await invalidateStationAuthCache(stationId);
 
     AdminLog.create({
       eventType: "station_reactivated",
@@ -804,6 +809,7 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     await FillingStation.findByIdAndUpdate(stationId, { isActive: false, isDeleted: true });
+    await invalidateStationAuthCache(stationId);
 
     AdminLog.create({
       eventType: "station_deleted",

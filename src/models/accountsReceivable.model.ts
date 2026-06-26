@@ -142,6 +142,9 @@ ARInvoiceSchema.index({ fillingStation: 1, invoiceNumber: 1 }, { unique: true })
 ARInvoiceSchema.index({ fillingStation: 1, customer: 1, status: 1 });
 ARInvoiceSchema.index({ fillingStation: 1, status: 1, dueDate: 1 });
 ARInvoiceSchema.index({ fillingStation: 1, "recurring.enabled": 1, "recurring.nextRunAt": 1 });
+// Cross-station recurring sweep (background scheduler) queries without a station,
+// so it needs a station-agnostic index on the due-template predicate.
+ARInvoiceSchema.index({ "recurring.enabled": 1, "recurring.nextRunAt": 1 });
 
 export const ARInvoice: Model<IARInvoice> = mongoose.model<IARInvoice>("ARInvoice", ARInvoiceSchema);
 
