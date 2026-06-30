@@ -20,6 +20,7 @@ export interface INotification extends Document {
     | "pump_maintenance"
     | "price_update"
     | "cash_reconciliation"
+    | "stock_reconciliation"
     | "emergency"
     | "support_ticket"
     | "support_response";
@@ -67,6 +68,7 @@ const NotificationSchema = new Schema<INotification>(
         "pump_maintenance",
         "price_update",
         "cash_reconciliation",
+        "stock_reconciliation",
         "emergency",
         "support_ticket",
         "support_response",
