@@ -254,11 +254,32 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
           return;
         }
 
-        const tankIndex = tankDoc.tanks.findIndex(
-          (t: any) =>
-            t.fuelType.toLowerCase() === shift.product.toLowerCase() ||
-            t.title.toLowerCase().includes(shift.product.toLowerCase())
-        );
+        // Stations often run several tanks of the same product (Tank A/B/C all
+        // PMS), so the dispensing pump — not the fuel type — is the authoritative
+        // tank. Resolve shift.pump → Pump doc → pump.tank; fall back to a
+        // fuel-type match only for legacy shifts with no resolvable pump link.
+        let tankIndex = -1;
+        if (shift.pump) {
+          const tankSubIds = tankDoc.tanks.map((t: any) => t._id);
+          const pumpDoc = await Pump.findOne({
+            tank: { $in: tankSubIds },
+            "pumps._id": shift.pump,
+          })
+            .select("tank")
+            .lean();
+          if (pumpDoc) {
+            const targetTankId = String((pumpDoc as any).tank);
+            tankIndex = tankDoc.tanks.findIndex((t: any) => t._id.toString() === targetTankId);
+          }
+        }
+
+        if (tankIndex === -1) {
+          tankIndex = tankDoc.tanks.findIndex(
+            (t: any) =>
+              t.fuelType.toLowerCase() === shift.product.toLowerCase() ||
+              t.title.toLowerCase().includes(shift.product.toLowerCase())
+          );
+        }
 
         if (tankIndex === -1) {
           console.log(`âš ï¸ No tank found for product: ${shift.product}`);
@@ -269,6 +290,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
         const prevQty = tank.currentQuantity;
         const litresSold = shift.litresSold || 0;
         tankDoc.tanks[tankIndex].currentQuantity = Math.max(0, prevQty - litresSold);
+        tankDoc.markModified("tanks");
 
         await tankDoc.save();
 

@@ -58,6 +58,11 @@ export interface IFillingStation extends Document {
   pendingDowngrade:   boolean;
   pendingDowngradeTo: string;
   downgradeAt:        Date | null;
+  // Wet-stock "yield factor" (station litre). Entered by the manager in Settings
+  // (e.g. 0.95, 0.96). Null until configured — never seeded in code.
+  defaultYieldFactor:          number | null;
+  defaultYieldFactorUpdatedBy: mongoose.Types.ObjectId | null;
+  defaultYieldFactorUpdatedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -133,6 +138,11 @@ const FillingStationSchema = new Schema<IFillingStation>(
     pendingDowngrade:         { type: Boolean, default: false },
     pendingDowngradeTo:       { type: String,  default: "" },
     downgradeAt:              { type: Date,    default: null },
+    // Station-level yield factor (station litre). NOT seeded — manager sets it in
+    // Settings. Null until configured; per-tank yieldFactor overrides this.
+    defaultYieldFactor:          { type: Number, min: 0.5, max: 1.5, default: null },
+    defaultYieldFactorUpdatedBy: { type: Schema.Types.ObjectId, ref: "Staff", default: null },
+    defaultYieldFactorUpdatedAt: { type: Date, default: null },
     createdAt: { type: Date },
     updatedAt: { type: Date },
   },

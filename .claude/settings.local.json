@@ -42,7 +42,10 @@
       "PowerShell(node scripts\\\\check-gas-procurement.js)",
       "PowerShell(node scripts\\\\check-plan-gating.js)",
       "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\); console.log\\('eslint:', !!\\(p.devDependencies?.eslint||p.dependencies?.eslint\\)\\)\")",
-      "PowerShell(npm *)"
+      "PowerShell(npm *)",
+      "Bash(echo \"---EXIT:$?---\")",
+      "Bash(npx ts-node *)",
+      "Bash(TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' npx ts-node --transpile-only \"C:/Users/TGTECH/AppData/Local/Temp/claude/C--Users-TGTECH-Desktop-filling-station-server/6243e5ba-4853-482f-9391-d264440a78f3/scratchpad/reconTest.ts\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",
