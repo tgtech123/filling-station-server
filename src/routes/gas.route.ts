@@ -31,6 +31,15 @@ import {
   getOrdersVsSales, getCashierPerformance, getTopCustomers,
   getTodayReconciliation, submitReconciliation,
 } from "../controllers/gasAnalytics.controller";
+import {
+  addCylinderProduct, listCylinderProducts, updateCylinderProduct, restockCylinderProduct,
+  createCylinderSale, voidCylinderSale, listCylinderSales, getCylinderDailySummary,
+} from "../controllers/gasCylinder.controller";
+import {
+  getCylinderReorderItems, createCylinderProcurement, listCylinderProcurements,
+  getCylinderProcurementById, updateCylinderProcurement, submitCylinderProcurement,
+  markCylinderOrdered, markCylinderReceived, recordCylinderPayment, deleteCylinderProcurement,
+} from "../controllers/gasCylinderProcurement.controller";
 
 const router = express.Router();
 router.use(requireAuth);
@@ -104,6 +113,30 @@ router.patch("/sales/:id/dispense",  attendant, dispenseSale);
 router.patch("/sales/:id/void",      mgr,       voidSale);
 router.get("/sales/daily-summary",   mgrOrAcct, getDailySummary);
 router.get("/sales",                 allGas,    listSales);
+
+// ─── Cylinder purchase orders (lubricant procurement pattern) ────────────────
+// Registered before the /cylinders/:id patterns so paths never collide.
+router.get("/cylinders/procurement/reorder-items", mgr,       getCylinderReorderItems);
+router.post("/cylinders/procurement",              mgr,       createCylinderProcurement);
+router.get("/cylinders/procurement",               checkRole("manager", "admin", "cashier", "accountant"), listCylinderProcurements);
+router.get("/cylinders/procurement/:id",           checkRole("manager", "admin", "cashier", "accountant"), getCylinderProcurementById);
+router.patch("/cylinders/procurement/:id",         mgr,       updateCylinderProcurement);
+router.patch("/cylinders/procurement/:id/submit",  mgr,       submitCylinderProcurement);
+router.patch("/cylinders/procurement/:id/ordered", mgr,       markCylinderOrdered);
+router.patch("/cylinders/procurement/:id/received",mgr,       markCylinderReceived);
+router.patch("/cylinders/procurement/:id/payment", checkRole("manager", "admin", "accountant"), recordCylinderPayment);
+router.delete("/cylinders/procurement/:id",        mgr,       deleteCylinderProcurement);
+
+// ─── Cylinder bottle retail (unit-based products, instant POS sales) ─────────
+// Sales paths first so they never collide with the /cylinders/:id pattern.
+router.post("/cylinders/sales",                cashier, createCylinderSale);
+router.get("/cylinders/sales/daily-summary",   checkRole("cashier", "manager", "admin", "accountant"), getCylinderDailySummary);
+router.get("/cylinders/sales",                 allGas,  listCylinderSales);
+router.patch("/cylinders/sales/:id/void",      mgr,     voidCylinderSale);
+router.get("/cylinders",                       allGas,  listCylinderProducts);
+router.post("/cylinders",                      mgr,     addCylinderProduct);
+router.patch("/cylinders/:id",                 mgr,     updateCylinderProduct);
+router.post("/cylinders/:id/restock",          mgr,     restockCylinderProduct);
 
 // ─── Customer Orders ────────────────────────────────────────────────────────
 router.get("/orders/inbox",          cashier,       getCashierInbox);
