@@ -158,6 +158,7 @@ Go to the FuelDesk website and click **Login**.
 
 - **Email Address** — the email your manager used when creating your account
 - **Password** — the password you were given (change it on first login — see Section 19)
+- **Remember me for 30 days** (optional) — tick this on your own device to stay signed in for 30 days instead of 24 hours, and to have your email pre-filled next time. Your password is never stored by FuelDesk — if your browser offers to save it, that is safe on your personal device, but always choose **Never** on a shared station computer.
 
 Click **Login**.
 
@@ -193,6 +194,8 @@ If you cannot remember your password:
 ## 6. The Dashboard — Your Home Screen
 
 When you log in, you land on your **dashboard**. The dashboard is different depending on your role. Here is what each role sees:
+
+> **Live updates:** FuelDesk dashboards and tables update in real time. When a sale is recorded, a shift is scheduled or approved, a delivery arrives, or staff are added, every open screen at your station refreshes automatically — you do not need to reload the page.
 
 ### Manager Dashboard
 The manager sees a full overview of their station:
@@ -243,7 +246,7 @@ The manager sees a full overview of their station:
    - **Emergency Contact**
    - **Role** — choose from: Supervisor, Accountant, Cashier, Attendant
    - **Department** — Fuel, Gas, or Both
-   - **Shift Type** — One-Day-Morning, One-Day-Evening, Full-Time, 24/7, Day-Off
+   - **Shift Type** — pick a built-in type (One-Day-Morning, One-Day-Evening, Full-Time, 24/7, Day-Off) **or create your own**: click **+ New shift type**, enter a name (e.g. "Night Shift"), optional start/end times, and whether it belongs to the morning or evening schedule group, then click **Create & Select**. Custom types are saved for your station and appear automatically in the supervisor's shift scheduling page.
    - **Password** — a temporary password for first login (advise them to change it)
    - **Profile Photo** (optional)
 4. Click **Add Staff**
@@ -330,9 +333,11 @@ Your shift will now appear as **Pending Approval** in the supervisor's queue.
 
 Supervisors and managers can create attendance schedules:
 1. Go to **Schedule Shift** in the menu
-2. Select the attendant and their shift type (Morning, Evening, Full-Time, etc.)
+2. Select the attendant and their shift type — the list includes the built-in types (Morning, Evening, Full-Time, etc.) **plus any custom shift types your manager has created** (see Section 7.1). New custom types appear here automatically, live, without reloading the page
 3. Set the date or recurrence
 4. Click **Save Schedule**
+
+The scheduled-attendants view groups every shift into its morning or evening column based on the shift type's schedule group.
 
 ---
 
@@ -409,6 +414,42 @@ All future shift calculations will use the new price. Historical shifts keep the
    - Number of shifts served
    - Efficiency compared to other pumps
 
+### 9.7 Fuel Deliveries — Scheduling & Receiving
+
+> Done by the Manager
+
+**Scheduling a delivery:**
+1. Go to **Fuel Management** > **Order & Deliveries**
+2. Click **Schedule Delivery**, choose the tank, supplier, price per litre and the **quantity ordered**, then save
+
+**Receiving a delivery (when the tanker arrives):**
+1. Find the delivery in the list and click **Mark as Completed**
+2. A **Receive Delivery** dialog opens showing what was ordered — enter the **actual litres the tanker discharged** (pre-filled with the ordered amount)
+3. If the figure differs from the order, the dialog immediately shows a **short delivery** or **over delivery** warning so you can see the gap before confirming
+4. Click **Confirm & Fill Tank** — the tank is filled with the *actual* litres received
+
+> The ordered quantity stays frozen on the record, so any shortfall automatically surfaces when your accountant matches the supplier's invoice (see Section 12). The accountant is also notified the moment a delivery is completed.
+
+### 9.8 Stock Reconciliation — The "Station Litre"
+
+Pump meters and physical tank stock never move exactly 1-for-1: most stations find that selling 40,000 metered litres only draws about 38,000 physical litres from the tank (a factor of ~0.95, often called the *station litre*). FuelDesk can track this so the leftover fuel — which is real, sellable stock — stops being invisible.
+
+**Step 1 — Set your yield factor (Manager):**
+1. Go to **System Settings** > **Fuel Yield Factor (Station Litre)**
+2. Enter your station's factor (e.g. **0.95** or **0.96**) as the station default — you choose the number; nothing is pre-set
+3. Optionally give an individual tank its own factor (it overrides the default for that tank)
+
+**Step 2 — Reconcile a tank (Manager or Supervisor):**
+1. Go to **Stock Reconciliation** in the menu
+2. Click **New Reconciliation**, pick the tank and enter the **closing dip** (the physically measured litres)
+3. Click **Preview** to see the full calculation — opening stock, deliveries, metered sales, expected closing stock, and the **variance in litres and naira** (excess = gain, shortage = investigate)
+4. Click **Submit for Approval**
+
+**Step 3 — Manager approves:**
+The manager reviews the reconciliation and clicks **Approve & true up**. Only then is the tank's official stock corrected to the measured value. The leftover litres carry over as the next cycle's opening stock — they are *not* counted as a new purchase, and they remain fully sellable while you wait for the next tanker. A shortage beyond tolerance is flagged to the manager and accountant automatically.
+
+> **Pump Audit:** the accuracy of this feature depends on every pump being linked to its correct tank. Click **Pump Audit** (on the Stock Reconciliation page or in Settings) to check for unlinked or mismatched pumps before your first reconciliation.
+
 ---
 
 ## 10. Lubricant Sales & Inventory
@@ -439,6 +480,8 @@ Lubricants (engine oil, gear oil, grease, etc.) are managed separately from fuel
 5. Click **Record Sale**
 
 The inventory count for that product automatically decreases.
+
+**Printing a receipt:** after the sale, the receipt opens automatically — click **Print** to print it. Receipts are formatted for an **80mm thermal printer** (e.g. Xprinter) in bold, solid black so they come out clear and legible. To **reprint** any past sale's receipt (as evidence for a customer), find the transaction in the sales table and click the printer icon on its row.
 
 ### 10.3 Restocking Lubricants
 
@@ -653,6 +696,26 @@ At the end of each day:
 3. Enter any discrepancies
 4. Click **Submit Reconciliation** to close the day
 
+### 11.9 Selling Empty Gas Cylinders (Bottle Retail)
+
+Many stations also retail **physical empty cylinders** (3kg, 5kg, 8kg bottles…). FuelDesk manages these as unit-counted shop products, separate from kg-based gas refills.
+
+**Manager — set up products & stock:**
+1. Go to **Gas Cylinders** in the menu
+2. Click **Add Product** — enter the label (e.g. "5kg Cylinder"), weight, optional brand, cost price, selling price, a **reorder alert level**, and any opening stock
+3. Restock anytime with the **Restock** button (every restock is logged with who, when, cost and supplier)
+
+**Cashier — selling a bottle:**
+1. On the Gas **Point of Sale**, open the **Cylinders** tab
+2. Tap the product (live stock badges show what's available), set the quantity, choose the payment method, and optionally attach a loyalty customer (they earn points as usual)
+3. Click **Sell Cylinder & Print Receipt** — the sale completes instantly (no attendant confirmation needed since nothing is dispensed) and a bold 80mm receipt prints for the customer
+4. Reprint any recent sale from the **Recent Sales** list on the same tab
+
+Stock counts down automatically and can never oversell; the manager is alerted when a product hits its reorder level. Managers can **void** a sale (stock is restored and loyalty points reversed) and see today's units, revenue and **profit** on the Gas Cylinders page.
+
+**Manager — restocking via Purchase Orders:**
+When products run low, a banner on the Gas Cylinders page offers **Raise Purchase Order** — low items are pre-filled with suggested quantities. Save as draft or **Submit & Email** the PO to your supplier (they fill in their prices and reply). When the order arrives, click **Receive**, enter what actually came and the invoice unit cost — stock and the restock log update automatically, short deliveries are flagged, and payment (unpaid / partial / paid) is tracked. The accountant is notified to register the supplier's invoice for 3-way matching (see Section 12).
+
 ---
 
 ## 12. Financial Reports & Cash Reconciliation
@@ -728,7 +791,7 @@ Beyond the simple reports above, FuelDesk includes a full **double-entry account
 
 - **Chart of Accounts** — your list of financial accounts (cash, bank, sales, cost of goods, VAT, etc.), created once at setup.
 - **Journal Entries** — manual double-entry postings. Every entry must balance (debits = credits). Large entries (₦500,000+) need a second person to approve — you cannot approve your own.
-- **Accounts Payable (money you owe)** — register supplier invoices, match them to purchase orders, and pay them in approved batches (with EFT file or cheque-printing data).
+- **Accounts Payable (money you owe)** — register supplier invoices and pay them in approved batches (with EFT file or cheque-printing data). Every PO-backed invoice goes through a **3-way match** — invoice vs what was ordered vs what was actually received — covering **lubricant POs, bulk gas POs, gas cylinder POs and fuel tanker deliveries**. An invoice that doesn't match within tolerance cannot be booked without an explicit, audited override. Whenever goods are received anywhere in the app, the accountant is **notified automatically** to register and match the supplier's invoice.
 - **Accounts Receivable (money owed to you)** — set up credit customers, raise invoices (including recurring ones), record receipts, and issue credit notes.
 - **Bank Reconciliation** — import your bank statement (CSV) and auto-match it against your records.
 - **Tax Engine** — define VAT / WHT / Sales-Tax codes, preview tax, and produce a filing/liability report.
@@ -978,6 +1041,8 @@ The upgrade window only shows plans that are **higher than your current plan** �
 
 > **Monthly plan:** Expires exactly 1 calendar month from today  
 > **Yearly plan:** Expires exactly 1 year from today
+
+> **If plan prices change:** the amount you are charged is always the price at the moment you click **Proceed to Payment** — never a stale figure. If the platform updates a plan's price while your upgrade window is open, FuelDesk detects it, refreshes the window with the **new amount**, and asks you to review before paying. A price change never affects a subscription you have already paid for — you keep the full period you bought, and the new price simply applies at your next renewal.
 
 ### 17.3 Renewing Your Plan (Highest Tier Users)
 
@@ -1340,6 +1405,12 @@ Deleting a staff account removes their login access. Their historical data (shif
 
 **Q: Can two people be logged in as the same user at the same time?**
 The system allows it, but it is not recommended. If you notice unfamiliar activity on your account, go to **System Settings** > **Active Sessions** and click **Logout Others** immediately, then change your password.
+
+**Q: Should I let the browser save my password? And what does "Remember me" do?**
+On **your own** phone or laptop, accepting the browser's "Save password?" prompt is safe — it is stored encrypted on your device. On a **shared station computer**, always choose **Never**: a saved password would auto-fill for the next person on that machine. The **Remember me** checkbox on the login page is different — it keeps your session active for **30 days** and pre-fills your email (never your password).
+
+**Q: Why do I see fewer FAQs in Help & Support than my manager?**
+FAQs are shown **by role** — each person sees only the questions relevant to their job (cashiers see cashier topics, accountants see accounting topics, and so on). Managers see everything.
 
 **Q: How do I add a new fuel type (e.g., Kerosene) after initial setup?**
 Go to **Fuel Management** > **Pricing** and add the new product type, then add a tank and pump for it. Contact support if the product type is not listed as an option.

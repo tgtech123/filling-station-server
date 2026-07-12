@@ -6,6 +6,7 @@ import GasCylinderProduct from "../models/gasCylinderProduct.model";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
 import Activity from "../models/activity.model";
+import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
 import { emitToStation } from "../services/socket.service";
 
@@ -364,6 +365,23 @@ export const markCylinderReceived = async (req: AuthenticatedRequest, res: Respo
     }).catch(console.error);
 
     emitToStation(String(stationId), "gas:cylinder-products-updated", {});
+
+    // Goods receipt recorded → nudge the accountant to register the supplier
+    // invoice in Payables and run the 3-way match against this PO.
+    const receivedTotal = procurement.items.reduce(
+      (s, i) => s + (i.receivedQuantity ?? i.quantityToProcure) * (i.unitCost || 0), 0
+    );
+    Notification.create({
+      fillingStation: stationId,
+      type: "message",
+      category: "delivery_arrived",
+      title: "Cylinder PO Received — Register Invoice",
+      body: `${procurement.procurementNumber} from ${procurement.vendorName || "vendor"} received (≈₦${receivedTotal.toLocaleString()}). Register the supplier invoice in Payables to 3-way match.`,
+      severity: "info",
+      timestamp: new Date(),
+      targetRole: "accountant",
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    }).catch((e: any) => console.error("Notification error (cylinder PO received -> accountant):", e));
 
     return res.status(200).json({
       message: `Marked as received. ${stockUpdated} product(s) restocked.${shortItems.length ? ` ${shortItems.length} item(s) were short delivered.` : ""}`,

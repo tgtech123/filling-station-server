@@ -2,9 +2,21 @@ import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
 import * as shiftController from "../controllers/shift.controller";
+import { listShiftTypes, createShiftType, updateShiftType } from "../controllers/shiftType.controller";
 // getTodaySchedule is exported from the same controller
 
 const router = express.Router();
+
+// ─── Shift types (built-in + station-defined) ────────────────────────────────
+// Registered first so they never collide with the /:shiftId pattern below.
+router.get(
+  "/types",
+  requireAuth,
+  checkRole("manager", "supervisor", "attendant", "cashier", "accountant"),
+  listShiftTypes
+);
+router.post("/types", requireAuth, checkRole("manager"), createShiftType);
+router.patch("/types/:id", requireAuth, checkRole("manager"), updateShiftType);
 
 // Start a shift - only accessible by attendants
 router.post(

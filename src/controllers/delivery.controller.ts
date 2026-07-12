@@ -4,6 +4,7 @@ import Delivery from "../models/delivery.model";
 import Tank from "../models/tanks.model";
 import mongoose from "mongoose";
 import Notification from "../models/notification.model";
+import { emitToStation } from "../services/socket.service";
 
 export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -45,6 +46,9 @@ export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
       fillingStation: new mongoose.Types.ObjectId(fillingStation),
       tank: new mongoose.Types.ObjectId(tank),
       pricePerLtr,
+      // PO leg frozen at scheduling: what we ORDERED. `quantity` starts equal
+      // and becomes the actual received amount (GRN leg) at completion.
+      orderedQuantity: Number(quantity),
       quantity,
       suplier: supplier,
       deliveryDate,
@@ -56,6 +60,9 @@ export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
       foundTank.currentQuantity = newTotal;
       await station.save();
     }
+
+    // Live-refresh delivery tables and dashboards
+    emitToStation(String(fillingStation), "delivery:updated", { action: "created" });
 
     return res.status(201).json({
       message: "Delivery added successfully",
@@ -101,6 +108,7 @@ export const getSupplies = async (req: AuthenticatedRequest, res: Response) => {
         tankTitle: matchedTank?.title || "Unknown Tank",
         fuelType: matchedTank?.fuelType || "Unknown",
         quantity: delivery.quantity,
+        orderedQuantity: delivery.orderedQuantity ?? delivery.quantity,
         supplier: delivery.suplier,
         deliveryDate: delivery.deliveryDate,
         status: delivery.status,
@@ -124,7 +132,7 @@ export const getSupplies = async (req: AuthenticatedRequest, res: Response) => {
 export const updateSupply = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
-    const { supplyId, status, pricePerLtr, quantity, supplier, deliveryDate } = req.body;
+    const { supplyId, status, pricePerLtr, quantity, supplier, deliveryDate, receivedQuantity } = req.body;
 
     // 1ï¸âƒ£ Authorization check
     if (!fillingStation) {
@@ -149,7 +157,22 @@ export const updateSupply = async (req: AuthenticatedRequest, res: Response) => 
 
     // 4ï¸âƒ£ Update allowed fields
     if (pricePerLtr !== undefined) delivery.pricePerLtr = pricePerLtr;
-    if (quantity !== undefined) delivery.quantity = quantity;
+    if (quantity !== undefined) {
+      delivery.quantity = quantity;
+      // Editing quantity while still Pending is an ORDER correction — keep the
+      // PO leg in sync. Once completing, the order stays frozen.
+      if (oldStatus === "Pending" && status !== "Completed") {
+        delivery.orderedQuantity = Number(quantity);
+      }
+    }
+    // Actual litres received at completion (GRN leg + tank fill). The ordered
+    // quantity is untouched, so short/over deliveries surface in the 3-way match.
+    if (receivedQuantity !== undefined && !isNaN(Number(receivedQuantity))) {
+      if (Number(receivedQuantity) < 0) {
+        return res.status(400).json({ error: "receivedQuantity cannot be negative" });
+      }
+      delivery.quantity = Number(receivedQuantity);
+    }
     if (supplier) delivery.suplier = supplier;
     if (deliveryDate) delivery.deliveryDate = deliveryDate;
     if (status) delivery.status = status;
@@ -200,10 +223,30 @@ export const updateSupply = async (req: AuthenticatedRequest, res: Response) => 
         severity: "info",
         timestamp: new Date(),
       }).catch((err) => console.error("Notification error (delivery completed):", err));
+
+      // Goods receipt recorded → nudge the accountant to register the supplier
+      // invoice in Payables and 3-way match it against this fuel delivery.
+      Notification.create({
+        fillingStation: new mongoose.Types.ObjectId(fillingStation),
+        type: "message",
+        category: "delivery_arrived",
+        title: "Fuel Delivery — Register Invoice",
+        body: `FUEL-${String(delivery._id).slice(-6).toUpperCase()} from ${delivery.suplier}: ${delivery.quantity.toLocaleString()} L of ${tank.fuelType} (≈₦${(delivery.quantity * delivery.pricePerLtr).toLocaleString()}). Register the supplier invoice in Payables to 3-way match.`,
+        severity: "info",
+        timestamp: new Date(),
+        targetRole: "accountant",
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      }).catch((err) => console.error("Notification error (fuel delivery -> accountant):", err));
     }
 
     // 6ï¸âƒ£ Save updated delivery
     await delivery.save();
+
+    // Live-refresh delivery tables and (on completion) tank dashboards
+    emitToStation(String(fillingStation), "delivery:updated", { action: "updated", status: delivery.status });
+    if (oldStatus !== "Completed" && status === "Completed") {
+      emitToStation(String(fillingStation), "dashboard:refresh", { reason: "delivery_completed" });
+    }
 
     return res.status(200).json({
       message: "Supply updated successfully",

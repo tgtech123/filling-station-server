@@ -7,9 +7,14 @@ export interface IFAQ extends Document {
   category: string;
   order: number;
   isPublished: boolean;
+  // Which roles this FAQ is relevant to. "all" = every role. Managers/admins
+  // always see everything regardless of this list.
+  targetRoles: string[];
   createdAt: Date;
   updatedAt: Date;
 }
+
+export const FAQ_ROLES = ["all", "manager", "supervisor", "accountant", "cashier", "attendant"] as const;
 
 const FAQSchema = new Schema<IFAQ>(
   {
@@ -18,6 +23,7 @@ const FAQSchema = new Schema<IFAQ>(
     category: { type: String, default: "General", trim: true },
     order: { type: Number, default: 0 },
     isPublished: { type: Boolean, default: true },
+    targetRoles: { type: [String], enum: FAQ_ROLES as unknown as string[], default: ["all"] },
   },
   { timestamps: true }
 );

@@ -13,6 +13,7 @@ import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
 import StationStatus from "../models/stationStatus.model";
 import redis from "../config/redis";
+import { emitToStation } from "../services/socket.service";
 
 
 
@@ -159,6 +160,9 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       targetRole: "manager",
     }).catch((err) => console.error("Notification error (createStaff):", err));
 
+    // Live-refresh staff tables on every open dashboard at this station
+    if (manager.station) emitToStation(String(manager.station), "staff:updated", { action: "created" });
+
     res.status(201).json({
       message: "Staff created successfully",
       staff: newStaff,
@@ -174,6 +178,8 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
 interface LoginRequestBody {
   email: string;
   password: string;
+  // "Remember me" — extends the JWT from 24h to 30 days
+  rememberMe?: boolean;
 }
 
 // Controller function
@@ -274,7 +280,9 @@ export const loginStaff = async (
     // Super manager = manager whose station has no parentStation (i.e. owns the root station)
     const isSuperManager = staff.role === "manager" && !(station as any)?.parentStation;
 
-    // 4. Create JWT token — hard 24-hour session from loginAt
+    // 4. Create JWT token — 24h session by default; "Remember me" extends it
+    // to 30 days so the user isn't asked for credentials every day. The client
+    // idle-lock still protects unattended open sessions either way.
     const token = jwt.sign(
       {
         id: staff._id,
@@ -287,7 +295,7 @@ export const loginStaff = async (
         loginAt: Date.now(),
       },
       process.env.JWT_SECRET!,
-      { expiresIn: "24h" }
+      { expiresIn: req.body.rememberMe === true ? "30d" : "24h" }
     );
 
     // Mark staff as on duty (available) on login
@@ -670,6 +678,8 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(500).json({ message: "Failed to update staff" });
     }
 
+    if (req.user?.station) emitToStation(String(req.user.station), "staff:updated", { action: "updated" });
+
     return res.status(200).json({ message: "Staff updated successfully", staff: updated });
   } catch (err: any) {
     console.error("Error updating staff:", err);
@@ -718,6 +728,8 @@ export const verifyOtp = async (req: Request, res: Response) => {
     const station = await FillingStation.findById(staff.station);
     const isSuperManager = staff.role === "manager" && !(station as any)?.parentStation;
 
+    // 2FA issues the real token here — honor the "Remember me" choice the
+    // user made on the login form (relayed by the client through the OTP step).
     const token = jwt.sign(
       {
         id: staff._id,
@@ -730,7 +742,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
         loginAt: Date.now(),
       },
       process.env.JWT_SECRET!,
-      { expiresIn: "24h" }
+      { expiresIn: req.body.rememberMe === true ? "30d" : "24h" }
     );
 
     await Staff.findByIdAndUpdate(staff._id, { onDuty: true });
@@ -932,6 +944,8 @@ export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     // If we reach here the transaction committed successfully
+    if (req.user?.station) emitToStation(String(req.user.station), "staff:updated", { action: "deleted" });
+
     return res.status(200).json({
       message: "Staff deleted successfully",
       staff: deletedStaff,

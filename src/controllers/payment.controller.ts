@@ -57,7 +57,7 @@ const calculateTax = (
 // â"€â"€ Initialize Payment â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export const initializePayment = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { planSlug, billingCycle, country = "NG" } = req.body;
+    const { planSlug, billingCycle, country = "NG", expectedTotal } = req.body;
     const stationId = req.user?.station;
     const userEmail = req.user?.email;
 
@@ -70,6 +70,8 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
       return res.status(404).json({ error: "Plan not found" });
     }
 
+    // Price is ALWAYS read live from the DB here — a plan price change applies
+    // to every initialization from that moment on. The client never sets it.
     const amountNaira = billingCycle === "yearly" ? plan.yearlyPrice : plan.monthlyPrice;
 
     if (amountNaira === 0) {
@@ -79,6 +81,18 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
     const taxRate = await getTaxRate(country);
     const { baseAmount, tax, totalAmount } = calculateTax(amountNaira, taxRate);
     const amountKobo = totalAmount * 100;
+
+    // Stale-quote guard: if the client says which total it DISPLAYED and the
+    // price has since changed (admin update), refuse and return the fresh
+    // pricing so the UI re-prompts with the new amount instead of surprising
+    // the user at the Paystack checkout.
+    if (expectedTotal !== undefined && Math.round(Number(expectedTotal)) !== Math.round(totalAmount)) {
+      return res.status(409).json({
+        error: `The price of ${plan.name} has been updated. The current total is ₦${totalAmount.toLocaleString()} (incl. VAT). Please review and try again.`,
+        priceChanged: true,
+        pricing: { baseAmount, tax, totalAmount, taxRate },
+      });
+    }
 
     const reference = `FS_${stationId}_${Date.now()}_${planSlug}`;
 
@@ -159,7 +173,7 @@ export const initializePayment = async (req: AuthenticatedRequest, res: Response
 // â"€â"€ Initialize Guest Payment (no auth) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 export const initializeGuestPayment = async (req: any, res: Response) => {
   try {
-    const { email, name, planSlug, billingCycle, country = "NG" } = req.body;
+    const { email, name, planSlug, billingCycle, country = "NG", expectedTotal } = req.body;
 
     if (!email || !name || !planSlug || !billingCycle) {
       return res.status(400).json({
@@ -195,6 +209,17 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
     const taxRate = await getTaxRate(country);
     const { baseAmount, tax, totalAmount } = calculateTax(amountNaira, taxRate);
     const amountKobo = totalAmount * 100;
+
+    // Stale-quote guard — same contract as initializePayment: reject with the
+    // fresh pricing when the displayed total no longer matches the live price.
+    if (expectedTotal !== undefined && Math.round(Number(expectedTotal)) !== Math.round(totalAmount)) {
+      return res.status(409).json({
+        error: `The price of ${plan.name} has been updated. The current total is ₦${totalAmount.toLocaleString()} (incl. VAT). Please review and try again.`,
+        priceChanged: true,
+        pricing: { baseAmount, tax, totalAmount, taxRate },
+      });
+    }
+
     const reference = `FS_GUEST_${Date.now()}_${planSlug}`;
 
     const paystackResponse = await axios.post(

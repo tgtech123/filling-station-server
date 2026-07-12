@@ -1,7 +1,7 @@
 ﻿import { Request, Response } from "express";
 import { AuthenticatedRequest } from "../interfaces";
 import SupportTicket from "../models/supportTicket.model";
-import FAQ from "../models/faq.model";
+import FAQ, { FAQ_ROLES } from "../models/faq.model";
 import Staff from "../models/staff.model";
 import FillingStation from "../models/fillingStation.model";
 import PlatformSettings from "../models/platformSettings.model";
@@ -131,10 +131,25 @@ export const getMyTickets = async (req: AuthenticatedRequest, res: Response) => 
   }
 };
 
-// GET /api/support/faqs  (plan-gated on frontend; any authenticated user can read)
-export const getFaqs = async (req: Request, res: Response) => {
+// GET /api/support/faqs  (plan-gated on frontend)
+// Role-scoped: each user sees only FAQs targeted at their role (or "all").
+// Managers/admins see everything — they oversee every department.
+export const getFaqs = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const faqs = await FAQ.find({ isPublished: true }).sort({ order: 1, createdAt: 1 }).lean();
+    const role = (req.user?.role || "").toLowerCase();
+    const filter: any = { isPublished: true };
+
+    if (role !== "manager" && role !== "admin") {
+      // Legacy FAQs saved before targetRoles existed count as "all".
+      filter.$or = [
+        { targetRoles: "all" },
+        { targetRoles: role },
+        { targetRoles: { $exists: false } },
+        { targetRoles: { $size: 0 } },
+      ];
+    }
+
+    const faqs = await FAQ.find(filter).sort({ order: 1, createdAt: 1 }).lean();
     return res.status(200).json({ data: faqs });
   } catch (error: any) {
     return res.status(500).json({ message: "Server error", error: error.message });
@@ -271,10 +286,19 @@ export const updateTicketStatus = async (req: AuthenticatedRequest, res: Respons
 
 // â”€â”€â”€ FAQ CRUD (admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+// Normalise + validate a targetRoles payload; returns undefined if not provided.
+const parseTargetRoles = (raw: any): string[] | undefined => {
+  if (raw === undefined) return undefined;
+  const arr = (Array.isArray(raw) ? raw : [raw])
+    .map((r) => String(r).toLowerCase().trim())
+    .filter((r) => (FAQ_ROLES as readonly string[]).includes(r));
+  return arr.length > 0 ? Array.from(new Set(arr)) : ["all"];
+};
+
 // POST /api/admin/support/faqs
 export const createFaq = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { question, answer, category, order, isPublished } = req.body;
+    const { question, answer, category, order, isPublished, targetRoles } = req.body;
     if (!question?.trim() || !answer?.trim()) {
       return res.status(400).json({ message: "Question and answer are required" });
     }
@@ -284,6 +308,7 @@ export const createFaq = async (req: AuthenticatedRequest, res: Response) => {
       category: category?.trim() || "General",
       order: order ?? 0,
       isPublished: isPublished !== false,
+      targetRoles: parseTargetRoles(targetRoles) ?? ["all"],
     });
     return res.status(201).json({ message: "FAQ created", data: faq });
   } catch (error: any) {
@@ -304,13 +329,15 @@ export const getAllFaqs = async (req: AuthenticatedRequest, res: Response) => {
 // PATCH /api/admin/support/faqs/:id
 export const updateFaq = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { question, answer, category, order, isPublished } = req.body;
+    const { question, answer, category, order, isPublished, targetRoles } = req.body;
     const updates: any = {};
     if (question !== undefined) updates.question = question.trim();
     if (answer !== undefined) updates.answer = answer.trim();
     if (category !== undefined) updates.category = category.trim();
     if (order !== undefined) updates.order = order;
     if (isPublished !== undefined) updates.isPublished = isPublished;
+    const parsedRoles = parseTargetRoles(targetRoles);
+    if (parsedRoles !== undefined) updates.targetRoles = parsedRoles;
 
     const faq = await FAQ.findByIdAndUpdate(req.params.id, updates, { new: true }).lean();
     if (!faq) return res.status(404).json({ message: "FAQ not found" });

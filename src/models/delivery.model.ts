@@ -5,6 +5,11 @@ export interface IDelivery extends Document {
   fillingStation: mongoose.Types.ObjectId;
   tank: mongoose.Types.ObjectId;
   pricePerLtr: number;
+  // What was ORDERED from the supplier — frozen at scheduling time. This is the
+  // PO leg of the 3-way match. Legacy records without it fall back to quantity.
+  orderedQuantity?: number;
+  // What was actually RECEIVED (updates on completion) — drives the tank fill
+  // and is the GRN leg of the 3-way match.
   quantity: number;
   suplier: string;
   deliveryDate: Date;
@@ -29,6 +34,10 @@ const DeliverySchema = new Schema<IDelivery>(
       required: true,
       min: 0,
       default: 0
+    },
+    orderedQuantity: {
+      type: Number,
+      min: 0,
     },
     quantity: {
       type: Number,

@@ -11,6 +11,7 @@ import GasLoyaltyTransaction from "../models/gasLoyaltyTransaction.model";
 import GasPricing from "../models/gasPricing.model";
 import FillingStation from "../models/fillingStation.model";
 import Notification from "../models/notification.model";
+import { emitToStation } from "../services/socket.service";
 
 // Utility: generate receipt number
 const genReceiptNumber = async (station: string): Promise<string> => {
@@ -131,6 +132,9 @@ export const createSale = async (req: AuthenticatedRequest, res: Response) => {
       date: new Date(),
     });
 
+    // Attendants' pending-sales screens pick this up instantly
+    emitToStation(String(station), "gas:sale-updated", { status: "pending_confirmation" });
+
     return res.status(201).json({ message: "Sale created", data: sale });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
@@ -179,6 +183,8 @@ export const confirmSale = async (req: AuthenticatedRequest, res: Response) => {
     if (sale.order) {
       await GasOrder.findByIdAndUpdate(sale.order, { status: "receipt_issued", confirmedAt: new Date() });
     }
+
+    emitToStation(String(station), "gas:sale-updated", { status: "confirmed" });
 
     return res.status(200).json({ message: "Sale confirmed", data: sale });
   } catch (err: any) {
@@ -262,6 +268,9 @@ export const dispenseSale = async (req: AuthenticatedRequest, res: Response) => 
       await GasOrder.findByIdAndUpdate(sale.order, { status: "dispensed", dispensedAt: new Date() });
     }
 
+    emitToStation(String(station), "gas:sale-updated", { status: "dispensed" });
+    emitToStation(String(station), "dashboard:refresh", { reason: "gas_sale_dispensed" });
+
     return res.status(200).json({ message: `Gas dispensed from "${tank.name}"`, data: sale });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
@@ -303,6 +312,8 @@ export const voidSale = async (req: AuthenticatedRequest, res: Response) => {
     sale.voidedBy = new Types.ObjectId(staffId);
     sale.voidReason = voidReason;
     await sale.save();
+
+    emitToStation(String(station), "gas:sale-updated", { status: "voided" });
 
     return res.status(200).json({ message: "Sale voided", data: sale });
   } catch (err: any) {

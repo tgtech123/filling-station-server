@@ -4,7 +4,8 @@ import { createTicket, getMyTickets, getFaqs } from "../controllers/support.cont
 
 const router = express.Router();
 
-router.get("/faqs", getFaqs);
+// requireAuth so the controller knows the caller's role and can scope the FAQs.
+router.get("/faqs", requireAuth, getFaqs);
 router.post("/tickets", requireAuth, createTicket);
 router.get("/tickets", requireAuth, getMyTickets);
 

@@ -8,7 +8,9 @@ import mongoose, { Document, Schema, Types, Model } from "mongoose";
 
 export type APMatchStatus = "unmatched" | "matched" | "variance";
 export type APInvoiceStatus = "draft" | "booked" | "partially_paid" | "paid" | "void";
-export type POSourceType = "lubricant" | "gas" | "none";
+// Every purchase document an invoice can be 3-way matched against:
+// lubricant PO, bulk-LPG PO, cylinder-bottle PO, or a fuel tanker delivery.
+export type POSourceType = "lubricant" | "gas" | "gas_cylinder" | "fuel" | "none";
 
 export interface IAPInvoiceLine {
   description: string;
@@ -88,7 +90,7 @@ const APInvoiceSchema = new Schema<IAPInvoice>(
     total:     { type: Number, required: true, min: 0 },
     totalBase: { type: Number, required: true, min: 0 },
     match: {
-      poType:   { type: String, enum: ["lubricant", "gas", "none"], default: "none" },
+      poType:   { type: String, enum: ["lubricant", "gas", "gas_cylinder", "fuel", "none"], default: "none" },
       poId:     { type: Schema.Types.ObjectId, default: null },
       poNumber: { type: String, trim: true },
       poAmount:              { type: Number },
