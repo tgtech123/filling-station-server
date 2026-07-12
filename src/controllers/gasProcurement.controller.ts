@@ -5,6 +5,7 @@ import GasProcurement from "../models/gasProcurement.model";
 import GasTank from "../models/gasTank.model";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
+import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -149,6 +150,20 @@ export const confirmDelivery = async (req: AuthenticatedRequest, res: Response) 
     order.superNotes          = superNotes;
     order.status              = "delivered";
     await order.save();
+
+    // Goods receipt recorded → nudge the accountant to register the supplier
+    // invoice in Payables and run the 3-way match against this PO.
+    Notification.create({
+      fillingStation: order.fillingStation,
+      type: "message",
+      category: "delivery_arrived",
+      title: "Gas PO Delivered — Register Invoice",
+      body: `${order.orderNumber} from ${order.supplierName}: ${Number(deliveredQuantityKg).toLocaleString()} kg received (≈₦${(Number(deliveredQuantityKg) * order.pricePerKg).toLocaleString()}). Register the supplier invoice in Payables to 3-way match.`,
+      severity: "info",
+      timestamp: new Date(),
+      targetRole: "accountant",
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    }).catch((e: any) => console.error("Notification error (gas PO delivered -> accountant):", e));
 
     return res.status(200).json({ message: "Delivery confirmed â€” awaiting manager validation", data: order });
   } catch (err: any) {

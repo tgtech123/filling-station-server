@@ -5,6 +5,7 @@ import Lubricant from "../models/lubricant.model";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
 import Activity from "../models/activity.model";
+import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
 
 // â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -344,6 +345,23 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       severity: shortItems.length ? "warning" : "info",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     }).catch(console.error);
+
+    // Goods receipt recorded → nudge the accountant to register the supplier
+    // invoice in Payables and run the 3-way match against this PO.
+    const receivedTotal = procurement.items.reduce(
+      (s, i) => s + (i.receivedQuantity ?? i.quantityToProcure) * (i.unitCost || 0), 0
+    );
+    Notification.create({
+      fillingStation: stationId,
+      type: "message",
+      category: "delivery_arrived",
+      title: "Lubricant PO Received — Register Invoice",
+      body: `${procurement.procurementNumber} from ${procurement.vendorName || "vendor"} received (≈₦${receivedTotal.toLocaleString()}). Register the supplier invoice in Payables to 3-way match.`,
+      severity: "info",
+      timestamp: new Date(),
+      targetRole: "accountant",
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    }).catch((e: any) => console.error("Notification error (lubricant PO received -> accountant):", e));
 
     const message = isManager
       ? `Marked as received. Stock updated.${shortItems.length ? ` ${shortItems.length} item(s) were short delivered.` : ""}`

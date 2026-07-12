@@ -5,6 +5,8 @@ import { APInvoice, APPaymentBatch } from "../models/accountsPayable.model";
 import { TaxConfig, TaxRecord } from "../models/treasury.model";
 import LubricantProcurement from "../models/lubricantProcurement.model";
 import GasProcurement from "../models/gasProcurement.model";
+import GasCylinderProcurement from "../models/gasCylinderProcurement.model";
+import Delivery from "../models/delivery.model";
 import {
   postJournal,
   nextDocNumber,
@@ -51,7 +53,37 @@ async function fetchPOandGRN(stationId: any, poType: string, poId: string): Prom
       : 0;
     return { poNumber: po.orderNumber, poAmount, grnAmount, grnRecorded };
   }
-  throw new Error("poType must be 'lubricant' or 'gas'");
+  if (poType === "gas_cylinder") {
+    const po: any = await GasCylinderProcurement.findOne({ _id: poId, fillingStation: stationId }).lean();
+    if (!po) throw new Error("Cylinder purchase order not found");
+    const poAmount = round2(
+      po.items.reduce((s: number, it: any) => s + it.quantityToProcure * (it.unitCost || 0), 0)
+    );
+    const grnRecorded = po.status === "received";
+    const grnAmount = grnRecorded
+      ? round2(po.items.reduce(
+          (s: number, it: any) => s + (it.receivedQuantity ?? it.quantityToProcure) * (it.unitCost || 0), 0))
+      : 0;
+    return { poNumber: po.procurementNumber, poAmount, grnAmount, grnRecorded };
+  }
+  if (poType === "fuel") {
+    // Fuel is bought via tanker Delivery records. Full 3-way rigor:
+    //   PO leg  = orderedQuantity × price (frozen at scheduling)
+    //   GRN leg = quantity × price (actual litres received at completion)
+    // Legacy deliveries without orderedQuantity fall back to quantity.
+    const d: any = await Delivery.findOne({ _id: poId, fillingStation: stationId }).lean();
+    if (!d) throw new Error("Fuel delivery record not found");
+    const orderedQty = d.orderedQuantity ?? d.quantity ?? 0;
+    const receivedQty = d.quantity ?? 0;
+    const grnRecorded = d.status === "Completed";
+    return {
+      poNumber: `FUEL-${String(d._id).slice(-6).toUpperCase()}`,
+      poAmount: round2(orderedQty * (d.pricePerLtr || 0)),
+      grnAmount: grnRecorded ? round2(receivedQty * (d.pricePerLtr || 0)) : 0,
+      grnRecorded,
+    };
+  }
+  throw new Error("poType must be 'lubricant', 'gas', 'gas_cylinder' or 'fuel'");
 }
 
 /**
@@ -396,13 +428,19 @@ export const listOpenPOs = async (req: AuthenticatedRequest, res: Response) => {
     const station = req.user?.station;
     if (!station) return noStation(res);
 
-    const [lub, gas] = await Promise.all([
+    const [lub, gas, cyl, fuel] = await Promise.all([
       LubricantProcurement.find({ fillingStation: station, status: { $in: ["ordered", "received"] } })
         .select("procurementNumber vendorName status items receivedAt")
         .sort({ createdAt: -1 }).limit(50).lean(),
       GasProcurement.find({ fillingStation: station, status: { $in: ["ordered", "awaiting_delivery", "delivered", "validated"] } })
         .select("orderNumber supplierName status orderedCost totalCost deliveredQuantityKg orderedQuantityKg pricePerKg")
         .sort({ createdAt: -1 }).limit(50).lean(),
+      GasCylinderProcurement.find({ fillingStation: station, status: { $in: ["submitted", "ordered", "received"] } })
+        .select("procurementNumber vendorName status items receivedAt")
+        .sort({ createdAt: -1 }).limit(50).lean(),
+      Delivery.find({ fillingStation: station })
+        .select("suplier quantity orderedQuantity pricePerLtr status deliveryDate")
+        .sort({ deliveryDate: -1 }).limit(50).lean(),
     ]);
 
     return res.status(200).json({
@@ -416,6 +454,21 @@ export const listOpenPOs = async (req: AuthenticatedRequest, res: Response) => {
           _id: p._id, poNumber: p.orderNumber, vendor: p.supplierName, status: p.status,
           amount: round2(p.orderedCost ?? p.orderedQuantityKg * p.pricePerKg),
           grnRecorded: ["delivered", "validated"].includes(p.status),
+        })),
+        gas_cylinder: cyl.map((p: any) => ({
+          _id: p._id, poNumber: p.procurementNumber, vendor: p.vendorName, status: p.status,
+          amount: round2(p.items.reduce((s: number, it: any) => s + it.quantityToProcure * (it.unitCost || 0), 0)),
+          grnRecorded: p.status === "received",
+        })),
+        fuel: fuel.map((d: any) => ({
+          _id: d._id,
+          poNumber: `FUEL-${String(d._id).slice(-6).toUpperCase()}`,
+          vendor: d.suplier || "Fuel supplier",
+          status: d.status,
+          // PO leg — what was ordered. The GRN leg (received) is matched separately.
+          amount: round2((d.orderedQuantity ?? d.quantity ?? 0) * (d.pricePerLtr || 0)),
+          grnRecorded: d.status === "Completed",
+          deliveryDate: d.deliveryDate,
         })),
       },
     });

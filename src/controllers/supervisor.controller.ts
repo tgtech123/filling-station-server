@@ -9,6 +9,7 @@ import Tank from "../models/tanks.model";
 import Lubricant from "../models/lubricant.model";
 import ActivityLog from "../models/activityLog.model";
 import DipReading from "../models/dipReading.model";
+import ShiftTypeDef from "../models/shiftTypeDef.model";
 import { emitToStation } from "../services/socket.service";
 
 // Helper function to check if a field is populated
@@ -699,7 +700,17 @@ export const getScheduledAttendants = async (req: AuthenticatedRequest, res: Res
       .sort({ shiftDate: 1, shiftType: 1 })
       .lean();
 
-    // Group by date and shift type
+    // Group by date and shift type. Custom station-defined types are bucketed
+    // by their configured session; anything unknown defaults to morning so no
+    // scheduled shift ever silently disappears from this view (previously
+    // Full-Time/24/7/custom types were dropped entirely).
+    const customDefs = await ShiftTypeDef.find({ fillingStation: stationId })
+      .select("name session")
+      .lean();
+    const customSession = new Map(
+      customDefs.map((d: any) => [d.name.toLowerCase(), d.session])
+    );
+
     const scheduled: any = {};
 
     shifts.forEach((shift: any) => {
@@ -717,14 +728,14 @@ export const getScheduledAttendants = async (req: AuthenticatedRequest, res: Res
           ? `${shift.attendant.firstName} ${shift.attendant.lastName}`
           : "Unknown",
         pumpNo: shift.pumpTitle || "-",
+        shiftType: shift.shiftType,
         status: shift.status === "Active" ? "active" : shift.status === "Completed" ? "closed" : "inactive",
       };
 
-      if (shift.shiftType === "One-Day-Morning" || shift.shiftType === "Day-Off") {
-        scheduled[dateKey].morning.push(attendantData);
-      } else if (shift.shiftType === "One-Day-Evening") {
-        scheduled[dateKey].evening.push(attendantData);
-      }
+      const type = String(shift.shiftType || "");
+      const isEvening =
+        type === "One-Day-Evening" || customSession.get(type.toLowerCase()) === "evening";
+      scheduled[dateKey][isEvening ? "evening" : "morning"].push(attendantData);
     });
 
     res.json({
@@ -757,6 +768,19 @@ export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response
 
     if (!attendantId || !shiftType || !startDate) {
       return res.status(400).json({ message: "Attendant ID, shift type, and start date are required" });
+    }
+
+    // Shift type must be a built-in or one of this station's active custom types
+    const BUILT_INS = ["One-Day-Morning", "One-Day-Evening", "Day-Off", "24/7", "Full-Time"];
+    if (!BUILT_INS.includes(shiftType)) {
+      const customType = await ShiftTypeDef.findOne({
+        fillingStation: stationId,
+        name: shiftType,
+        isActive: true,
+      }).lean();
+      if (!customType) {
+        return res.status(400).json({ message: `"${shiftType}" is not a valid shift type for this station` });
+      }
     }
 
     // Get attendant
@@ -843,6 +867,15 @@ export const scheduleAttendant = async (req: AuthenticatedRequest, res: Response
       status: "Success",
       metadata: { attendantId, shiftType, startDate, endDate },
     });
+
+    // Real-time: the supervisor schedule view, the attendant's shifts page and
+    // dashboards all refresh without a manual reload.
+    emitToStation(String(stationId), "shift:scheduled", {
+      attendantId: String(attendantId),
+      shiftType,
+      count: shifts.length,
+    });
+    emitToStation(String(stationId), "dashboard:refresh", { reason: "shift_scheduled" });
 
     res.json({
       success: true,

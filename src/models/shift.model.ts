@@ -7,7 +7,8 @@ export interface IShift extends Document {
   pump: mongoose.Types.ObjectId; // Reference to pump._id
   pumpTitle: string; // e.g., "Pump 1"
   product: string; // Fuel type: "PMS", "AGO", "Diesel", etc.
-  shiftType: "One-Day-Morning" | "One-Day-Evening" | "Day-Off" | "Full-Time";
+  // Built-in type or a station-defined custom type (ShiftTypeDef.name)
+  shiftType: string;
   shiftDate: Date;
   startTime: Date;
   endTime?: Date;
@@ -47,10 +48,12 @@ const shiftSchema = new Schema<IShift>(
       required: true,
       trim: true,
     },
+    // Free string — validated against built-ins + the station's ShiftTypeDefs
+    // at scheduling time, so managers can add their own types.
     shiftType: {
       type: String,
-      enum: ["One-Day-Morning", "One-Day-Evening", "Day-Off", "Full-Time"],
       required: true,
+      trim: true,
     },
     shiftDate: {
       type: Date,
