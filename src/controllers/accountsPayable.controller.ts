@@ -70,16 +70,33 @@ async function fetchPOandGRN(stationId: any, poType: string, poId: string): Prom
     // Fuel is bought via tanker Delivery records. Full 3-way rigor:
     //   PO leg  = orderedQuantity × price (frozen at scheduling)
     //   GRN leg = quantity × price (actual litres received at completion)
-    // Legacy deliveries without orderedQuantity fall back to quantity.
+    // One PURCHASE may be split across several tanks (shared purchaseRef, e.g.
+    // FDL-2026-001) — the invoice matches the WHOLE purchase, so all lines of
+    // the group are summed. Legacy single deliveries match individually.
     const d: any = await Delivery.findOne({ _id: poId, fillingStation: stationId }).lean();
     if (!d) throw new Error("Fuel delivery record not found");
-    const orderedQty = d.orderedQuantity ?? d.quantity ?? 0;
-    const receivedQty = d.quantity ?? 0;
-    const grnRecorded = d.status === "Completed";
+
+    const group: any[] = d.purchaseRef
+      ? await Delivery.find({
+          fillingStation: stationId,
+          purchaseRef: d.purchaseRef,
+          status: { $ne: "Cancelled" },
+        }).lean()
+      : [d];
+
+    const poAmount = round2(
+      group.reduce((s, g) => s + (g.orderedQuantity ?? g.quantity ?? 0) * (g.pricePerLtr || 0), 0)
+    );
+    // The goods receipt is only complete when EVERY tank line has been received.
+    const grnRecorded = group.length > 0 && group.every((g) => g.status === "Completed");
+    const grnAmount = grnRecorded
+      ? round2(group.reduce((s, g) => s + (g.quantity ?? 0) * (g.pricePerLtr || 0), 0))
+      : 0;
+
     return {
-      poNumber: `FUEL-${String(d._id).slice(-6).toUpperCase()}`,
-      poAmount: round2(orderedQty * (d.pricePerLtr || 0)),
-      grnAmount: grnRecorded ? round2(receivedQty * (d.pricePerLtr || 0)) : 0,
+      poNumber: d.purchaseRef || `FUEL-${String(d._id).slice(-6).toUpperCase()}`,
+      poAmount,
+      grnAmount,
       grnRecorded,
     };
   }
@@ -438,9 +455,9 @@ export const listOpenPOs = async (req: AuthenticatedRequest, res: Response) => {
       GasCylinderProcurement.find({ fillingStation: station, status: { $in: ["submitted", "ordered", "received"] } })
         .select("procurementNumber vendorName status items receivedAt")
         .sort({ createdAt: -1 }).limit(50).lean(),
-      Delivery.find({ fillingStation: station })
-        .select("suplier quantity orderedQuantity pricePerLtr status deliveryDate")
-        .sort({ deliveryDate: -1 }).limit(50).lean(),
+      Delivery.find({ fillingStation: station, status: { $ne: "Cancelled" } })
+        .select("suplier quantity orderedQuantity pricePerLtr status deliveryDate purchaseRef")
+        .sort({ deliveryDate: -1 }).limit(150).lean(),
     ]);
 
     return res.status(200).json({
@@ -460,16 +477,49 @@ export const listOpenPOs = async (req: AuthenticatedRequest, res: Response) => {
           amount: round2(p.items.reduce((s: number, it: any) => s + it.quantityToProcure * (it.unitCost || 0), 0)),
           grnRecorded: p.status === "received",
         })),
-        fuel: fuel.map((d: any) => ({
-          _id: d._id,
-          poNumber: `FUEL-${String(d._id).slice(-6).toUpperCase()}`,
-          vendor: d.suplier || "Fuel supplier",
-          status: d.status,
-          // PO leg — what was ordered. The GRN leg (received) is matched separately.
-          amount: round2((d.orderedQuantity ?? d.quantity ?? 0) * (d.pricePerLtr || 0)),
-          grnRecorded: d.status === "Completed",
-          deliveryDate: d.deliveryDate,
-        })),
+        // Fuel purchases: multi-tank splits share a purchaseRef and must appear
+        // as ONE selectable PO (the invoice covers the whole purchase). Rows
+        // without a ref (legacy) stay individual. Any line's _id is a valid
+        // handle — the matcher expands to the full group from it.
+        fuel: (() => {
+          const groups = new Map<string, any[]>();
+          const singles: any[] = [];
+          for (const d of fuel as any[]) {
+            if (d.purchaseRef) {
+              const g = groups.get(d.purchaseRef) || [];
+              g.push(d);
+              groups.set(d.purchaseRef, g);
+            } else {
+              singles.push(d);
+            }
+          }
+          const out: any[] = [];
+          for (const [ref, g] of groups) {
+            out.push({
+              _id: g[0]._id,
+              poNumber: ref,
+              vendor: g[0].suplier || "Fuel supplier",
+              status: g.every((x) => x.status === "Completed") ? "Completed" : "Pending",
+              amount: round2(g.reduce((s, x) => s + (x.orderedQuantity ?? x.quantity ?? 0) * (x.pricePerLtr || 0), 0)),
+              grnRecorded: g.every((x) => x.status === "Completed"),
+              tanks: g.length,
+              deliveryDate: g[0].deliveryDate,
+            });
+          }
+          for (const d of singles) {
+            out.push({
+              _id: d._id,
+              poNumber: `FUEL-${String(d._id).slice(-6).toUpperCase()}`,
+              vendor: d.suplier || "Fuel supplier",
+              status: d.status,
+              amount: round2((d.orderedQuantity ?? d.quantity ?? 0) * (d.pricePerLtr || 0)),
+              grnRecorded: d.status === "Completed",
+              tanks: 1,
+              deliveryDate: d.deliveryDate,
+            });
+          }
+          return out;
+        })(),
       },
     });
   } catch (e: any) {

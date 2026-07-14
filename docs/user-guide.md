@@ -14,7 +14,7 @@
 6. [The Dashboard — Your Home Screen](#6-the-dashboard--your-home-screen)
 7. [Managing Your Staff](#7-managing-your-staff)
 8. [Shift Management](#8-shift-management)
-9. [Fuel Management — Pumps, Tanks & Pricing](#9-fuel-management--pumps-tanks--pricing)
+9. [Product Management — Pumps, Tanks & Pricing](#9-product-management--pumps-tanks--pricing)
 10. [Lubricant Sales & Inventory](#10-lubricant-sales--inventory)
 11. [Gas Department (CNG / LPG)](#11-gas-department-cng--lpg)
 12. [Financial Reports & Cash Reconciliation](#12-financial-reports--cash-reconciliation) — reports, reconciliation & the Accounting Suite
@@ -341,13 +341,13 @@ The scheduled-attendants view groups every shift into its morning or evening col
 
 ---
 
-## 9. Fuel Management — Pumps, Tanks & Pricing
+## 9. Product Management — Pumps, Tanks & Pricing
 
 ### 9.1 Adding a Pump
 
 > Done by the Manager or Supervisor
 
-1. Go to **Fuel Management** > **Pumps** in the menu
+1. Go to **Product Management** > **Pumps** in the menu
 2. Click **Add Pump**
 3. Enter:
    - **Pump Name/Number** — e.g., "Pump 1" or "PMS Pump A"
@@ -357,13 +357,13 @@ The scheduled-attendants view groups every shift into its morning or evening col
 
 ### 9.2 Updating Pump Details
 
-1. Go to **Fuel Management** > **Pumps**
+1. Go to **Product Management** > **Pumps**
 2. Click **Edit** next to the pump you want to update
 3. Make your changes and click **Save**
 
 ### 9.3 Scheduling Pump Maintenance
 
-1. Go to **Fuel Management** > **Pumps**
+1. Go to **Product Management** > **Pumps**
 2. Click the pump that needs maintenance
 3. Click **Schedule Maintenance**
 4. Enter the maintenance date and description
@@ -376,7 +376,7 @@ The pump will be flagged for maintenance and will appear in alerts.
 Tanks store your fuel. Keep their details up to date so your inventory is accurate.
 
 **Adding a Tank:**
-1. Go to **Fuel Management** > **Tanks** (or **Tank Status**)
+1. Go to **Product Management** > **Tanks** (or **Tank Status**)
 2. Click **Add Tank**
 3. Enter:
    - **Tank Name/Number**
@@ -398,7 +398,7 @@ The system will compare this against expected levels based on recorded sales and
 
 > Done by the Manager
 
-1. Go to **Fuel Management** > **Pricing** (or look for a **Prices** option in the menu)
+1. Go to **Product Management** > **Pricing** (or look for a **Prices** option in the menu)
 2. Click **Edit Price** for the fuel type you want to update
 3. Enter the new price per litre
 4. Click **Save**
@@ -414,13 +414,19 @@ All future shift calculations will use the new price. Historical shifts keep the
    - Number of shifts served
    - Efficiency compared to other pumps
 
-### 9.7 Fuel Deliveries — Scheduling & Receiving
+### 9.7 Product Deliveries — Scheduling & Receiving
 
-> Done by the Manager
+> Done by the Manager. Find it under **Product Management** > **Order & Deliveries**.
 
-**Scheduling a delivery:**
-1. Go to **Fuel Management** > **Order & Deliveries**
-2. Click **Schedule Delivery**, choose the tank, supplier, price per litre and the **quantity ordered**, then save
+**Scheduling a delivery (one purchase can fill several tanks):**
+1. Go to **Product Management** > **Order & Deliveries** and click **Schedule Delivery**
+2. Choose the **Product** (PMS, AGO/Diesel, DPK/Kerosene…)
+3. Under **Fill Tanks**, pick a tank and the litres going into it. If the load is split across more than one tank of the same product — e.g. a **30,000 L PMS load** poured into three PMS tanks as 12,000 + 10,000 + 8,000 — click **Add another tank** and enter each allocation. The running total is shown as you go
+4. Enter the **price per litre**, **supplier** and **delivery date**, then click **Schedule Delivery**
+
+All the tank allocations are saved as **one purchase** under a shared reference (e.g. `FDL-2026-001`), so the supplier's single invoice matches the whole load — while each tank still tracks its own exact stock. Each tank line is received individually as the tanker discharges into it.
+
+> **Capacity is respected.** Each tank in the list shows how much **free space** it has (limit minus what's already in it). If Tank A holds 10,000 L and its limit is 22,000 L, it can only take **12,000 L more** — the form shows this, offers a "Fill to capacity" shortcut, and blocks you from over-filling it. You simply put the remaining litres into your other tanks of the same product. If your total free space is less than the load, you cannot store it all until some is sold down first.
 
 **Receiving a delivery (when the tanker arrives):**
 1. Find the delivery in the list and click **Mark as Completed**
@@ -428,7 +434,7 @@ All future shift calculations will use the new price. Historical shifts keep the
 3. If the figure differs from the order, the dialog immediately shows a **short delivery** or **over delivery** warning so you can see the gap before confirming
 4. Click **Confirm & Fill Tank** — the tank is filled with the *actual* litres received
 
-> The ordered quantity stays frozen on the record, so any shortfall automatically surfaces when your accountant matches the supplier's invoice (see Section 12). The accountant is also notified the moment a delivery is completed.
+> The ordered quantity stays frozen on the record, so any shortfall automatically surfaces when your accountant matches the supplier's invoice (see Section 12). The accountant is also notified the moment a delivery is completed. For a split purchase, the invoice in Payables covers the whole `FDL-…` group — the goods receipt is treated as complete only once **every** tank in the purchase has been received.
 
 ### 9.8 Stock Reconciliation — The "Station Litre"
 
@@ -1413,7 +1419,7 @@ On **your own** phone or laptop, accepting the browser's "Save password?" prompt
 FAQs are shown **by role** — each person sees only the questions relevant to their job (cashiers see cashier topics, accountants see accounting topics, and so on). Managers see everything.
 
 **Q: How do I add a new fuel type (e.g., Kerosene) after initial setup?**
-Go to **Fuel Management** > **Pricing** and add the new product type, then add a tank and pump for it. Contact support if the product type is not listed as an option.
+Go to **Product Management** > **Pricing** and add the new product type, then add a tank and pump for it. Contact support if the product type is not listed as an option.
 
 **Q: The billing history section shows empty. Why?**
 Billing history only shows **successful** payments made through Paystack. If you are on the Free Plan, no payments have been made yet and the section will be empty.
