@@ -6,58 +6,94 @@ import mongoose from "mongoose";
 import Notification from "../models/notification.model";
 import { emitToStation } from "../services/socket.service";
 
+// Sequential purchase reference shared by every tank line of one purchase.
+const buildPurchaseRef = async (stationId: any): Promise<string> => {
+  const year = new Date().getFullYear();
+  const refs = await Delivery.distinct("purchaseRef", {
+    fillingStation: stationId,
+    purchaseRef: { $ne: null },
+  });
+  return `FDL-${year}-${String(refs.length + 1).padStart(3, "0")}`;
+};
+
 export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
-    const { tank, pricePerLtr, quantity, supplier, deliveryDate, status } = req.body;
+    const { tank, pricePerLtr, quantity, supplier, deliveryDate, status, allocations } = req.body;
 
-    // 1ï¸âƒ£ Authorization check
     if (!fillingStation) {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    // 2ï¸âƒ£ Validate required fields
-    if (!tank || !pricePerLtr || !quantity || !supplier || !deliveryDate) {
+    // One purchase can fill several tanks: `allocations: [{ tank, quantity }]`.
+    // The legacy single-tank body is normalised into a one-line allocation.
+    const linesIn: { tank: string; quantity: number }[] =
+      Array.isArray(allocations) && allocations.length > 0
+        ? allocations.map((a: any) => ({ tank: String(a.tank), quantity: Number(a.quantity) }))
+        : tank && quantity
+        ? [{ tank: String(tank), quantity: Number(quantity) }]
+        : [];
+
+    if (linesIn.length === 0 || !pricePerLtr || !supplier || !deliveryDate) {
       return res.status(400).json({ error: "Please fill all required fields" });
     }
+    if (linesIn.some((l) => !l.tank || isNaN(l.quantity) || l.quantity <= 0)) {
+      return res.status(400).json({ error: "Every tank allocation needs a tank and a positive quantity" });
+    }
+    // The same tank cannot appear twice in one purchase
+    const seen = new Set(linesIn.map((l) => l.tank));
+    if (seen.size !== linesIn.length) {
+      return res.status(400).json({ error: "Each tank can only appear once per purchase" });
+    }
 
-    // 3ï¸âƒ£ Find the tank for this station
     const station = await Tank.findOne({ fillingStation }).exec();
-
     if (!station) {
       return res.status(404).json({ error: "No tank record found for this filling station" });
     }
 
-    const foundTank = station.tanks.find((t) => t._id.toString() === tank);
-    if (!foundTank) {
-      return res.status(404).json({ error: "Specified tank not found in this station" });
+    // Validate EVERY allocation before creating anything (all-or-nothing).
+    const resolved: { sub: any; qty: number }[] = [];
+    for (const line of linesIn) {
+      const foundTank = station.tanks.find((t) => t._id.toString() === line.tank);
+      if (!foundTank) {
+        return res.status(404).json({ error: "Specified tank not found in this station" });
+      }
+      const newTotal = Number(foundTank.currentQuantity) + line.quantity;
+      if (newTotal > foundTank.limit) {
+        return res.status(400).json({
+          error: `Cannot add ${line.quantity}L to ${foundTank.title} - this will exceed its limit of ${foundTank.limit}L.`,
+        });
+      }
+      resolved.push({ sub: foundTank, qty: line.quantity });
     }
 
-    // 4ï¸âƒ£ Calculate new quantity (simulate update before saving)
-   const newTotal = Number(foundTank.currentQuantity) + Number(quantity);
-    if (newTotal > foundTank.limit) {
-      return res.status(400).json({
-        error: `Cannot add ${quantity}L â€” this will exceed the tank limit of ${foundTank.limit}L.`,
+    // Shared purchase ref ties the tank lines together for 3-way matching.
+    const purchaseRef = await buildPurchaseRef(fillingStation);
+
+    const created = [];
+    for (const { sub, qty } of resolved) {
+      const newDelivery = await Delivery.create({
+        fillingStation: new mongoose.Types.ObjectId(fillingStation),
+        tank: sub._id,
+        purchaseRef,
+        pricePerLtr,
+        // PO leg frozen at scheduling: what we ORDERED per tank. `quantity`
+        // becomes the actual received amount (GRN leg) at completion.
+        orderedQuantity: qty,
+        quantity: qty,
+        suplier: supplier,
+        deliveryDate,
+        status: status || "Pending",
       });
+      created.push(newDelivery);
+
+      if (status === "Completed") {
+        sub.currentQuantity = Number(sub.currentQuantity) + qty;
+      }
     }
 
-    // 5ï¸âƒ£ Create the delivery record first
-    const newDelivery = await Delivery.create({
-      fillingStation: new mongoose.Types.ObjectId(fillingStation),
-      tank: new mongoose.Types.ObjectId(tank),
-      pricePerLtr,
-      // PO leg frozen at scheduling: what we ORDERED. `quantity` starts equal
-      // and becomes the actual received amount (GRN leg) at completion.
-      orderedQuantity: Number(quantity),
-      quantity,
-      suplier: supplier,
-      deliveryDate,
-      status: status || "Pending",
-    });
-
-    // 6ï¸âƒ£ If status is "Completed", update tank quantity
     if (status === "Completed") {
-      foundTank.currentQuantity = newTotal;
+      station.markModified("tanks");
       await station.save();
     }
 
@@ -65,8 +101,12 @@ export const addSupply = async (req: AuthenticatedRequest, res: Response) => {
     emitToStation(String(fillingStation), "delivery:updated", { action: "created" });
 
     return res.status(201).json({
-      message: "Delivery added successfully",
-      data: newDelivery,
+      message:
+        created.length > 1
+          ? `Purchase ${purchaseRef} scheduled across ${created.length} tanks`
+          : "Delivery added successfully",
+      data: created.length > 1 ? created : created[0],
+      purchaseRef,
     });
   } catch (error: any) {
     console.error("Error adding supply:", error);
@@ -109,6 +149,7 @@ export const getSupplies = async (req: AuthenticatedRequest, res: Response) => {
         fuelType: matchedTank?.fuelType || "Unknown",
         quantity: delivery.quantity,
         orderedQuantity: delivery.orderedQuantity ?? delivery.quantity,
+        purchaseRef: delivery.purchaseRef || null,
         supplier: delivery.suplier,
         deliveryDate: delivery.deliveryDate,
         status: delivery.status,

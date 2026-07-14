@@ -732,7 +732,7 @@ export const auditPumpLinks = async (req: AuthenticatedRequest, res: Response) =
           shiftProducts: u.products,
           lastShiftDate: u.lastShiftDate,
           reason:
-            "Recorded shift product(s) don't match the pump's current tank fuel type — the pump may have been reassigned, or the tank's fuel changed.",
+            "Recorded shift product(s) don't match the pump's current tank product type — the pump may have been reassigned, or the tank's product changed.",
         });
       }
     }

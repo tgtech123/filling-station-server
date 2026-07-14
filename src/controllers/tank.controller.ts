@@ -49,7 +49,7 @@ export const addTank = async (req: AuthenticatedRequest, res: Response) => {
     const VALID_FUEL_TYPES = ["Petrol", "Diesel", "Kerosene", "Gas", "PMS", "AGO"];
     if (!VALID_FUEL_TYPES.includes(normalizedFuelType)) {
       return res.status(400).json({
-        error: `Invalid fuel type. Must be one of: ${VALID_FUEL_TYPES.join(", ")}`,
+        error: `Invalid product type. Must be one of: ${VALID_FUEL_TYPES.join(", ")}`,
       });
     }
 

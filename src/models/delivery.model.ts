@@ -4,6 +4,11 @@ export interface IDelivery extends Document {
   _id: mongoose.Types.ObjectId;
   fillingStation: mongoose.Types.ObjectId;
   tank: mongoose.Types.ObjectId;
+  // One PURCHASE can fill several tanks (e.g. a 30,000L PMS load split across
+  // three tanks). Each tank gets its own Delivery line, all sharing this ref
+  // (FDL-2026-001) so the supplier's single invoice 3-way matches the whole
+  // purchase, while stock/reconciliation stay exact per tank.
+  purchaseRef?: string;
   pricePerLtr: number;
   // What was ORDERED from the supplier — frozen at scheduling time. This is the
   // PO leg of the 3-way match. Legacy records without it fall back to quantity.
@@ -28,6 +33,11 @@ const DeliverySchema = new Schema<IDelivery>(
       type: Schema.Types.ObjectId,
       ref: "Tank",
       required: true,
+    },
+    purchaseRef: {
+      type: String,
+      trim: true,
+      index: true,
     },
     pricePerLtr: {
       type: Number,
