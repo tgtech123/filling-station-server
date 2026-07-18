@@ -12,7 +12,11 @@ import SubscriptionPayment from "../models/subscriptionPayment.model";
 import AdminLog from "../models/adminLog.model";
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Payment from "../models/payment.model";
-import PlatformSettings, { DEFAULT_TAX_RATES } from "../models/platformSettings.model";
+import PlatformSettings, {
+  DEFAULT_TAX_RATES,
+  DEFAULT_TERMS_AND_CONDITIONS,
+  DEFAULT_PRIVACY_POLICY,
+} from "../models/platformSettings.model";
 import { getCache, setCache, deleteCache, invalidateStationAuthCache } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
 import crypto from "crypto";
@@ -1057,7 +1061,9 @@ export const seedPlatformSettings = async () => {
     contactAddress: "Km 2 Airport Road, Rukpokwu, Port Harcourt, Rivers State",
     currency: "Nigerian Naira (NGN)",
     currencyCode: "NGN",
-    termsAndConditions: "By using FuelDesk, you agree to our terms of service...",
+    // termsAndConditions / privacyPolicy stay empty on purpose: the public
+    // endpoint falls back to the full default legal text until the admin
+    // writes their own in Settings → Legal.
     planStatus: true,
     emailNotifications: true,
     inAppNotifications: false,
@@ -1105,6 +1111,7 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
       currencyCode,
       taxRates,
       termsAndConditions,
+      privacyPolicy,
       planStatus,
       emailNotifications,
       inAppNotifications,
@@ -1159,6 +1166,7 @@ export const updatePlatformSettings = async (req: AuthenticatedRequest, res: Res
     }
 
     if (termsAndConditions !== undefined) updates.termsAndConditions = termsAndConditions;
+    if (privacyPolicy !== undefined) updates.privacyPolicy = privacyPolicy;
     if (planStatus !== undefined) updates.planStatus = planStatus;
     if (emailNotifications !== undefined) updates.emailNotifications = emailNotifications;
     if (inAppNotifications !== undefined) updates.inAppNotifications = inAppNotifications;
@@ -1197,7 +1205,7 @@ export const getPublicSettings = async (req: Request, res: Response) => {
     // No .lean(): taxRates is a Map and only serializes correctly from a hydrated
     // doc (and the schema default backfills it for docs created before the field).
     const settings = await PlatformSettings.findOne().select(
-      "platformName contactEmail contactPhone contactAddress currency currencyCode termsAndConditions supportWhatsApp logoUrl taxRates"
+      "platformName contactEmail contactPhone contactAddress currency currencyCode termsAndConditions privacyPolicy supportWhatsApp logoUrl taxRates"
     );
 
     // Per-country VAT rates (decimal fractions) so the pricing/upgrade screens can
@@ -1207,16 +1215,23 @@ export const getPublicSettings = async (req: Request, res: Response) => {
         ? Object.fromEntries(settings.taxRates)
         : DEFAULT_TAX_RATES;
 
+    const platformName = settings?.platformName || "FuelDesk";
+
     return res.status(200).json({
       message: "Public settings retrieved",
       data: {
-        platformName: settings?.platformName || "FuelDesk",
+        platformName,
         contactEmail: settings?.contactEmail || "",
         contactPhone: settings?.contactPhone || "",
         contactAddress: settings?.contactAddress || "",
         currency: settings?.currency || "Nigerian Naira (NGN)",
         currencyCode: settings?.currencyCode || "NGN",
-        termsAndConditions: settings?.termsAndConditions || "No terms available",
+        termsAndConditions:
+          settings?.termsAndConditions ||
+          DEFAULT_TERMS_AND_CONDITIONS.split("{platform}").join(platformName),
+        privacyPolicy:
+          settings?.privacyPolicy ||
+          DEFAULT_PRIVACY_POLICY.split("{platform}").join(platformName),
         supportWhatsApp: settings?.supportWhatsApp || "",
         logoUrl: settings?.logoUrl || "",
         taxRates,
