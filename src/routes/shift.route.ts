@@ -2,7 +2,7 @@ import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
 import * as shiftController from "../controllers/shift.controller";
-import { listShiftTypes, createShiftType, updateShiftType } from "../controllers/shiftType.controller";
+import { listShiftTypes, createShiftType, updateShiftType, toggleBuiltInShiftType } from "../controllers/shiftType.controller";
 // getTodaySchedule is exported from the same controller
 
 const router = express.Router();
@@ -16,6 +16,8 @@ router.get(
   listShiftTypes
 );
 router.post("/types", requireAuth, checkRole("manager"), createShiftType);
+// Built-in toggle registered before /types/:id so "builtin" isn't read as an id.
+router.patch("/types/builtin/:name", requireAuth, checkRole("manager"), toggleBuiltInShiftType);
 router.patch("/types/:id", requireAuth, checkRole("manager"), updateShiftType);
 
 // Start a shift - only accessible by attendants

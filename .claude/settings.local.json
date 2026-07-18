@@ -46,7 +46,20 @@
       "Bash(echo \"---EXIT:$?---\")",
       "Bash(npx ts-node *)",
       "Bash(TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}' npx ts-node --transpile-only \"C:/Users/TGTECH/AppData/Local/Temp/claude/C--Users-TGTECH-Desktop-filling-station-server/6243e5ba-4853-482f-9391-d264440a78f3/scratchpad/reconTest.ts\")",
-      "Bash(node docs/generate-word-guide.js)"
+      "Bash(node docs/generate-word-guide.js)",
+      "Bash(curl -s -m 10 http://localhost:5000/api/health)",
+      "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5000/api/shifts/types)",
+      "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5000/api/gas/cylinders)",
+      "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5000/api/stock-reconcile/settings/factors)",
+      "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5000/api/this-does-not-exist)",
+      "Bash(node \"C:/Users/TGTECH/AppData/Local/Temp/claude/C--Users-TGTECH-Desktop-filling-station-server/6243e5ba-4853-482f-9391-d264440a78f3/scratchpad/mintToken.js\")",
+      "Bash(cp \"C:/Users/TGTECH/AppData/Local/Temp/claude/C--Users-TGTECH-Desktop-filling-station-server/6243e5ba-4853-482f-9391-d264440a78f3/scratchpad/mintToken.js\" ./_verify_mint.js)",
+      "Bash(node ./_verify_mint.js)",
+      "Bash(sed 's|console.log\\(\"TOKEN=\" + token\\);|require\\(\"fs\"\\).writeFileSync\\(process.env.TOKOUT, token\\);console.log\\(\"TOKEN_WRITTEN\"\\);|' __TRACKED_VAR__/mintToken.js)",
+      "Bash(TOKOUT=__TRACKED_VAR__/token.txt node ./_verify_mint.js)",
+      "Bash(curl -s -m 8 __TRACKED_VAR__/api/gas/cylinders/sales?limit=5 -H 'Authorization: Bearer __TRACKED_VAR__')",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);\\(j.data||[]\\).forEach\\(x=>console.log\\(x.receiptNumber,x._id,x.status\\)\\);}\\)\")",
+      "Bash(curl -s -m 5 -o /dev/null -w \"stale :5000 /api/gas/cylinders -> HTTP %{http_code}\\\\n\" http://localhost:5000/api/gas/cylinders)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",

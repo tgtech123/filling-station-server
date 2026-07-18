@@ -2,6 +2,7 @@ import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import ShiftTypeDef, { BUILT_IN_SHIFT_TYPES } from "../models/shiftTypeDef.model";
+import HiddenBuiltInShiftType from "../models/hiddenBuiltInShiftType.model";
 import { emitToStation } from "../services/socket.service";
 
 /**
@@ -20,19 +21,29 @@ export const listShiftTypes = async (req: AuthenticatedRequest, res: Response) =
     if (!station) return res.status(403).json({ message: "Unauthorized" });
 
     const { includeInactive } = req.query as any;
+    const showAll = includeInactive === "true";
     const filter: any = { fillingStation: station };
-    if (includeInactive !== "true") filter.isActive = true;
+    if (!showAll) filter.isActive = true;
 
-    const custom = await ShiftTypeDef.find(filter).sort({ createdAt: 1 }).lean();
+    const [custom, hidden] = await Promise.all([
+      ShiftTypeDef.find(filter).sort({ createdAt: 1 }).lean(),
+      HiddenBuiltInShiftType.find({ fillingStation: station }).lean(),
+    ]);
+    const hiddenNames = new Set(hidden.map((h: any) => h.name));
 
     return res.status(200).json({
       data: {
-        builtIn: BUILT_IN_SHIFT_TYPES.map((t) => ({
-          name: t.name,
-          label: t.label,
-          session: t.session,
-          isBuiltIn: true,
-        })),
+        // Selection lists get only visible built-ins; management views
+        // (includeInactive=true) get all, flagged so they can be re-enabled.
+        builtIn: BUILT_IN_SHIFT_TYPES
+          .filter((t) => showAll || !hiddenNames.has(t.name))
+          .map((t) => ({
+            name: t.name,
+            label: t.label,
+            session: t.session,
+            isBuiltIn: true,
+            isActive: !hiddenNames.has(t.name),
+          })),
         custom: custom.map((t: any) => ({
           _id: t._id,
           name: t.name,
@@ -123,6 +134,46 @@ export const updateShiftType = async (req: AuthenticatedRequest, res: Response) 
     emitToStation(String(station), "shift-types:updated", { name: def.name });
 
     return res.status(200).json({ message: "Shift type updated", data: def });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+// PATCH /api/shifts/types/builtin/:name — manager hides/shows a built-in type.
+// Built-ins aren't stored, so "hiding" adds a per-station suppression row and
+// "showing" removes it. The name stays resolvable, so shift/staff history is
+// never affected — the type is only omitted from selection dropdowns.
+export const toggleBuiltInShiftType = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    const userId = req.user?.id;
+    if (!station || !userId) return res.status(403).json({ message: "Unauthorized" });
+
+    const name = String(req.params.name || "").trim();
+    const builtIn = BUILT_IN_SHIFT_TYPES.find((t) => t.name === name);
+    if (!builtIn) return res.status(404).json({ message: "Not a built-in shift type" });
+
+    const { isActive } = req.body;
+    if (typeof isActive !== "boolean") {
+      return res.status(400).json({ message: "isActive (boolean) is required" });
+    }
+
+    if (isActive) {
+      await HiddenBuiltInShiftType.deleteOne({ fillingStation: station, name });
+    } else {
+      await HiddenBuiltInShiftType.updateOne(
+        { fillingStation: station, name },
+        { $setOnInsert: { fillingStation: station, name, hiddenBy: new Types.ObjectId(userId) } },
+        { upsert: true }
+      );
+    }
+
+    emitToStation(String(station), "shift-types:updated", { name });
+
+    return res.status(200).json({
+      message: isActive ? "Shift type shown" : "Shift type hidden",
+      data: { name, label: builtIn.label, session: builtIn.session, isBuiltIn: true, isActive },
+    });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
