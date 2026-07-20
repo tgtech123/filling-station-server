@@ -1657,19 +1657,46 @@ export const getScheduledAttendantsByType = async (req: AuthenticatedRequest, re
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Get today's shifts
-    const shifts = await Shift.find({
-      fillingStation: stationId,
-      shiftDate: { $gte: today },
-    })
-      .populate("attendant", "firstName lastName")
-      .sort({ shiftType: 1, shiftDate: 1 })
-      .lean();
+    const [shifts, customDefs] = await Promise.all([
+      Shift.find({
+        fillingStation: stationId,
+        shiftDate: { $gte: today },
+      })
+        .populate("attendant", "firstName lastName")
+        .sort({ shiftType: 1, shiftDate: 1 })
+        .lean(),
+      ShiftTypeDef.find({ fillingStation: stationId }).lean(),
+    ]);
 
-    // Group by shift type
-    const oneDayMorning: any[] = [];
-    const oneDayEvening: any[] = [];
-    const dayOffFullTime: any[] = [];
+    // Dynamic groups: the three classic cards always render; 24/7 and custom
+    // station-defined types get a card whenever they have scheduled shifts, so
+    // no shift ever silently disappears from the supervisor's Scheduled tab
+    // (previously 24/7 and custom-type shifts were dropped entirely).
+    type Group = {
+      key: string;
+      title: string;
+      subtitle: string;
+      timeRange: string;
+      alwaysShow: boolean;
+      match: (t: string) => boolean;
+      assignedStaff: any[];
+    };
+
+    const groups: Group[] = [
+      { key: "One-Day-Morning", title: "One-Day", subtitle: "Morning", timeRange: "6AM - 2PM", alwaysShow: true, match: (t) => t === "One-Day-Morning", assignedStaff: [] },
+      { key: "One-Day-Evening", title: "One-Day", subtitle: "Evening", timeRange: "2PM - 10PM", alwaysShow: true, match: (t) => t === "One-Day-Evening", assignedStaff: [] },
+      { key: "Day-Off", title: "Day-Off", subtitle: "Full time", timeRange: "6AM - 10PM", alwaysShow: true, match: (t) => t === "Day-Off" || t === "Full-Time", assignedStaff: [] },
+      { key: "24/7", title: "24/7", subtitle: "Round the Clock", timeRange: "12AM - 12AM", alwaysShow: false, match: (t) => t === "24/7", assignedStaff: [] },
+      ...customDefs.map((d: any): Group => ({
+        key: d.name,
+        title: d.name,
+        subtitle: d.session === "evening" ? "Evening" : "Morning",
+        timeRange: d.startTime && d.endTime ? `${d.startTime} - ${d.endTime}` : "",
+        alwaysShow: false,
+        match: (t) => t.toLowerCase() === d.name.toLowerCase(),
+        assignedStaff: [],
+      })),
+    ];
 
     shifts.forEach((shift: any) => {
       const attendantData = {
@@ -1681,37 +1708,29 @@ export const getScheduledAttendantsByType = async (req: AuthenticatedRequest, re
         status: shift.status === "Active" ? "active" : shift.status === "Completed" ? "closed" : "inactive",
       };
 
-      if (shift.shiftType === "One-Day-Morning") {
-        oneDayMorning.push(attendantData);
-      } else if (shift.shiftType === "One-Day-Evening") {
-        oneDayEvening.push(attendantData);
-      } else if (shift.shiftType === "Day-Off" || shift.shiftType === "Full-Time") {
-        dayOffFullTime.push(attendantData);
+      const type = String(shift.shiftType || "");
+      let group = groups.find((g) => g.match(type));
+      if (!group) {
+        // Type no longer defined (shouldn't happen, but never lose a shift)
+        group = { key: type, title: type, subtitle: "", timeRange: "", alwaysShow: false, match: () => false, assignedStaff: [] };
+        groups.push(group);
       }
+      group.assignedStaff.push(attendantData);
     });
+
+    const visible = groups
+      .filter((g) => g.alwaysShow || g.assignedStaff.length > 0)
+      .map(({ key, title, subtitle, timeRange, assignedStaff }) => ({
+        key,
+        title,
+        subtitle,
+        timeRange,
+        assignedStaff,
+      }));
 
     res.json({
       success: true,
-      data: {
-        oneDayMorning: {
-          title: "One-Day",
-          subtitle: "Morning",
-          timeRange: "6AM - 2PM",
-          assignedStaff: oneDayMorning,
-        },
-        oneDayEvening: {
-          title: "One-Day",
-          subtitle: "Evening",
-          timeRange: "2PM - 10PM",
-          assignedStaff: oneDayEvening,
-        },
-        dayOffFullTime: {
-          title: "Day-Off",
-          subtitle: "Full time",
-          timeRange: "6AM - 10PM",
-          assignedStaff: dayOffFullTime,
-        },
-      },
+      data: { groups: visible },
     });
   } catch (error: any) {
     console.error("Error fetching scheduled attendants by type:", error);
