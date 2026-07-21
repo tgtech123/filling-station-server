@@ -103,6 +103,7 @@ export type JournalSource =
   | "manual"
   | "ap_invoice"
   | "ap_payment"
+  | "ap_credit_note"
   | "ar_invoice"
   | "ar_receipt"
   | "ar_credit_note"
@@ -190,7 +191,7 @@ const JournalEntrySchema = new Schema<IJournalEntry>(
     source: {
       type: String,
       enum: [
-        "manual", "ap_invoice", "ap_payment", "ar_invoice", "ar_receipt",
+        "manual", "ap_invoice", "ap_payment", "ap_credit_note", "ar_invoice", "ar_receipt",
         "ar_credit_note", "grn", "depreciation", "disposal", "fx_revaluation",
         "period_close", "year_end_close", "bank_reconciliation", "tax",
         "sales_posting", "opening_balance",

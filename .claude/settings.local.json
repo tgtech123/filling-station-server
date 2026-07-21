@@ -59,7 +59,11 @@
       "Bash(TOKOUT=__TRACKED_VAR__/token.txt node ./_verify_mint.js)",
       "Bash(curl -s -m 8 __TRACKED_VAR__/api/gas/cylinders/sales?limit=5 -H 'Authorization: Bearer __TRACKED_VAR__')",
       "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);\\(j.data||[]\\).forEach\\(x=>console.log\\(x.receiptNumber,x._id,x.status\\)\\);}\\)\")",
-      "Bash(curl -s -m 5 -o /dev/null -w \"stale :5000 /api/gas/cylinders -> HTTP %{http_code}\\\\n\" http://localhost:5000/api/gas/cylinders)"
+      "Bash(curl -s -m 5 -o /dev/null -w \"stale :5000 /api/gas/cylinders -> HTTP %{http_code}\\\\n\" http://localhost:5000/api/gas/cylinders)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npm run *)",
+      "Bash(echo \"=== BUILD EXIT $? ===\")",
+      "Bash([ -f \"$LOG\" ])"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",

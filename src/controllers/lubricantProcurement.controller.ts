@@ -313,8 +313,11 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       unitCost: getUnitCost(item),
     })) as any;
 
-    // Only manager auto-updates stock using actual received qty
-    if (role === "manager") {
+    // Receiving is restricted to manager/supervisor/admin, all of whom update
+    // stock on receipt. (The old supervisor "soft receipt" that recorded the PO
+    // without moving stock has been retired.)
+    const updatesStock = ["manager", "supervisor", "admin"].includes(role || "");
+    if (updatesStock) {
       const bulkOps = procurement.items.map((item) => ({
         updateOne: {
           filter: { _id: item.lubricantId, fillingStation: stationId },
@@ -328,7 +331,6 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
     procurement.receivedAt = new Date();
     await procurement.save();
 
-    const isManager = role === "manager";
     const shortItems = procurement.items.filter(
       (i) => (i.receivedQuantity ?? i.quantityToProcure) < i.quantityToProcure
     );
@@ -338,9 +340,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       type: "procurement",
       status: "success",
       title: "Procurement Received",
-      description: isManager
-        ? `Procurement ${procurement.procurementNumber} â€” ${procurement.items.length} product(s) stock levels updated${shortItems.length ? ` (${shortItems.length} item(s) short delivered)` : ""}`
-        : `Procurement ${procurement.procurementNumber} received by supervisor â€” manager must update stock manually`,
+      description: `Procurement ${procurement.procurementNumber} â€” ${procurement.items.length} product(s) stock levels updated${shortItems.length ? ` (${shortItems.length} item(s) short delivered)` : ""}`,
       timestamp: new Date(),
       severity: shortItems.length ? "warning" : "info",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -363,11 +363,9 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     }).catch((e: any) => console.error("Notification error (lubricant PO received -> accountant):", e));
 
-    const message = isManager
-      ? `Marked as received. Stock updated.${shortItems.length ? ` ${shortItems.length} item(s) were short delivered.` : ""}`
-      : "Marked as received. Ask the manager to update stock levels.";
+    const message = `Marked as received. Stock updated.${shortItems.length ? ` ${shortItems.length} item(s) were short delivered.` : ""}`;
 
-    return res.status(200).json({ message, data: procurement, stockUpdated: isManager });
+    return res.status(200).json({ message, data: procurement, stockUpdated: updatesStock });
   } catch (err: any) {
     return res.status(500).json({ message: "Server error", error: err.message });
   }

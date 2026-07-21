@@ -25,12 +25,13 @@ export const periodOf = (date: Date): string => {
 // ─── Document number sequences ────────────────────────────────────────────────
 
 const SEQ_PREFIX: Record<string, string> = {
-  journal:     "JE",
-  ap_invoice:  "AP",
-  ap_batch:    "BATCH",
-  ar_invoice:  "INV",
-  credit_note: "CN",
-  receipt:     "RCT",
+  journal:        "JE",
+  ap_invoice:     "AP",
+  ap_batch:       "BATCH",
+  ap_credit_note: "APCN",
+  ar_invoice:     "INV",
+  credit_note:    "CN",
+  receipt:        "RCT",
 };
 
 export async function nextDocNumber(stationId: string | Types.ObjectId, key: string): Promise<string> {
