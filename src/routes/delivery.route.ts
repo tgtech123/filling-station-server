@@ -5,10 +5,10 @@ import { addSupply, deleteSupply, getSupplies, updateSupply } from "../controlle
 
 const router = express.Router();
 
-router.post("/add-supply", requireAuth, checkRole("manager"), addSupply);
-router.get("/", requireAuth, checkRole("manager"), getSupplies);
-router.post("/update-supply", requireAuth, checkRole("manager"), updateSupply);
-router.post("/delete-supply", requireAuth, checkRole("manager"), deleteSupply);
+router.post("/add-supply", requireAuth, checkRole("manager", "supervisor", "admin"), addSupply);
+router.get("/", requireAuth, checkRole("manager", "supervisor", "admin"), getSupplies);
+router.post("/update-supply", requireAuth, checkRole("manager", "supervisor", "admin"), updateSupply);
+router.post("/delete-supply", requireAuth, checkRole("manager", "admin"), deleteSupply);
 
 
 

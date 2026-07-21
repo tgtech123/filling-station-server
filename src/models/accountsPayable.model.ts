@@ -54,6 +54,7 @@ export interface IAPInvoice extends Document {
   matchStatus: APMatchStatus;
   status: APInvoiceStatus;
   amountPaid: number;
+  creditApplied: number;       // supplier credit notes applied against this invoice
   // GL account code the debit books to for non-PO invoices — lets a fuel
   // purchase invoice hit its product's cost account (5010 PMS Cost of Sales…)
   expenseAccountCode?: string;
@@ -109,6 +110,7 @@ const APInvoiceSchema = new Schema<IAPInvoice>(
       default: "draft",
     },
     amountPaid:   { type: Number, default: 0, min: 0 },
+    creditApplied:{ type: Number, default: 0, min: 0 },
     expenseAccountCode: { type: String, trim: true },
     journalEntry: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
     notes:        { type: String, trim: true },
@@ -129,7 +131,7 @@ export const APInvoice: Model<IAPInvoice> = mongoose.model<IAPInvoice>("APInvoic
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type PaymentMethod = "EFT" | "ACH" | "check";
-export type BatchStatus = "draft" | "approved" | "executed" | "cancelled";
+export type BatchStatus = "draft" | "approved" | "executed" | "cancelled" | "reversed";
 
 export interface IBatchPayment {
   invoice: Types.ObjectId;
@@ -159,6 +161,12 @@ export interface IAPPaymentBatch extends Document {
   approvedBy?: Types.ObjectId | null;
   executedBy?: Types.ObjectId | null;
   executedAt?: Date | null;
+  // Payment reversal (bounced check, wrong amount, duplicate) — the executed
+  // batch is reversed, its JE mirrored, and the settled invoices re-opened.
+  reversedBy?: Types.ObjectId | null;
+  reversedAt?: Date | null;
+  reversalReason?: string;
+  reversalJournalEntry?: Types.ObjectId | null;
   notes?: string;
   createdBy: Types.ObjectId;
   createdAt: Date;
@@ -190,7 +198,7 @@ const APPaymentBatchSchema = new Schema<IAPPaymentBatch>(
     totalNet:    { type: Number, required: true, min: 0 },
     status: {
       type: String,
-      enum: ["draft", "approved", "executed", "cancelled"],
+      enum: ["draft", "approved", "executed", "cancelled", "reversed"],
       default: "draft",
     },
     fileGeneratedAt: { type: Date, default: null },
@@ -198,6 +206,10 @@ const APPaymentBatchSchema = new Schema<IAPPaymentBatch>(
     approvedBy:      { type: Schema.Types.ObjectId, ref: "Staff", default: null },
     executedBy:      { type: Schema.Types.ObjectId, ref: "Staff", default: null },
     executedAt:      { type: Date, default: null },
+    reversedBy:           { type: Schema.Types.ObjectId, ref: "Staff", default: null },
+    reversedAt:           { type: Date, default: null },
+    reversalReason:       { type: String, trim: true },
+    reversalJournalEntry: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
     notes:           { type: String, trim: true },
     createdBy:       { type: Schema.Types.ObjectId, ref: "Staff", required: true },
   },
@@ -210,4 +222,94 @@ APPaymentBatchSchema.index({ fillingStation: 1, status: 1, payDate: -1 });
 export const APPaymentBatch: Model<IAPPaymentBatch> = mongoose.model<IAPPaymentBatch>(
   "APPaymentBatch",
   APPaymentBatchSchema
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AP Credit Note — supplier credit / debit memo. Reduces what the station owes
+// (goods returned, over-billing, price adjustment, damaged goods). Booking posts
+// Dr AP, Cr Inventory/Expense, Cr VAT Payable (reversing the input VAT claimed on
+// the original invoice). It can be applied against a specific booked invoice to
+// reduce its outstanding balance, or stand as an open supplier credit that later
+// nets against a future invoice/payment.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type APCreditNoteStatus = "open" | "applied" | "void";
+export type APCreditReason =
+  | "return" | "overbilling" | "price_adjustment" | "damaged" | "other";
+
+export interface IAPCreditNoteLine {
+  description: string;
+  quantity: number;
+  unitCost: number;
+  amount: number;
+}
+
+export interface IAPCreditNote extends Document {
+  fillingStation: Types.ObjectId;
+  creditNoteNumber: string;          // APCN-2026-00003
+  supplier?: Types.ObjectId | null;
+  supplierName: string;
+  invoice?: Types.ObjectId | null;   // the AP invoice being credited (optional)
+  invoiceRef?: string;
+  date: Date;
+  currency: string;
+  fxRate: number;
+  reason: APCreditReason;
+  notes?: string;
+  lines: IAPCreditNoteLine[];
+  subtotal: number;
+  taxCode?: string;
+  taxAmount: number;                 // input VAT reversed
+  total: number;                     // subtotal + tax (document currency)
+  totalBase: number;                 // total × fxRate (NGN)
+  amountApplied: number;             // how much has been applied to invoices
+  debitAccountCode?: string;         // account the original invoice debited (mirrored on credit)
+  status: APCreditNoteStatus;
+  journalEntry?: Types.ObjectId | null;
+  createdBy: Types.ObjectId;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const APCreditNoteSchema = new Schema<IAPCreditNote>(
+  {
+    fillingStation:   { type: Schema.Types.ObjectId, ref: "FillingStation", required: true },
+    creditNoteNumber: { type: String, required: true },
+    supplier:         { type: Schema.Types.ObjectId, ref: "Supplier", default: null },
+    supplierName:     { type: String, required: true, trim: true },
+    invoice:          { type: Schema.Types.ObjectId, ref: "APInvoice", default: null },
+    invoiceRef:       { type: String, trim: true },
+    date:             { type: Date, required: true },
+    currency:         { type: String, default: "NGN", uppercase: true },
+    fxRate:           { type: Number, default: 1 },
+    reason:           { type: String, enum: ["return", "overbilling", "price_adjustment", "damaged", "other"], required: true },
+    notes:            { type: String, trim: true },
+    lines: [
+      {
+        description: { type: String, required: true, trim: true },
+        quantity:    { type: Number, required: true, min: 0 },
+        unitCost:    { type: Number, required: true, min: 0 },
+        amount:      { type: Number, required: true, min: 0 },
+      },
+    ],
+    subtotal:  { type: Number, required: true, min: 0 },
+    taxCode:   { type: String, trim: true },
+    taxAmount: { type: Number, default: 0, min: 0 },
+    total:     { type: Number, required: true, min: 0 },
+    totalBase: { type: Number, required: true, min: 0 },
+    amountApplied:    { type: Number, default: 0, min: 0 },
+    debitAccountCode: { type: String, trim: true },
+    status:    { type: String, enum: ["open", "applied", "void"], default: "open" },
+    journalEntry: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
+    createdBy: { type: Schema.Types.ObjectId, ref: "Staff", required: true },
+  },
+  { timestamps: true }
+);
+
+APCreditNoteSchema.index({ fillingStation: 1, creditNoteNumber: 1 }, { unique: true });
+APCreditNoteSchema.index({ fillingStation: 1, supplierName: 1, status: 1 });
+
+export const APCreditNote: Model<IAPCreditNote> = mongoose.model<IAPCreditNote>(
+  "APCreditNote",
+  APCreditNoteSchema
 );

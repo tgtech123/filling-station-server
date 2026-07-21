@@ -22,8 +22,8 @@ router.get("/", requireAuth, checkRole("manager", "supervisor", "cashier", "acco
 router.get("/:id", requireAuth, checkRole("manager", "supervisor", "cashier", "accountant"), getProcurementById);
 router.patch("/:id", requireAuth, checkRole("manager", "supervisor"), updateProcurement);
 router.patch("/:id/submit", requireAuth, checkRole("manager", "supervisor"), submitProcurement);
-router.patch("/:id/ordered", requireAuth, checkRole("manager", "supervisor", "cashier"), markOrdered);
-router.patch("/:id/received", requireAuth, checkRole("manager", "supervisor", "cashier"), markReceived);
+router.patch("/:id/ordered", requireAuth, checkRole("manager", "supervisor", "admin"), markOrdered);
+router.patch("/:id/received", requireAuth, checkRole("manager", "supervisor", "admin"), markReceived);
 router.patch("/:id/payment", requireAuth, checkRole("manager", "supervisor", "accountant"), recordPayment);
 router.delete("/:id", requireAuth, checkRole("manager", "supervisor"), deleteProcurement);
 

@@ -123,7 +123,7 @@ router.get("/cylinders/procurement/:id",           checkRole("manager", "admin",
 router.patch("/cylinders/procurement/:id",         mgr,       updateCylinderProcurement);
 router.patch("/cylinders/procurement/:id/submit",  mgr,       submitCylinderProcurement);
 router.patch("/cylinders/procurement/:id/ordered", mgr,       markCylinderOrdered);
-router.patch("/cylinders/procurement/:id/received",mgr,       markCylinderReceived);
+router.patch("/cylinders/procurement/:id/received",checkRole("manager", "admin", "supervisor"), markCylinderReceived);
 router.patch("/cylinders/procurement/:id/payment", checkRole("manager", "admin", "accountant"), recordCylinderPayment);
 router.delete("/cylinders/procurement/:id",        mgr,       deleteCylinderProcurement);
 

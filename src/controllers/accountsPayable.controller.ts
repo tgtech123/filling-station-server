@@ -1,7 +1,8 @@
 import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
-import { APInvoice, APPaymentBatch } from "../models/accountsPayable.model";
+import { APInvoice, APPaymentBatch, APCreditNote } from "../models/accountsPayable.model";
+import { JournalEntry } from "../models/accounting.model";
 import { TaxConfig, TaxRecord } from "../models/treasury.model";
 import LubricantProcurement from "../models/lubricantProcurement.model";
 import GasProcurement from "../models/gasProcurement.model";
@@ -409,7 +410,6 @@ export const voidAPInvoice = async (req: AuthenticatedRequest, res: Response) =>
 
     // A booked invoice must reverse its JE to keep AP control in sync
     if (invoice.status === "booked" && invoice.journalEntry) {
-      const { JournalEntry } = await import("../models/accounting.model");
       const je = await JournalEntry.findById(invoice.journalEntry);
       if (je && je.status === "posted") {
         await postJournal({
@@ -549,7 +549,8 @@ export const createPaymentBatch = async (req: AuthenticatedRequest, res: Respons
     }
 
     const payments = invoices.map((inv) => {
-      const outstanding = round2(inv.totalBase - inv.amountPaid);
+      // Supplier credit notes already applied reduce what's left to pay
+      const outstanding = round2(inv.totalBase - inv.amountPaid - (inv.creditApplied || 0));
       const wht = round2(inv.whtAmount * inv.fxRate);
       return {
         invoice: inv._id,
@@ -660,7 +661,7 @@ export const executePaymentBatch = async (req: AuthenticatedRequest, res: Respon
       const inv = await APInvoice.findById(p.invoice);
       if (!inv) continue;
       inv.amountPaid = round2(inv.amountPaid + p.amount);
-      inv.status = inv.amountPaid >= inv.totalBase - 0.01 ? "paid" : "partially_paid";
+      inv.status = inv.amountPaid + (inv.creditApplied || 0) >= inv.totalBase - 0.01 ? "paid" : "partially_paid";
       await inv.save();
     }
 
@@ -803,5 +804,311 @@ export const listPaymentBatches = async (req: AuthenticatedRequest, res: Respons
     return res.status(200).json({ data: docs, total, page: Number(page) });
   } catch (e: any) {
     return err500(res, e);
+  }
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AP Credit Notes — supplier credit / debit memo. The professional way to correct
+// a booked (or already paid) invoice without mutating a posted entry: it reduces
+// Payables and reverses the inventory/expense + input VAT that the invoice booked.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Issue a supplier credit note. Books immediately — Dr AP, Cr Inventory/Expense,
+ * Cr VAT Payable (reversing the input VAT). With `invoiceId` the credit is applied
+ * to that invoice's open balance; without it, it stands as an open supplier credit
+ * to net against a future invoice via applyAPCreditNote.
+ */
+export const createAPCreditNote = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const {
+      supplierName, supplier, invoiceId, date,
+      lines, taxCode, currency = "NGN", fxRate = 1,
+      reason = "other", notes, debitAccountCode,
+    } = req.body;
+
+    if (!supplierName || !Array.isArray(lines) || lines.length === 0) {
+      return res.status(400).json({ message: "supplierName and at least one line are required" });
+    }
+
+    const cleanLines = lines.map((l: any) => {
+      const quantity = Number(l.quantity) || 0;
+      const unitCost = Number(l.unitCost) || 0;
+      return { description: String(l.description || "").trim(), quantity, unitCost, amount: round2(quantity * unitCost) };
+    });
+    const subtotal = round2(cleanLines.reduce((s: number, l: any) => s + l.amount, 0));
+    if (subtotal <= 0) return res.status(400).json({ message: "Credit amount must be positive" });
+
+    // VAT reversal — mirror the invoice tax engine (VAT only; WHT settles at payment)
+    let taxAmount = 0, appliedTaxCode: string | undefined;
+    if (taxCode) {
+      const cfg: any = await TaxConfig.findOne({ fillingStation: station }).lean();
+      const tax = cfg?.taxes?.find((t: any) => t.code === taxCode && t.isActive);
+      if (!tax) return res.status(400).json({ message: `Tax code ${taxCode} not found or inactive` });
+      if (tax.kind !== "WHT") { appliedTaxCode = tax.code; taxAmount = round2((subtotal * tax.rate) / 100); }
+    }
+
+    const total = round2(subtotal + taxAmount);
+    const totalBase = round2(total * Number(fxRate));
+
+    // Resolve the account to credit back — mirror the original invoice's debit
+    let invoice: any = null;
+    let creditAcctCode: string | undefined = debitAccountCode;
+    if (invoiceId) {
+      invoice = await APInvoice.findOne({ _id: invoiceId, fillingStation: station });
+      if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+      if (!["booked", "partially_paid", "paid"].includes(invoice.status)) {
+        return res.status(400).json({ message: "Credit notes apply to booked invoices only — void an unposted draft instead" });
+      }
+      const open = round2(invoice.totalBase - invoice.amountPaid - (invoice.creditApplied || 0));
+      if (totalBase > open + 0.01) {
+        return res.status(400).json({ message: `Credit (₦${totalBase.toLocaleString()}) exceeds the invoice's open balance (₦${open.toLocaleString()})` });
+      }
+      creditAcctCode = invoice.match.poType !== "none" ? SYS.INVENTORY : (invoice.expenseAccountCode || SYS.OTHER_EXPENSES);
+    }
+    creditAcctCode = creditAcctCode || SYS.INVENTORY; // standalone credit defaults to inventory
+
+    const cnDate = date ? new Date(date) : new Date();
+    await assertPeriodOpen(station, cnDate, "ap");
+
+    const apAcc = await sysAccount(station, SYS.AP);
+    const creditAcc = await sysAccount(station, creditAcctCode);
+
+    const jeLines: any[] = [
+      { account: apAcc._id, debit: totalBase, description: `AP credit — ${supplierName}` },
+      { account: creditAcc._id, credit: round2(subtotal * Number(fxRate)), description: `Credit note — ${supplierName}` },
+    ];
+    if (taxAmount > 0) {
+      const vatAcc = await sysAccount(station, SYS.VAT_PAYABLE);
+      jeLines.push({ account: vatAcc._id, credit: round2(taxAmount * Number(fxRate)), description: "Input VAT reversed", taxCode: appliedTaxCode });
+    }
+
+    const creditNoteNumber = await nextDocNumber(station, "ap_credit_note");
+
+    const entry = await postJournal({
+      stationId: station, userId: req.user!.id, date: cnDate,
+      memo: `AP credit note ${creditNoteNumber} — ${supplierName}: ${reason}`,
+      lines: jeLines,
+      source: "ap_credit_note", sourceRef: creditNoteNumber, sourceModel: "APCreditNote",
+    });
+
+    const cn = await APCreditNote.create({
+      fillingStation: station,
+      creditNoteNumber,
+      supplier: supplier || null,
+      supplierName: String(supplierName).trim(),
+      invoice: invoice?._id ?? null,
+      invoiceRef: invoice?.internalRef,
+      date: cnDate,
+      currency, fxRate,
+      reason, notes,
+      lines: cleanLines,
+      subtotal, taxCode: appliedTaxCode, taxAmount, total, totalBase,
+      amountApplied: invoice ? totalBase : 0,
+      debitAccountCode: creditAcctCode,
+      status: invoice ? "applied" : "open",
+      journalEntry: entry._id as Types.ObjectId,
+      createdBy: req.user!.id,
+    });
+
+    if (invoice) {
+      invoice.creditApplied = round2((invoice.creditApplied || 0) + totalBase);
+      if (invoice.amountPaid + invoice.creditApplied >= invoice.totalBase - 0.01) invoice.status = "paid";
+      else if (invoice.status === "booked") invoice.status = "partially_paid";
+      await invoice.save();
+    }
+
+    audit({
+      stationId: station, userId: req.user!.id, action: "ap.credit_note.create",
+      entity: "APCreditNote", entityId: cn._id as Types.ObjectId,
+      summary: `${creditNoteNumber} — ${supplierName} ₦${totalBase.toLocaleString()} (${reason})${invoice ? ` applied to ${invoice.internalRef}` : ""}`,
+    });
+
+    return res.status(201).json({ message: "Credit note issued", data: { creditNote: cn, journal: entry } });
+  } catch (e: any) {
+    return res.status(400).json({ message: e.message });
+  }
+};
+
+/** Apply an OPEN supplier credit to a booked, unpaid invoice (allocation only —
+ *  AP was already reduced when the credit was booked, so there is no new JE). */
+export const applyAPCreditNote = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const { invoiceId } = req.body;
+    if (!invoiceId) return res.status(400).json({ message: "invoiceId is required" });
+
+    const cn = await APCreditNote.findOne({ _id: req.params.id, fillingStation: station });
+    if (!cn) return res.status(404).json({ message: "Credit note not found" });
+    if (cn.status !== "open") return res.status(400).json({ message: "Only open credit notes can be applied" });
+
+    const invoice = await APInvoice.findOne({ _id: invoiceId, fillingStation: station });
+    if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+    if (!["booked", "partially_paid"].includes(invoice.status)) {
+      return res.status(400).json({ message: "Credit can only be applied to a booked, unpaid invoice" });
+    }
+
+    const available = round2(cn.totalBase - cn.amountApplied);
+    const open = round2(invoice.totalBase - invoice.amountPaid - (invoice.creditApplied || 0));
+    const applied = round2(Math.min(available, open));
+    if (applied <= 0) return res.status(400).json({ message: "Nothing to apply — credit exhausted or invoice already settled" });
+
+    invoice.creditApplied = round2((invoice.creditApplied || 0) + applied);
+    invoice.status = invoice.amountPaid + invoice.creditApplied >= invoice.totalBase - 0.01 ? "paid" : "partially_paid";
+    await invoice.save();
+
+    cn.amountApplied = round2(cn.amountApplied + applied);
+    if (!cn.invoice) { cn.invoice = invoice._id as Types.ObjectId; cn.invoiceRef = invoice.internalRef; }
+    if (cn.amountApplied >= cn.totalBase - 0.01) cn.status = "applied";
+    await cn.save();
+
+    audit({
+      stationId: station, userId: req.user!.id, action: "ap.credit_note.apply",
+      entity: "APCreditNote", entityId: cn._id as Types.ObjectId,
+      summary: `${cn.creditNoteNumber} applied ₦${applied.toLocaleString()} to ${invoice.internalRef}`,
+    });
+
+    return res.status(200).json({ message: `Applied ₦${applied.toLocaleString()} to ${invoice.internalRef}`, data: { creditNote: cn, invoice } });
+  } catch (e: any) {
+    return res.status(400).json({ message: e.message });
+  }
+};
+
+export const listAPCreditNotes = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const { status, supplierName } = req.query as any;
+    const filter: any = { fillingStation: station };
+    if (status) filter.status = status;
+    if (supplierName) filter.supplierName = { $regex: supplierName, $options: "i" };
+
+    const docs = await APCreditNote.find(filter).sort({ createdAt: -1 }).limit(100).lean();
+    return res.status(200).json({ data: docs });
+  } catch (e: any) {
+    return err500(res, e);
+  }
+};
+
+/** Void a credit note: reverse its booking JE and restore the invoice's balance. */
+export const voidAPCreditNote = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const cn = await APCreditNote.findOne({ _id: req.params.id, fillingStation: station });
+    if (!cn) return res.status(404).json({ message: "Credit note not found" });
+    if (cn.status === "void") return res.status(400).json({ message: "Credit note already voided" });
+
+    await assertPeriodOpen(station, new Date(), "ap");
+
+    if (cn.journalEntry) {
+      const je = await JournalEntry.findById(cn.journalEntry);
+      if (je && je.status === "posted") {
+        await postJournal({
+          stationId: station, userId: req.user!.id, date: new Date(),
+          memo: `Void AP credit note ${cn.creditNoteNumber}`,
+          lines: je.lines.map((l) => ({ account: l.account, debit: l.credit, credit: l.debit, description: l.description })),
+          source: "ap_credit_note", sourceRef: cn.creditNoteNumber, sourceModel: "APCreditNote", sourceId: cn._id as Types.ObjectId,
+        });
+        je.status = "reversed";
+        await je.save();
+      }
+    }
+
+    // Un-apply from the invoice, restoring its open balance
+    if (cn.invoice && cn.amountApplied > 0) {
+      const invoice = await APInvoice.findById(cn.invoice);
+      if (invoice) {
+        invoice.creditApplied = round2(Math.max(0, (invoice.creditApplied || 0) - cn.amountApplied));
+        if (invoice.status !== "void" && invoice.amountPaid + invoice.creditApplied < invoice.totalBase - 0.01) {
+          invoice.status = invoice.amountPaid > 0 ? "partially_paid" : "booked";
+        }
+        await invoice.save();
+      }
+    }
+
+    cn.status = "void";
+    await cn.save();
+
+    audit({
+      stationId: station, userId: req.user!.id, action: "ap.credit_note.void",
+      entity: "APCreditNote", entityId: cn._id as Types.ObjectId,
+      summary: `${cn.creditNoteNumber} voided`,
+    });
+
+    return res.status(200).json({ message: "Credit note voided", data: cn });
+  } catch (e: any) {
+    return res.status(400).json({ message: e.message });
+  }
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Payment reversal — the escape hatch for an executed batch (bounced check, wrong
+// amount, duplicate). Mirrors the payment JE, marks the original reversed, and
+// re-opens every invoice the batch settled back to its pre-payment balance.
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const reversePaymentBatch = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const batch = await APPaymentBatch.findOne({ _id: req.params.id, fillingStation: station });
+    if (!batch) return res.status(404).json({ message: "Batch not found" });
+    if (batch.status !== "executed") return res.status(400).json({ message: "Only executed batches can be reversed" });
+
+    const reversalDate = req.body.date ? new Date(req.body.date) : new Date();
+    await assertPeriodOpen(station, reversalDate, "ap");
+
+    // Mirror the original payment JE (Dr Bank, Cr AP, Dr WHT Payable)
+    let reversalEntry: any = null;
+    if (batch.journalEntry) {
+      const je = await JournalEntry.findById(batch.journalEntry);
+      if (je && je.status === "posted") {
+        reversalEntry = await postJournal({
+          stationId: station, userId: req.user!.id, date: reversalDate,
+          memo: `Reverse payment batch ${batch.batchNumber}${req.body.reason ? ` — ${req.body.reason}` : ""}`,
+          lines: je.lines.map((l) => ({ account: l.account, debit: l.credit, credit: l.debit, description: l.description })),
+          source: "ap_payment", sourceRef: batch.batchNumber, sourceModel: "APPaymentBatch", sourceId: batch._id as Types.ObjectId,
+        });
+        je.status = "reversed";
+        await je.save();
+      }
+    }
+
+    // Re-open each settled invoice to its pre-payment balance
+    for (const p of batch.payments) {
+      const inv = await APInvoice.findById(p.invoice);
+      if (!inv) continue;
+      inv.amountPaid = round2(Math.max(0, inv.amountPaid - p.amount));
+      inv.status = inv.amountPaid + (inv.creditApplied || 0) >= inv.totalBase - 0.01
+        ? "paid"
+        : inv.amountPaid > 0 ? "partially_paid" : "booked";
+      await inv.save();
+    }
+
+    batch.status = "reversed";
+    batch.reversedBy = new Types.ObjectId(req.user!.id);
+    batch.reversedAt = new Date();
+    batch.reversalReason = req.body.reason;
+    if (reversalEntry) batch.reversalJournalEntry = reversalEntry._id as Types.ObjectId;
+    await batch.save();
+
+    audit({
+      stationId: station, userId: req.user!.id, action: "ap.batch.reverse",
+      entity: "APPaymentBatch", entityId: batch._id as Types.ObjectId,
+      summary: `${batch.batchNumber} reversed${reversalEntry ? ` (${reversalEntry.entryNumber})` : ""} — ${batch.payments.length} invoice(s) re-opened`,
+    });
+
+    return res.status(200).json({ message: "Payment batch reversed — invoices re-opened", data: { batch, journal: reversalEntry } });
+  } catch (e: any) {
+    return res.status(400).json({ message: e.message });
   }
 };

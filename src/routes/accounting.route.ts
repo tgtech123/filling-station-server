@@ -13,8 +13,9 @@ import {
 
 import {
   createAPInvoice, rematchAPInvoice, bookAPInvoice, listAPInvoices, voidAPInvoice, listOpenPOs,
-  createPaymentBatch, approvePaymentBatch, executePaymentBatch,
+  createPaymentBatch, approvePaymentBatch, executePaymentBatch, reversePaymentBatch,
   generateEFTFile, getCheckPrintData, listPaymentBatches,
+  createAPCreditNote, applyAPCreditNote, listAPCreditNotes, voidAPCreditNote,
 } from "../controllers/accountsPayable.controller";
 
 import {
@@ -90,8 +91,15 @@ router.get("/ap/batches",               acct,       listPaymentBatches);
 router.post("/ap/batches",              acct,       createPaymentBatch);
 router.patch("/ap/batches/:id/approve", acctSenior, approvePaymentBatch);
 router.post("/ap/batches/:id/execute",  acctSenior, executePaymentBatch);
+router.post("/ap/batches/:id/reverse",  acctSenior, reversePaymentBatch);
 router.get("/ap/batches/:id/eft-file",  acct,       generateEFTFile);
 router.get("/ap/batches/:id/checks",    acct,       getCheckPrintData);
+
+// AP Credit Notes — supplier credits / debit memos (corrections to booked/paid invoices)
+router.get("/ap/credit-notes",            acct,       listAPCreditNotes);
+router.post("/ap/credit-notes",           acctSenior, createAPCreditNote);
+router.post("/ap/credit-notes/:id/apply", acctSenior, applyAPCreditNote);
+router.post("/ap/credit-notes/:id/void",  acctSenior, voidAPCreditNote);
 
 // ─── Accounts Receivable ─────────────────────────────────────────────────────
 router.get("/ar/customers",             acct, listCustomers);
