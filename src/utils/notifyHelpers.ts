@@ -1,11 +1,15 @@
 import { Types } from "mongoose";
 import Notification, { INotification } from "../models/notification.model";
 import AdminNotification, { AdminNotifType } from "../models/adminNotification.model";
-import { emitToStation } from "../services/socket.service";
+import { emitToStationAudience } from "../services/socket.service";
 
 /**
  * Fire-and-forget: create a station-scoped notification visible to station staff.
  * Safe to call without await — errors are swallowed and logged.
+ *
+ * `targetRole` decides the audience. Use "owner" for anything the business
+ * owner should not have to share with their hired managers — money, the
+ * subscription, the state of the account itself.
  */
 export const notifyStation = (
   fillingStation: Types.ObjectId | string,
@@ -34,12 +38,19 @@ export const notifyStation = (
     expiresAt,
   })
     .then(() => {
-      emitToStation(fillingStation.toString(), "notification:new", {
-        title: opts.title,
-        body: opts.body,
-        severity: opts.severity ?? null,
-        targetRole: opts.targetRole ?? "manager",
-      });
+      // Pushed only to the addressed audience — an owner-only notification must
+      // not even wake a hired manager's client.
+      emitToStationAudience(
+        fillingStation.toString(),
+        opts.targetRole ?? "manager",
+        "notification:new",
+        {
+          title: opts.title,
+          body: opts.body,
+          severity: opts.severity ?? null,
+          targetRole: opts.targetRole ?? "manager",
+        }
+      );
     })
     .catch((err: any) => console.error("[notifyStation] error:", err?.message));
 };

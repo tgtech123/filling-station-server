@@ -48,10 +48,16 @@ import stockReconciliationRoutes from "./routes/stockReconciliation.route";
 
 const app = express();
 app.set("trust proxy", 1);
+// Prod origins come from env so a custom domain works without a code change:
+//   FRONTEND_URL       — the primary production frontend origin
+//   CORS_ORIGINS       — optional comma-separated list of additional origins
+// The vercel.app + localhost entries keep the current deploy and local dev working.
 const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  ...(process.env.CORS_ORIGINS?.split(",").map((o) => o.trim()) || []),
   "https://filling-station-system.vercel.app",
   "http://localhost:3000",
-];
+].filter(Boolean) as string[];
 
 
 // ── Security headers (first) 
@@ -93,7 +99,10 @@ app.use(
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      if (origin.endsWith(".vercel.app")) return callback(null, true);
+      // Vercel preview deployments are allowed outside production only;
+      // production is pinned to the explicit allowlist above.
+      if (process.env.NODE_ENV !== "production" && origin.endsWith(".vercel.app"))
+        return callback(null, true);
       callback(new Error(`Not allowed by CORS: ${origin}`));
     },
     credentials: true,

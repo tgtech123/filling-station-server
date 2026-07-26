@@ -61,6 +61,7 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
       // Update existing reconciliation
       reconciliation.cashReceived = cashAmount;
       reconciliation.expectedAmount = shift.totalAmount || 0;
+      reconciliation.priceSplitUnresolved = (shift as any).priceSplitUnresolved ?? false;
       reconciliation.reconciledBy = new Types.ObjectId(cashierId);
       if (notes !== undefined) {
         reconciliation.notes = notes;
@@ -99,9 +100,17 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           fillingStation: new Types.ObjectId(fillingStation),
           type: "alert",
           category: "cash_reconciliation",
-          title: "Cash Discrepancy on Your Shift",
-          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
-          severity: "critical",
+          title: reconciliation.priceSplitUnresolved
+            ? "Price Change on Your Shift — Under Review"
+            : "Cash Discrepancy on Your Shift",
+          // When the price moved mid-shift and no boundary reading was taken,
+          // the difference is almost certainly arithmetic. Telling the attendant
+          // they are short would be accusing them of something the owner's price
+          // change caused.
+          body: reconciliation.priceSplitUnresolved
+            ? `The fuel price changed during your shift on ${reconciliation.pumpTitle ?? "your pump"}, so the expected amount (₦${discAbs.toLocaleString()} apart) is an estimate. A supervisor will confirm the split — no action needed from you.`
+            : `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
+          severity: reconciliation.priceSplitUnresolved ? "warning" : "critical",
           timestamp: new Date(),
           targetRole: "attendant",
         }).catch((err) => console.error("Notification error (reconciliation flagged - attendant):", err));
@@ -147,6 +156,9 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
         cashReceived: cashAmount,
         reconciledBy: new Types.ObjectId(cashierId),
         notes: notes || undefined,
+        // Carried from the shift: the price moved mid-shift and the boundary
+        // meter reading was never recorded, so expectedAmount is an estimate.
+        priceSplitUnresolved: (shift as any).priceSplitUnresolved ?? false,
       });
 
       // The pre-save hook will calculate discrepancy and status
@@ -182,9 +194,17 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
           fillingStation: new Types.ObjectId(fillingStation),
           type: "alert",
           category: "cash_reconciliation",
-          title: "Cash Discrepancy on Your Shift",
-          body: `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
-          severity: "critical",
+          title: reconciliation.priceSplitUnresolved
+            ? "Price Change on Your Shift — Under Review"
+            : "Cash Discrepancy on Your Shift",
+          // When the price moved mid-shift and no boundary reading was taken,
+          // the difference is almost certainly arithmetic. Telling the attendant
+          // they are short would be accusing them of something the owner's price
+          // change caused.
+          body: reconciliation.priceSplitUnresolved
+            ? `The fuel price changed during your shift on ${reconciliation.pumpTitle ?? "your pump"}, so the expected amount (₦${discAbs.toLocaleString()} apart) is an estimate. A supervisor will confirm the split — no action needed from you.`
+            : `Your cash reconciliation for ${reconciliation.pumpTitle ?? "your shift"} has a discrepancy of ₦${discAbs.toLocaleString()}. Please review.`,
+          severity: reconciliation.priceSplitUnresolved ? "warning" : "critical",
           timestamp: new Date(),
           targetRole: "attendant",
         }).catch((err) => console.error("Notification error (reconciliation flagged - attendant):", err));

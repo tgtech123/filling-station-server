@@ -6,6 +6,7 @@ import { connectDB } from "./config/db";
 import app from "./app";
 import { initSocket } from "./services/socket.service";
 import { startScheduler } from "./services/scheduler.service";
+import { backfillStationOwners } from "./services/ownerBackfill.service";
 
 // Fail fast on missing critical env — a server that boots without these would
 // 500 on every login (JWT) or refuse every DB operation, which is worse than
@@ -27,6 +28,12 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     await connectDB();
+
+    // Idempotent: assigns Staff.isOwner to pre-existing station owners. Awaited
+    // so no request can be served while ownership is still unresolved — a
+    // manager logging in mid-backfill would otherwise get a token that says
+    // they are not the owner.
+    await backfillStationOwners();
 
     const httpServer = http.createServer(app);
     await initSocket(httpServer);

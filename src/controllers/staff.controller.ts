@@ -7,6 +7,8 @@ import Staff from "../models/staff.model";
 import Notification from "../models/notification.model";
 import FillingStation from "../models/fillingStation.model";
 import Activity from "../models/activity.model";
+import { actorFrom } from "../utils/actor";
+import { isOwnerAccount } from "../middlewares/requireOwner";
 
 export const bulkImportStaff = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -22,6 +24,10 @@ export const bulkImportStaff = async (req: AuthenticatedRequest, res: Response) 
     }
 
     const station = await FillingStation.findById(stationId);
+
+    // Resolved once, outside the loop — the manager-creation rule below is
+    // per-row but the caller's ownership is not.
+    const callerIsOwner = await isOwnerAccount(req.user?.id?.toString());
 
     const results = {
       success: [] as any[],
@@ -48,7 +54,7 @@ export const bulkImportStaff = async (req: AuthenticatedRequest, res: Response) 
         }
 
         // Only the station owner may create managers — same rule as createStaff
-        if (role.toLowerCase() === "manager" && !req.user?.isSuperManager) {
+        if (role.toLowerCase() === "manager" && !callerIsOwner) {
           results.failed.push({ email, reason: "Only the station owner can create managers" });
           continue;
         }
@@ -119,6 +125,7 @@ export const bulkImportStaff = async (req: AuthenticatedRequest, res: Response) 
     }
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationId,
       type: "stock",
       title: "Bulk Staff Import",

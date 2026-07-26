@@ -27,6 +27,7 @@ import {
   updatePlatformSettings,
   getPublicSettings,
   adminResetOwnerPassword,
+  transferStationOwnership,
 } from "../controllers/admin.controller";
 import {
   getAllTickets,
@@ -65,6 +66,9 @@ router.get("/activity-logs", requireAuth, checkAdmin, getActivityLogs);
 router.delete("/stations/:stationId", requireAuth, checkAdmin, deleteStation);
 router.post("/stations/:stationId/restore", requireAuth, checkAdmin, restoreStation);
 router.post("/stations/:stationId/reset-owner-password", requireAuth, checkAdmin, adminResetOwnerPassword);
+// Move ownership between managers — for when the owner has left the business
+// and can no longer hand it over themselves.
+router.patch("/stations/:stationId/owner", requireAuth, checkAdmin, transferStationOwnership);
 
 router.get("/plans", requireAuth, checkAdmin, getAdminPlans);
 router.post("/plans", requireAuth, checkAdmin, createPlan);

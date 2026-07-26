@@ -5,6 +5,8 @@ import StationStatus from "../models/stationStatus.model";
 import Activity from "../models/activity.model";
 import Notification from "../models/notification.model";
 import { invalidateStationAuthCache } from "../config/redis";
+import { actorFrom } from "../utils/actor";
+import { auditLog } from "../utils/auditLog";
 
 export const activateEmergency = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -32,11 +34,23 @@ export const activateEmergency = async (req: AuthenticatedRequest, res: Response
     // Lock staff out immediately — don't wait out the auth gate's cache TTL.
     await invalidateStationAuthCache(stationObjectId);
 
+    auditLog(req, {
+      action: "Emergency Stop Activated",
+      description: `Station locked down — all non-manager staff signed out${reason ? `: ${reason}` : ""}`,
+      status: "Critical",
+      metadata: { reason: reason ?? null },
+    });
+
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationObjectId,
       type: "alert",
       title: "Emergency Stop Activated",
-      description: "All staff locked out by manager",
+      // Named, not "by manager" — halting the whole station is the single most
+      // disruptive action available and must point at a person.
+      description: `All staff locked out by ${actorFrom(req.user).userName ?? "a manager"}${
+        reason ? ` — ${reason}` : ""
+      }`,
       timestamp: new Date(),
       severity: "critical",
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -84,11 +98,20 @@ export const deactivateEmergency = async (req: AuthenticatedRequest, res: Respon
     // Let staff back in immediately rather than waiting out the cache TTL.
     await invalidateStationAuthCache(stationObjectId);
 
+    auditLog(req, {
+      action: "Emergency Stop Deactivated",
+      description: "Station lockdown lifted — staff can sign in again",
+      status: "Critical",
+    });
+
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationObjectId,
       type: "alert",
       title: "Emergency Stop Deactivated",
-      description: "System restored by manager. Staff can login again.",
+      description: `System restored by ${
+        actorFrom(req.user).userName ?? "a manager"
+      }. Staff can login again.`,
       timestamp: new Date(),
       severity: "info",
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),

@@ -1,5 +1,5 @@
 ﻿import { Request, Response } from "express";
-import { Types } from "mongoose";
+import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
@@ -245,8 +245,10 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
           .map((s: any) => s.parentStation.toString())
       ),
     ];
+    // isOwner, not role — a station can have several managers and only one of
+    // them is the owner whose name belongs on the account.
     const parentManagers = parentIds.length
-      ? await Staff.find({ station: { $in: parentIds }, role: "manager" }).lean()
+      ? await Staff.find({ station: { $in: parentIds }, role: "manager", isOwner: true }).lean()
       : [];
     const parentManagerMap = new Map<string, string>(
       parentManagers.map((m: any) => [
@@ -258,7 +260,9 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
     const stationsWithDetails = await Promise.all(
       stations.map(async (station) => {
         const [manager, staffCount] = await Promise.all([
-          Staff.findOne({ station: station._id, role: "manager" }).lean(),
+          // The owner — not "whichever manager Mongo returns first", which with
+          // 2–3 managers on a station was effectively random.
+          Staff.findOne({ station: station._id, role: "manager", isOwner: true }).lean(),
           Staff.countDocuments({ station: station._id }),
         ]);
 
@@ -330,7 +334,9 @@ export const getStationById = async (req: AuthenticatedRequest, res: Response) =
     const [station, manager, totalStaff, totalShifts, revenueAgg, tankDoc, pumpDoc, lastActivity] =
       await Promise.all([
         FillingStation.findById(stationId).lean(),
-        Staff.findOne({ station: stationId, role: "manager" }).lean(),
+        // The owner specifically — support needs the account holder, not an
+        // arbitrary one of the station's managers.
+        Staff.findOne({ station: stationId, role: "manager", isOwner: true }).lean(),
         Staff.countDocuments({ station: stationId }),
         Shift.countDocuments({ fillingStation: stationObjectId }),
         Shift.aggregate([
@@ -645,7 +651,8 @@ export const updateStationStatus = async (req: AuthenticatedRequest, res: Respon
         title: "Account Reactivated",
         body: "Your FuelDesk account has been reactivated by the platform administrator. All features are now available.",
         severity: "info",
-        targetRole: "manager",
+        // Account standing with FuelDesk is between us and the owner.
+        targetRole: "owner",
         expiresInDays: 7,
       });
 
@@ -674,7 +681,8 @@ export const updateStationStatus = async (req: AuthenticatedRequest, res: Respon
         title: "Account Suspended",
         body: "Your FuelDesk account has been suspended by the platform administrator. Please contact support at support@flourishstation.com to resolve this.",
         severity: "critical",
-        targetRole: "manager",
+        // The owner is the one who can resolve it — and the one it embarrasses.
+        targetRole: "owner",
         expiresInDays: 14,
       });
 
@@ -1615,7 +1623,10 @@ export const adminResetOwnerPassword = async (req: Request, res: Response) => {
     const station = await FillingStation.findById(stationId);
     if (!station) return res.status(404).json({ message: 'Station not found' });
 
-    const owner = await Staff.findOne({ station: stationId, role: 'manager' });
+    // Must be the OWNER. With several managers on a station the old
+    // role-only lookup could send the reset link to a hired manager — handing
+    // them the owner's account.
+    const owner = await Staff.findOne({ station: stationId, role: 'manager', isOwner: true });
     if (!owner) return res.status(404).json({ message: 'Station owner not found' });
 
     const resetToken = crypto.randomBytes(32).toString('hex');
@@ -1640,5 +1651,77 @@ export const adminResetOwnerPassword = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('adminResetOwnerPassword error:', err.message);
     return res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+/**
+ * PATCH /api/admin/stations/:stationId/owner  { staffId }
+ *
+ * Move ownership of a station to a different manager. Support-operated, because
+ * the situations that need it — the owner sold the business, left, died, or the
+ * boot backfill picked the wrong person because the original account had been
+ * deleted — are exactly the ones where the current owner cannot act.
+ *
+ * Ownership is single-holder by construction: the previous owner is demoted to
+ * a hired manager in the same operation.
+ */
+export const transferStationOwnership = async (req: Request, res: Response) => {
+  const session = await mongoose.startSession();
+  try {
+    const { stationId } = req.params;
+    const { staffId } = req.body;
+
+    if (!Types.ObjectId.isValid(stationId) || !Types.ObjectId.isValid(staffId)) {
+      return res.status(400).json({ message: 'Invalid station or staff id' });
+    }
+
+    const station = await FillingStation.findById(stationId).lean();
+    if (!station) return res.status(404).json({ message: 'Station not found' });
+
+    const target = await Staff.findById(staffId);
+    if (!target) return res.status(404).json({ message: 'Staff not found' });
+
+    if (target.station?.toString() !== stationId) {
+      return res.status(400).json({ message: 'That staff member does not belong to this station' });
+    }
+    if (target.role !== 'manager') {
+      return res.status(400).json({ message: 'Ownership can only be held by a manager' });
+    }
+
+    let previousOwner: any = null;
+
+    await session.withTransaction(async () => {
+      // Demote the incumbent, then promote the target. Both inside one
+      // transaction so the station is never left with two owners or none.
+      previousOwner = await Staff.findOneAndUpdate(
+        { station: stationId, isOwner: true, _id: { $ne: target._id } },
+        { $set: { isOwner: false } },
+        { session, new: false }
+      );
+
+      await Staff.findByIdAndUpdate(target._id, { $set: { isOwner: true } }, { session });
+    });
+
+    AdminLog.create({
+      eventType: 'ownership_transfer',
+      description: `Ownership of ${station.name} transferred to ${target.firstName} ${target.lastName} (${target.email})`,
+      stationOrUser: station.name,
+      status: 'warning',
+      fillingStation: station._id,
+      performedBy: (req as AuthenticatedRequest).user?.email || 'Admin',
+    }).catch((err: any) => console.error('AdminLog error (ownership transfer):', err));
+
+    return res.json({
+      message: 'Ownership transferred',
+      newOwner: { id: target._id, name: `${target.firstName} ${target.lastName}`, email: target.email },
+      previousOwner: previousOwner
+        ? { id: previousOwner._id, name: `${previousOwner.firstName} ${previousOwner.lastName}` }
+        : null,
+    });
+  } catch (err: any) {
+    console.error('transferStationOwnership error:', err.message);
+    return res.status(500).json({ message: 'Server error', error: err.message });
+  } finally {
+    await session.endSession();
   }
 };

@@ -6,6 +6,7 @@ import GasCylinderProduct from "../models/gasCylinderProduct.model";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
 import Activity from "../models/activity.model";
+import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
 import { emitToStation } from "../services/socket.service";
@@ -198,6 +199,7 @@ export const submitCylinderProcurement = async (req: AuthenticatedRequest, res: 
     await procurement.save();
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationId,
       type: "procurement",
       status: "success",
@@ -354,6 +356,7 @@ export const markCylinderReceived = async (req: AuthenticatedRequest, res: Respo
     );
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationId,
       type: "procurement",
       status: "success",
@@ -440,6 +443,7 @@ export const recordCylinderPayment = async (req: AuthenticatedRequest, res: Resp
     const paidByName = staff ? `${(staff as any).firstName} ${(staff as any).lastName}`.trim() : "Unknown";
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationId,
       type: "procurement",
       status: "success",

@@ -10,7 +10,7 @@ import GasShift from "../models/gasShift.model";
 import GasLoyaltyTransaction from "../models/gasLoyaltyTransaction.model";
 import GasPricing from "../models/gasPricing.model";
 import FillingStation from "../models/fillingStation.model";
-import Notification from "../models/notification.model";
+import { notifyStation } from "../utils/notifyHelpers";
 import { emitToStation } from "../services/socket.service";
 
 // Utility: generate receipt number
@@ -244,16 +244,16 @@ export const dispenseSale = async (req: AuthenticatedRequest, res: Response) => 
     if (updatedTank && updatedTank.capacityKg > 0) {
       const pct = updatedTank.currentStockKg / updatedTank.capacityKg;
       if (pct < 0.15) {
-        Notification.create({
-          fillingStation: station,
+        // Owner + every hired manager, pushed live.
+        notifyStation(station, {
           type: "alert",
           category: "low_stock",
           title: "Gas Tank Low Stock",
           body: `Gas tank "${updatedTank.name}" is at ${Math.round(pct * 100)}% capacity — ${updatedTank.currentStockKg.toFixed(1)} kg remaining.`,
           severity: pct < 0.05 ? "critical" : "warning",
-          timestamp: new Date(),
           targetRole: "manager",
-        }).catch((err: any) => console.error("Notification error (gas low stock):", err));
+          expiresInDays: 1,
+        });
       }
     }
 

@@ -7,6 +7,7 @@ import GasCustomer from "../models/gasCustomer.model";
 import GasLoyaltyTransaction from "../models/gasLoyaltyTransaction.model";
 import FillingStation from "../models/fillingStation.model";
 import Notification from "../models/notification.model";
+import { notifyStation } from "../utils/notifyHelpers";
 import { emitToStation } from "../services/socket.service";
 
 /**
@@ -283,16 +284,19 @@ export const createCylinderSale = async (req: AuthenticatedRequest, res: Respons
     // Low-stock alert once the shelf hits the reorder level.
     const remaining = product.quantityInStock - qty;
     if (remaining <= product.reorderLevel) {
-      Notification.create({
-        fillingStation: new Types.ObjectId(station),
+      // "manager" reaches the owner AND every hired manager — stock is a shared
+      // responsibility, and the owner should never learn about an empty shelf
+      // last. notifyStation (rather than a bare Notification.create) also pushes
+      // it live, so the bell updates immediately instead of on the next poll.
+      notifyStation(station, {
         type: "alert",
         category: "low_stock",
         title: "Cylinder Stock Low",
         body: `${product.label} is down to ${remaining} unit(s) (reorder level: ${product.reorderLevel}). Restock soon.`,
         severity: remaining === 0 ? "critical" : "warning",
-        timestamp: new Date(),
         targetRole: "manager",
-      }).catch((e: any) => console.error("Notification error (cylinder low stock):", e));
+        expiresInDays: 1,
+      });
     }
 
     emitToStation(String(station), "gas:cylinder-sale", { receiptNumber: sale.receiptNumber });

@@ -36,6 +36,15 @@ router.put(
   shiftController.endShift
 );
 
+// Record the pump meter at the moment the price changed, so the shift is valued
+// at the old price up to that reading and the new price after it.
+router.post(
+  "/:shiftId/price-change-reading",
+  requireAuth,
+  checkRole("attendant"),
+  shiftController.submitPriceChangeReading
+);
+
 // Get all shifts - accessible by attendants (own shifts), managers, and cashiers (all shifts)
 router.get(
   "/",

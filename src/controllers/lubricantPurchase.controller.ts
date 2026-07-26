@@ -4,6 +4,7 @@ import { AuthenticatedRequest } from "../interfaces";
 import Lubricant from "../models/lubricant.model";
 import LubricantPurchase, { ILubricantPurchaseItem } from "../models/lubricant-purchase.model";
 import Activity from "../models/activity.model";
+import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
 
 // ðŸ†• Create a new lubricant purchase
@@ -116,6 +117,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
       .map((i) => `${i.productName} Ã—${i.quantity}`)
       .join(", ");
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation,
       type: "stock",
       title: "Stock Added",

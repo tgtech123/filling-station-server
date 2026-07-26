@@ -4,7 +4,8 @@ import { AuthenticatedRequest } from "../interfaces";
 import Pump from "../models/pump.model";
 import { Types } from "mongoose";
 import Activity from "../models/activity.model";
-import Notification from "../models/notification.model";
+import { notifyStation } from "../utils/notifyHelpers";
+import { auditLog } from "../utils/auditLog";
 import { deleteCache } from "../config/redis";
 
 export const addTank = async (req: AuthenticatedRequest, res: Response) => {
@@ -217,6 +218,9 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
     const percentFull = tank.limit > 0 ? (tank.currentQuantity / tank.limit) * 100 : 0;
     if (percentFull < 20) {
       Activity.create({
+        // Deliberately unattributed: this is a threshold the system detected,
+        // not something a person did. Stamping it with whoever happened to be
+        // editing the tank would read as if they caused the shortage.
         fillingStation: fillingStationId,
         type: "alert",
         title: "Inventory Alert",
@@ -226,15 +230,18 @@ export const updateTankDetails = async (req: AuthenticatedRequest, res: Response
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       }).catch((err) => console.error("Activity log error (updateTankDetails):", err));
 
-      Notification.create({
-        fillingStation: fillingStationId,
+      // Fuel is the biggest number on the balance sheet — the owner sees this
+      // alongside the managers (the "manager" audience includes the owner), and
+      // it is pushed live instead of waiting for the next bell poll.
+      notifyStation(fillingStationId, {
         type: "alert",
         category: "tank_alert",
         title: "Low Tank Alert",
         body: `${tank.fuelType} tank ${tank.title} is below 20% â€” ${tank.currentQuantity} Ltrs remaining`,
         severity: "warning",
-        timestamp: new Date(),
-      }).catch((err) => console.error("Notification error (tank alert):", err));
+        targetRole: "manager",
+        expiresInDays: 1,
+      });
     }
 
     return res.status(200).json({
@@ -288,6 +295,13 @@ export const deleteTank = async (req: AuthenticatedRequest, res: Response) => {
     await station.save();
 
     // 6ï¸âƒ£ Return updated tanks
+    auditLog(req, {
+      action: "Tank Deleted",
+      description: `Tank "${tankExists.title}" (${tankExists.fuelType}) removed from the station`,
+      status: "Critical",
+      metadata: { tankId, title: tankExists.title, fuelType: tankExists.fuelType },
+    });
+
     return res.status(200).json({
       message: `Tank "${tankExists.title}" deleted successfully`,
     //   data: station.tanks,

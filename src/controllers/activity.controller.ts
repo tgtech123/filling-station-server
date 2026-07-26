@@ -41,6 +41,11 @@ export const getRecentActivity = async (req: AuthenticatedRequest, res: Response
         description: a.description,
         timestamp: a.timestamp,
         severity: a.severity ?? null,
+        // Who did it. Null on system-generated entries (thresholds, jobs) —
+        // the client should render those as "System".
+        userId: (a as any).user ?? null,
+        userName: (a as any).userName ?? null,
+        userRole: (a as any).userRole ?? null,
       })),
     });
   } catch (err: any) {

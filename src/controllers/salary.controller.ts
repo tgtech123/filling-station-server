@@ -7,6 +7,7 @@ import FillingStation from "../models/fillingStation.model";
 import CommissionStructure from "../models/commissionStructure.model";
 import BonusStructure from "../models/bonusStructure.model";
 import Expense from "../models/expense.model";
+import { isOwnerAccount } from "../middlewares/requireOwner";
 
 // Generate human-readable staff code from ObjectId
 const toStaffCode = (id: mongoose.Types.ObjectId): string =>
@@ -94,6 +95,9 @@ const buildFreshEntry = (
     bankDetails: (s as any).bankDetails?.acctNo
       ? (s as any).bankDetails
       : { acctNo: "", acctName: "", bankName: "" },
+    // A manager's pay is the owner's decision — the accountant sees the row and
+    // it counts toward the payroll total, but cannot edit it here.
+    readOnly: s.role === "manager",
   };
   return recalcEntry(base, pensionEnabled);
 };
@@ -179,13 +183,19 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
       .map((e) => {
         const s = staffById.get(e.staff.toString())!;
 
+        // Included so drafts created before manager rows became read-only pick
+        // up the lock the next time payroll is opened, instead of staying
+        // editable until some other field happens to change.
+        const shouldBeReadOnly = s.role === "manager";
+
         const staffChanged =
           e.firstName  !== s.firstName       ||
           e.lastName   !== s.lastName        ||
           e.role       !== s.role            ||
           e.shiftType  !== (s.shiftType ?? "") ||
           e.payType    !== (s.payType ?? "Monthly") ||
-          e.basicSalary !== (s.amount ?? 0);
+          e.basicSalary !== (s.amount ?? 0)  ||
+          !!e.readOnly !== shouldBeReadOnly;
 
         if (!staffChanged) return e as Partial<ISalaryEntry>;
 
@@ -216,6 +226,9 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
             acctName: e.bankDetails.acctName,
             bankName: e.bankDetails.bankName,
           },
+          // Recomputed from the live role so a promotion into (or out of) the
+          // manager role flips the row's editability with it.
+          readOnly: s.role === "manager",
           // placeholders â€" will be recalculated by recalcEntry
           totalBonus: 0,
           taxAmount:  0,
@@ -278,10 +291,41 @@ export const saveDraft = async (req: AuthenticatedRequest, res: Response) => {
     // Persist pension toggle if provided; keep existing value otherwise
     const pension = pensionEnabled !== undefined ? pensionEnabled : draft.pensionEnabled;
     draft.pensionEnabled = pension;
-    draft.entries = entries.map((e) => recalcEntry(e, pension)) as typeof draft.entries;
+
+    // Manager rows are read-only to the accountant. Rather than trusting the
+    // client to respect the flag, the stored row wins: whatever was posted for
+    // a manager is discarded and the row is recalculated from what the OWNER
+    // set via /api/salary/staff/:id/config. Only the pension toggle, which is
+    // company-wide, is allowed to affect them.
+    const lockedByStaffId = new Map(
+      draft.entries
+        .filter((e) => e.readOnly)
+        .map((e) => [e.staff.toString(), e])
+    );
+
+    let rejectedEdits = 0;
+    const nextEntries = entries.map((e) => {
+      const locked = e.staff ? lockedByStaffId.get(e.staff.toString()) : undefined;
+      if (!locked) return recalcEntry(e, pension);
+      rejectedEdits++;
+      // Subdocuments carry mongoose internals; convert to a plain object before
+      // recalculating so nothing mongoose-specific leaks into the new array.
+      const plain = (locked as any).toObject ? (locked as any).toObject() : { ...locked };
+      return recalcEntry(plain, pension);
+    });
+
+    draft.entries = nextEntries as typeof draft.entries;
     await draft.save();
 
-    return res.status(200).json({ success: true, data: draft });
+    return res.status(200).json({
+      success: true,
+      data: draft,
+      // Surfaced so the UI can explain the row snapping back rather than
+      // leaving the accountant thinking their edit just failed.
+      ...(rejectedEdits > 0 && {
+        notice: `${rejectedEdits} manager row(s) are read-only — a manager's pay is set by the station owner.`,
+      }),
+    });
   } catch (err) {
     console.error("saveDraft:", err);
     return res.status(500).json({ message: "Server error" });
@@ -430,10 +474,31 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { station } = req.user!;
 
-    const records = await SalaryDraft.find({
+    // Month filtering. `month=YYYY-MM` pins one month; `from`/`to` give a range.
+    // Months are stored as "YYYY-MM" strings, which sort and compare correctly
+    // as text, so a plain $gte/$lte range works without any date parsing.
+    const { month, from, to } = req.query as {
+      month?: string;
+      from?: string;
+      to?: string;
+    };
+    const isMonth = (v?: string) => typeof v === "string" && /^\d{4}-\d{2}$/.test(v);
+
+    const query: any = {
       station: new mongoose.Types.ObjectId(station),
       status: "validated",
-    })
+    };
+
+    if (isMonth(month)) {
+      query.month = month;
+    } else if (isMonth(from) || isMonth(to)) {
+      query.month = {
+        ...(isMonth(from) && { $gte: from }),
+        ...(isMonth(to) && { $lte: to }),
+      };
+    }
+
+    const records = await SalaryDraft.find(query)
       .sort({ month: -1 })
       .select("-entries")
       .populate("preparedBy", "firstName lastName")
@@ -446,9 +511,88 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
       validatedByName: displayName(r.validatedBy, r.validatedByName),
     }));
 
-    return res.status(200).json({ success: true, data });
+    return res.status(200).json({
+      success: true,
+      total: data.length,
+      filter: { month: month ?? null, from: from ?? null, to: to ?? null },
+      data,
+    });
   } catch (err) {
     console.error("getHistory:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * GET /api/salary/structure?month=YYYY-MM
+ *
+ * Read-only view of the salary structure. Creates nothing and changes nothing —
+ * safe to open at any time, including months with no draft yet.
+ *
+ * Scope follows the same rule as the rest of payroll:
+ *   • OWNER      — every row, the whole wage bill
+ *   • ACCOUNTANT — every row, since they prepare it
+ *   • HIRED MANAGER — their own row only. They are in the structure and can see
+ *     what they are paid, but not what their peers or the owner earn.
+ */
+export const getSalaryStructure = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { station, role } = req.user!;
+    const callerId = String(req.user?._id ?? req.user?.id ?? "");
+    const stationOid = new mongoose.Types.ObjectId(station);
+
+    const month =
+      typeof req.query.month === "string" && /^\d{4}-\d{2}$/.test(req.query.month)
+        ? req.query.month
+        : new Date().toISOString().slice(0, 7);
+
+    const isOwner = role === "manager" ? await isOwnerAccount(callerId) : false;
+    const seesEveryone = isOwner || role === "accountant";
+
+    const draft = await SalaryDraft.findOne({ station: stationOid, month }).lean();
+
+    let entries: any[];
+
+    if (draft) {
+      entries = draft.entries as any[];
+    } else {
+      // No draft for this month yet — derive the structure from the live roster
+      // so the table is never empty just because the accountant hasn't opened
+      // payroll. Nothing is persisted.
+      const [staffList, structures, bonusStructures] = await Promise.all([
+        Staff.find({
+          station: stationOid,
+          role: { $ne: "admin" },
+          $or: [{ role: { $ne: "manager" } }, { role: "manager", amount: { $gt: 0 } }],
+        }).lean(),
+        CommissionStructure.find({ fillingStation: stationOid }).lean(),
+        BonusStructure.find({ fillingStation: stationOid }).lean(),
+      ]);
+      const structureByRole = new Map(structures.map((s) => [s.role, s]));
+      const bonusMap = buildBonusMap(bonusStructures);
+      entries = staffList.map((s) => buildFreshEntry(s, structureByRole, bonusMap, true));
+    }
+
+    if (!seesEveryone) {
+      entries = entries.filter((e) => String(e.staff) === callerId);
+    }
+
+    return res.status(200).json({
+      success: true,
+      month,
+      status: draft?.status ?? "not-started",
+      scope: seesEveryone ? "all" : "self",
+      // Nobody edits through this endpoint; the accountant's editable view is
+      // GET /api/salary/draft.
+      editable: false,
+      total: entries.length,
+      totalPayroll: seesEveryone
+        ? entries.reduce((sum: number, e: any) => sum + (e.salaryToPay ?? 0), 0)
+        : undefined,
+      data: entries,
+    });
+  } catch (err) {
+    console.error("getSalaryStructure:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -464,8 +608,11 @@ export const getSalaryConfig = async (req: AuthenticatedRequest, res: Response) 
       .lean() as any;
     if (!target) return res.status(404).json({ message: "Staff not found" });
 
+    // Anyone may read their own pay. Reading someone else's is the owner's
+    // right alone — a hired manager must not see what the other managers, or
+    // the owner, earn. Checked against the DB, not the token's claim.
     const isSelf = target._id.toString() === callerId?.toString();
-    if (!isSelf && !req.user?.isSuperManager) {
+    if (!isSelf && !(await isOwnerAccount(callerId?.toString()))) {
       return res.status(403).json({ message: "Access denied" });
     }
 
@@ -491,8 +638,8 @@ export const configureSalary = async (req: AuthenticatedRequest, res: Response) 
     const isSelf = target._id.toString() === callerId?.toString();
 
     if (!isSelf) {
-      if (!req.user?.isSuperManager) {
-        return res.status(403).json({ message: "Only super managers can configure another manager's salary" });
+      if (!(await isOwnerAccount(callerId?.toString()))) {
+        return res.status(403).json({ message: "Only the station owner can configure another staff member's salary" });
       }
       const managerDoc = await Staff.findById(callerId).lean() as any;
       const currentDoc = await FillingStation.findById(callerStation).lean() as any;

@@ -14,6 +14,9 @@ import Notification from "../models/notification.model";
 import StationStatus from "../models/stationStatus.model";
 import redis from "../config/redis";
 import { emitToStation } from "../services/socket.service";
+import { isOwnerAccount } from "../middlewares/requireOwner";
+import { auditLog } from "../utils/auditLog";
+import { addStaffToOpenPayrollDraft } from "../services/payrollSync.service";
 
 
 
@@ -62,10 +65,11 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // Only the super manager (owner of the parent station) may create branch managers
-    if (role === "manager" && !manager.isSuperManager) {
+    // Hiring a manager is the owner's decision. Checked against the DB so a
+    // token minted before an ownership change cannot be used to hire.
+    if (role === "manager" && !(await isOwnerAccount(manager.id?.toString()))) {
       return res.status(403).json({
-        error: "Only the station owner can create branch managers",
+        error: "Only the station owner can create managers",
       });
     }
 
@@ -160,6 +164,20 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       targetRole: "manager",
     }).catch((err) => console.error("Notification error (createStaff):", err));
 
+    // Who hired whom, and when. With several managers on a station this is the
+    // difference between an audit trail and an argument.
+    auditLog(req, {
+      action: "Staff Created",
+      description: `${firstName} ${lastName} (${email}) added as ${role}`,
+      status: role === "manager" ? "Critical" : "Success",
+      metadata: { staffId: newStaff._id, role, email },
+    });
+
+    // Put the new hire straight into this month's payroll structure, prefilled
+    // from their staff record, instead of waiting for the accountant to next
+    // open payroll. No-ops when the month is already submitted or validated.
+    addStaffToOpenPayrollDraft(stationId as any, newStaff._id as any);
+
     // Live-refresh staff tables on every open dashboard at this station
     if (manager.station) emitToStation(String(manager.station), "staff:updated", { action: "created" });
 
@@ -214,6 +232,12 @@ export const loginStaff = async (
       // Staff was found so we have a station â€” log the failed attempt
       if (staff.station) {
         Activity.create({
+          // Attributed to the account that was targeted — the actor is unknown
+          // by definition, but knowing WHOSE credentials were attacked is the
+          // useful signal when three managers share a station.
+          user: staff._id,
+          userName: `${staff.firstName} ${staff.lastName}`.trim(),
+          userRole: staff.role,
           fillingStation: staff.station,
           type: "login",
           status: "failed",
@@ -277,8 +301,13 @@ export const loginStaff = async (
     // 3. Get associated station
     const station = await FillingStation.findById(staff.station);
 
-    // Super manager = manager whose station has no parentStation (i.e. owns the root station)
-    const isSuperManager = staff.role === "manager" && !(station as any)?.parentStation;
+    // Owner = the manager who registered the business (Staff.isOwner). This used
+    // to be inferred as "any manager on a root station", which made every hired
+    // manager an owner on single-station plans — 3 people with billing, payroll
+    // and the power to delete each other. Ownership is now explicit and stored.
+    // `isSuperManager` is kept as the wire name so existing clients keep working.
+    const isOwner = staff.role === "manager" && staff.isOwner === true;
+    const isSuperManager = isOwner;
 
     // 4. Create JWT token — 24h session by default; "Remember me" extends it
     // to 30 days so the user isn't asked for credentials every day. The client
@@ -292,6 +321,7 @@ export const loginStaff = async (
         lastName: staff.lastName,
         station: staff.station?.toString(),
         isSuperManager,
+        isOwner,
         loginAt: Date.now(),
       },
       process.env.JWT_SECRET!,
@@ -304,6 +334,9 @@ export const loginStaff = async (
     // Log successful login
     if (staff.station) {
       Activity.create({
+        user: staff._id,
+        userName: `${staff.firstName} ${staff.lastName}`.trim(),
+        userRole: staff.role,
         fillingStation: staff.station,
         type: "login",
         status: "success",
@@ -344,6 +377,7 @@ export const loginStaff = async (
             }
           : null,
         isSuperManager,
+        isOwner,
       },
     });
   } catch (error: any) {
@@ -448,7 +482,11 @@ export const forgotPassword = async (req: Request, res: Response) => {
         body: `A password reset was requested for ${email}`,
         severity: "warning",
         timestamp: new Date(),
-        targetRole: staff.role ?? "manager",
+        // This one has no `staff` field, so it is delivered by role. A reset on
+        // the OWNER's account must therefore be addressed to "owner" — with the
+        // plain role it would announce the owner's security event to every
+        // hired manager.
+        targetRole: staff.isOwner ? "owner" : staff.role ?? "manager",
       }).catch((err) => console.error("Notification error (password reset):", err));
     }
 
@@ -526,9 +564,17 @@ export const getAllStaff = async (req: AuthenticatedRequest, res: Response) => {
       query.station = user.station; // ensure staff belong to same station
     }
 
-    // Retrieve staff, optionally excluding sensitive fields like password
+    // Pay and bank details are owner-only. A station can have several managers,
+    // and this endpoint powers the staff directory every one of them opens — so
+    // without this a hired manager reads the owner's salary, tax rate and bank
+    // account, which would defeat the access rules on /api/salary entirely.
+    const callerIsOwner = await isOwnerAccount(user.id?.toString());
+    const projection = callerIsOwner
+      ? "-password -__v"
+      : "-password -__v -amount -payType -taxPercentage -bankDetails";
+
     const staffList = await Staff.find(query)
-      .select("-password -__v") // hide password and version key
+      .select(projection)
       .sort({ createdAt: -1 }); // latest first
 
     if (!staffList.length) {
@@ -583,6 +629,24 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ message: "You can only update staff from your station" });
     }
 
+    const isSelfEdit = staff.id.toString() === manager.id?.toString();
+    const callerIsOwner = await isOwnerAccount(manager.id?.toString());
+
+    // The owner's record is theirs alone. Without this a hired manager could
+    // change the owner's email and password and take over the account.
+    if ((staff as any).isOwner && !isSelfEdit) {
+      return res.status(403).json({
+        message: "The station owner's account can only be edited by the owner.",
+      });
+    }
+
+    // Editing a peer manager (pay, role, credentials) is an ownership-level act.
+    if (staff.role === "manager" && !isSelfEdit && !callerIsOwner) {
+      return res.status(403).json({
+        message: "Only the station owner can edit another manager.",
+      });
+    }
+
     // Allowed fields to update
     const allowedFields = new Set([
       "firstName",
@@ -615,6 +679,19 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ message: "Cannot change staff station via this endpoint" });
     }
 
+    // Pay is set by the owner (see /api/salary), never through the staff editor.
+    // This route allows self-edits, so without this a hired manager could open
+    // their own profile and write their own salary.
+    if (!callerIsOwner) {
+      for (const payField of ["amount", "payType"]) {
+        if (payField in updates) {
+          return res.status(403).json({
+            message: "Only the station owner can change pay details.",
+          });
+        }
+      }
+    }
+
     // If email is being changed, ensure uniqueness
     if (updates.email && updates.email !== staff.email) {
       const existing = await Staff.findOne({ email: updates.email });
@@ -627,8 +704,14 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     // Without this, promoting staff (e.g. attendant → manager) would bypass the
     // same cap that createStaff enforces.
     if (updates.role && updates.role !== staff.role) {
+      // The owner must stay a manager — demoting them would lock the station out
+      // of billing, payroll and manager administration with no way back.
+      if ((staff as any).isOwner) {
+        return res.status(403).json({ error: "The station owner's role cannot be changed." });
+      }
+
       // Only the station owner may assign the manager role
-      if (updates.role === "manager" && !manager.isSuperManager) {
+      if (updates.role === "manager" && !callerIsOwner) {
         return res.status(403).json({ error: "Only the station owner can assign the manager role" });
       }
 
@@ -678,6 +761,19 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(500).json({ message: "Failed to update staff" });
     }
 
+    auditLog(req, {
+      action: "Staff Updated",
+      description: `${updated.firstName} ${updated.lastName} (${updated.role}) updated — ${Object.keys(
+        updates
+      )
+        .filter((k) => k !== "password")
+        .join(", ") || "no visible fields"}${updates.password ? " (password reset)" : ""}`,
+      status: staff.role === "manager" ? "Critical" : "Success",
+      // Field names only, never values — the trail records that pay or
+      // credentials changed without becoming a second copy of them.
+      metadata: { staffId: updated._id, fields: Object.keys(updates) },
+    });
+
     if (req.user?.station) emitToStation(String(req.user.station), "staff:updated", { action: "updated" });
 
     return res.status(200).json({ message: "Staff updated successfully", staff: updated });
@@ -726,7 +822,9 @@ export const verifyOtp = async (req: Request, res: Response) => {
     }
 
     const station = await FillingStation.findById(staff.station);
-    const isSuperManager = staff.role === "manager" && !(station as any)?.parentStation;
+    // Same explicit ownership rule as the non-2FA login path above.
+    const isOwner = staff.role === "manager" && staff.isOwner === true;
+    const isSuperManager = isOwner;
 
     // 2FA issues the real token here — honor the "Remember me" choice the
     // user made on the login form (relayed by the client through the OTP step).
@@ -739,6 +837,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
         lastName: staff.lastName,
         station: staff.station?.toString(),
         isSuperManager,
+        isOwner,
         loginAt: Date.now(),
       },
       process.env.JWT_SECRET!,
@@ -749,6 +848,9 @@ export const verifyOtp = async (req: Request, res: Response) => {
 
     if (staff.station) {
       Activity.create({
+        user: staff._id,
+        userName: `${staff.firstName} ${staff.lastName}`.trim(),
+        userRole: staff.role,
         fillingStation: staff.station,
         type: "login",
         status: "success",
@@ -787,6 +889,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
             }
           : null,
         isSuperManager,
+        isOwner,
       },
     });
   } catch (error: any) {
@@ -923,6 +1026,26 @@ export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
         throw { status: 403, message: "You can only delete staff from your station" };
       }
 
+      // The owner account is the root of the station — losing it would strand
+      // billing, payroll and manager administration with nobody able to reach
+      // them. Nobody deletes the owner, not even the owner.
+      if ((staff as any).isOwner) {
+        throw {
+          status: 403,
+          message:
+            "The station owner's account cannot be deleted. Transfer ownership first.",
+        };
+      }
+
+      // A station can have several managers. Removing one is an ownership-level
+      // decision — without this, any hired manager could delete their peers.
+      if (staff.role === "manager" && !(await isOwnerAccount(manager.id?.toString()))) {
+        throw {
+          status: 403,
+          message: "Only the station owner can remove a manager.",
+        };
+      }
+
       // Remove staff id from the FillingStation.staff array
       const station = await FillingStation.findById(managerStation).session(session);
       if (!station) {
@@ -941,6 +1064,17 @@ export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
       }
 
       // (Optional) Add other cleanup here (e.g., remove references in other collections)
+    });
+
+    auditLog(req, {
+      action: "Staff Deleted",
+      description: `${deletedStaff?.firstName} ${deletedStaff?.lastName} (${deletedStaff?.role}) removed from the station`,
+      status: "Critical",
+      metadata: {
+        staffId: deletedStaff?._id,
+        role: deletedStaff?.role,
+        email: deletedStaff?.email,
+      },
     });
 
     // If we reach here the transaction committed successfully

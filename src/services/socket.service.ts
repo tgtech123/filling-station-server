@@ -4,10 +4,14 @@ import jwt from "jsonwebtoken";
 
 let _io: SocketIOServer | null = null;
 
+// Mirrors the HTTP CORS allowlist in app.ts — env-driven so a custom production
+// domain works without a code change (FRONTEND_URL + optional CORS_ORIGINS list).
 const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL,
+  ...(process.env.CORS_ORIGINS?.split(",").map((o) => o.trim()) || []),
   "https://filling-station-system.vercel.app",
   "http://localhost:3000",
-];
+].filter(Boolean) as string[];
 
 /**
  * Attach a Redis pub/sub adapter so Socket.IO emits fan out across EVERY API
@@ -54,7 +58,10 @@ export async function initSocket(httpServer: HttpServer): Promise<SocketIOServer
     cors: {
       origin: (origin, cb) => {
         if (!origin) return cb(null, true);
-        if (ALLOWED_ORIGINS.includes(origin) || origin.endsWith(".vercel.app"))
+        if (
+          ALLOWED_ORIGINS.includes(origin) ||
+          (process.env.NODE_ENV !== "production" && origin.endsWith(".vercel.app"))
+        )
           return cb(null, true);
         cb(new Error(`Socket.IO CORS blocked: ${origin}`));
       },
@@ -90,6 +97,20 @@ export async function initSocket(httpServer: HttpServer): Promise<SocketIOServer
     if (user?.station) {
       // Each socket joins its station room — emits only reach users of the same station
       socket.join(`station:${user.station}`);
+
+      // Role room, so an event meant for one role isn't pushed to every client.
+      if (user.role) socket.join(`station:${user.station}:role:${user.role}`);
+
+      // Owner room. Only the business owner joins, so owner-scoped events
+      // (billing, subscription, account status) never reach a hired manager's
+      // socket — they are in `role:manager` but not here.
+      //
+      // Reads the token's isOwner claim. A session minted before this shipped
+      // has no claim and simply won't join, which fails closed: the owner sees
+      // these events again after their next login, and nobody sees them early.
+      if (user.role === "manager" && user.isOwner === true) {
+        socket.join(`station:${user.station}:owner`);
+      }
     }
     if (user?.role === "admin") {
       socket.join("admin");
@@ -114,6 +135,38 @@ export function emitToStation(
 ): void {
   if (!_io) return;
   _io.to(`station:${stationId.toString()}`).emit(event, { ...data, _ts: Date.now() });
+}
+
+/**
+ * Emit to just the audience a notification is addressed to, mirroring the
+ * targetRole filter the notification API applies when reading.
+ *
+ *   "all"     → every user of the station
+ *   "owner"   → the business owner only
+ *   "manager" → the owner AND every hired manager (both hold role=manager, so
+ *               both are in the role room)
+ *   <role>    → that role
+ *
+ * Without this every client is woken for every event and re-fetches its bell,
+ * which for owner-only events tells hired managers that *something* private
+ * just happened.
+ */
+export function emitToStationAudience(
+  stationId: string | { toString(): string },
+  targetRole: string,
+  event: string,
+  data: Record<string, unknown> = {}
+): void {
+  if (!_io) return;
+  const base = `station:${stationId.toString()}`;
+  const room =
+    targetRole === "all"
+      ? base
+      : targetRole === "owner"
+      ? `${base}:owner`
+      : `${base}:role:${targetRole}`;
+
+  _io.to(room).emit(event, { ...data, _ts: Date.now() });
 }
 
 export function getIO(): SocketIOServer | null {

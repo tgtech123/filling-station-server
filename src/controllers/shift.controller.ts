@@ -84,6 +84,36 @@ const getProductFromPump = async (pumpId: Types.ObjectId, stationId: Types.Objec
   }
 };
 
+/**
+ * The pump's price RIGHT NOW.
+ *
+ * Shifts are scheduled ahead of time and copy the price at that moment, so the
+ * stored value goes stale the instant the owner changes prices. Anything that
+ * needs the real price must read it from the Pump document, which is the single
+ * source of truth that the owner-only price update writes to.
+ *
+ * Returns null when the pump can't be found, so callers can keep whatever they
+ * already had instead of zeroing out a shift's value.
+ */
+const getCurrentPumpPrice = async (
+  pumpId: Types.ObjectId,
+  stationId: Types.ObjectId
+): Promise<number | null> => {
+  try {
+    const pumpDoc = await Pump.findOne({ "pumps._id": pumpId }).lean();
+    if (!pumpDoc) return null;
+
+    const pump = (pumpDoc as any).pumps?.find(
+      (p: any) => String(p._id) === String(pumpId)
+    );
+    const price = Number(pump?.pricePerLtr);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  } catch (error) {
+    console.error("Error reading current pump price:", error);
+    return null;
+  }
+};
+
 // Start a shift — requires a supervisor-scheduled shift for today
 export const startShift = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -139,8 +169,32 @@ export const startShift = async (req: AuthenticatedRequest, res: Response) => {
 
     // Transition Scheduled → Active
     scheduledShift.openingMeterReading = openingReading;
-    scheduledShift.startTime = new Date();
+    const startedAt = new Date();
+    scheduledShift.startTime = startedAt;
     scheduledShift.status = "Active";
+
+    // Re-read the price from the pump NOW rather than trusting the value copied
+    // in when the shift was scheduled — scheduling creates one shift per day
+    // across a date range, so a shift worked on Sunday was carrying Monday's
+    // price. Any change in between silently became the attendant's cash
+    // discrepancy.
+    const livePrice = await getCurrentPumpPrice(
+      scheduledShift.pump,
+      new Types.ObjectId(fillingStation)
+    );
+    if (livePrice !== null) scheduledShift.pricePerLtr = livePrice;
+
+    // Open the first priced segment at the opening meter.
+    scheduledShift.priceSegments = [
+      {
+        pricePerLtr: scheduledShift.pricePerLtr,
+        from: startedAt,
+        openingMeter: openingReading,
+        closingMeter: null,
+      },
+    ] as any;
+    scheduledShift.awaitingPriceChangeMeter = false;
+    scheduledShift.priceSplitUnresolved = false;
 
     await scheduledShift.save();
 
@@ -154,6 +208,12 @@ export const startShift = async (req: AuthenticatedRequest, res: Response) => {
       .then((attendant: any) => {
         const name = attendant ? `${attendant.firstName} ${attendant.lastName}` : "Attendant";
         return Activity.create({
+          // Attributed to the ATTENDANT whose shift it is, not the caller — a
+          // manager may start a shift on their behalf, and the meaningful
+          // subject of the record is who worked the pump.
+          user: attendant?._id ?? null,
+          userName: attendant ? name : null,
+          userRole: attendant?.role ?? null,
           fillingStation: new Types.ObjectId(fillingStation),
           type: "sale",
           title: `Shift started â€” ${newShift.pumpTitle}`,
@@ -241,6 +301,21 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
     shift.endTime = new Date();
     shift.status = "Completed";
 
+    // Close the final priced segment at the closing meter.
+    if (shift.priceSegments?.length) {
+      const last = shift.priceSegments[shift.priceSegments.length - 1];
+      if (last.openingMeter !== null) {
+        last.closingMeter = closingReading;
+      } else {
+        // The price changed and the attendant never entered the boundary
+        // reading, so the split between old and new price is unknown. Flag it
+        // rather than guessing — the difference must not be charged to the
+        // attendant, and a supervisor resolves the split at approval.
+        shift.priceSplitUnresolved = true;
+      }
+      shift.markModified("priceSegments");
+    }
+
     // The pre-save hook will calculate litresSold and totalAmount
     await shift.save();
 
@@ -306,6 +381,8 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
 
         if (percentFilled < 20) {
           Activity.create({
+            // System-detected threshold — left unattributed on purpose, same as
+            // the equivalent alert in tank.controller.
             fillingStation: shift.fillingStation,
             type: "alert",
             title: "Low Tank Alert",
@@ -326,6 +403,9 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
       .then((attendant: any) => {
         const name = attendant ? `${attendant.firstName} ${attendant.lastName}` : "Attendant";
         return Activity.create({
+          user: attendant?._id ?? null,
+          userName: attendant ? name : null,
+          userRole: attendant?.role ?? null,
           fillingStation: new Types.ObjectId(fillingStation),
           type: "sale",
           title: `Shift ended â€” ${shift.pumpTitle}`,
@@ -659,6 +739,92 @@ export const getTodaySchedule = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
+/**
+ * POST /api/shifts/:shiftId/price-change-reading   { meterReading }
+ *
+ * The attendant's answer to "the price just changed — what does your pump read
+ * right now?". That number is the boundary between the two priced segments:
+ * litres up to it were sold at the old price, litres after at the new one.
+ *
+ * Entering it is what keeps the shift's expected cash exact, so the attendant
+ * is not later held responsible for a difference the price change created.
+ */
+export const submitPriceChangeReading = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const fillingStation = req.user?.station;
+    const attendantId = req.user?.id;
+    const { shiftId } = req.params;
+    const { meterReading } = req.body;
+
+    if (!fillingStation || !attendantId) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+    if (!Types.ObjectId.isValid(shiftId)) {
+      return res.status(400).json({ error: "Invalid shift id" });
+    }
+
+    const reading = Number(meterReading);
+    if (!Number.isFinite(reading) || reading < 0) {
+      return res.status(400).json({ error: "meterReading must be a valid non-negative number" });
+    }
+
+    const shift = await Shift.findOne({
+      _id: new Types.ObjectId(shiftId),
+      fillingStation: new Types.ObjectId(fillingStation),
+      attendant: new Types.ObjectId(attendantId),
+      status: "Active",
+    });
+
+    if (!shift) {
+      return res.status(404).json({ error: "Active shift not found" });
+    }
+    if (!shift.awaitingPriceChangeMeter || shift.priceSegments.length < 2) {
+      return res.status(400).json({ error: "This shift is not waiting for a price-change reading" });
+    }
+
+    const openSegment = shift.priceSegments[shift.priceSegments.length - 1];
+    const previousSegment = shift.priceSegments[shift.priceSegments.length - 2];
+
+    // The meter only ever counts up. It must be at or past where the previous
+    // segment began, and it cannot exceed what is physically plausible — a typo
+    // here would silently misprice hundreds of litres.
+    const floor = previousSegment.openingMeter ?? shift.openingMeterReading;
+    if (reading < floor) {
+      return res.status(400).json({
+        error: `Meter reading cannot be less than ${floor} — the reading at the start of this price period.`,
+      });
+    }
+
+    previousSegment.closingMeter = reading;
+    openSegment.openingMeter = reading;
+    shift.awaitingPriceChangeMeter = false;
+    shift.markModified("priceSegments");
+    await shift.save();
+
+    const litresAtOldPrice = Math.max(0, reading - (previousSegment.openingMeter ?? 0));
+
+    emitToStation(fillingStation, "shift:price-reading-recorded", {
+      shiftId: String(shift._id),
+    });
+
+    return res.status(200).json({
+      message: "Meter reading recorded. Your shift is now split across both prices.",
+      data: {
+        litresAtOldPrice,
+        oldPrice: previousSegment.pricePerLtr,
+        newPrice: openSegment.pricePerLtr,
+        meterAtChange: reading,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error in submitPriceChangeReading:", err);
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
 // Get current shift for attendant
 export const getCurrentShift = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -693,6 +859,21 @@ export const getCurrentShift = async (req: AuthenticatedRequest, res: Response) 
         pricePerLtr: currentShift.pricePerLtr,
         startTime: currentShift.startTime,
         status: currentShift.status,
+        // Drives the "record your meter now" prompt on the attendant's screen.
+        awaitingPriceChangeMeter: currentShift.awaitingPriceChangeMeter ?? false,
+        priceChange: currentShift.awaitingPriceChangeMeter
+          ? {
+              oldPrice:
+                currentShift.priceSegments?.[currentShift.priceSegments.length - 2]
+                  ?.pricePerLtr ?? null,
+              newPrice:
+                currentShift.priceSegments?.[currentShift.priceSegments.length - 1]
+                  ?.pricePerLtr ?? null,
+              changedAt:
+                currentShift.priceSegments?.[currentShift.priceSegments.length - 1]?.from ??
+                null,
+            }
+          : null,
       },
     });
   } catch (err: any) {

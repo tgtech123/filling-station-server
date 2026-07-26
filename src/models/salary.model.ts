@@ -27,6 +27,17 @@ export interface ISalaryEntry {
     acctName: string;
     bankName: string;
   };
+  /**
+   * Manager rows are READ-ONLY in the payroll draft.
+   *
+   * Managers belong in the structure — they are paid staff and must appear so
+   * the payroll total is right. But what a manager earns is the owner's
+   * decision, set through /api/salary/staff/:id/config, not something the
+   * accountant edits while preparing the month. saveDraft keeps the stored
+   * values for these rows and ignores whatever is posted for them; the flag
+   * lets the client lock the row instead of silently discarding edits.
+   */
+  readOnly: boolean;
 }
 
 export interface ISalaryDraft extends Document {
@@ -75,6 +86,7 @@ const salaryEntrySchema = new Schema<ISalaryEntry>(
       acctName: { type: String, default: "" },
       bankName: { type: String, default: "" },
     },
+    readOnly: { type: Boolean, default: false },
   },
   { _id: false }
 );

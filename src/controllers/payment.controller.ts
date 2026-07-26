@@ -664,7 +664,9 @@ export const paystackWebhook = async (req: any, res: Response) => {
           title: "Subscription Activated",
           body: "Your " + (meta?.planName ?? planSlug) + " plan is now active.",
           severity: "info",
-          targetRole: "manager",
+          // Billing is the owner's — hired managers do not see what the
+          // business pays or when it renews.
+          targetRole: "owner",
           expiresInDays: 7,
         });
         notifyAdmin({
@@ -684,7 +686,8 @@ export const paystackWebhook = async (req: any, res: Response) => {
           title: "SMS Credits Activated",
           body: `${meta.credits} SMS credits added. Customers will receive their loyalty portal link when enrolled.`,
           severity: "info",
-          targetRole: "manager",
+          // A purchase — owner's money.
+          targetRole: "owner",
           expiresInDays: 7,
         });
       }
@@ -1038,7 +1041,8 @@ export const scheduleDowngrade = async (req: AuthenticatedRequest, res: Response
       title:       "Downgrade Scheduled",
       body:        `Your plan will change to ${(plan as any).name} on ${new Date(effectiveDate).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" })}.`,
       severity:    "info",
-      targetRole:  "manager",
+      // Only the owner can schedule this, so only the owner is told about it.
+      targetRole:  "owner",
       expiresInDays: 30,
     });
 

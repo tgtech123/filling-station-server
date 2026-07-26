@@ -4,16 +4,44 @@ import { AuthenticatedRequest } from "../interfaces";
 import Notification from "../models/notification.model";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
+import { isOwnerAccount } from "../middlewares/requireOwner";
+
+/**
+ * Which targetRole values this user is entitled to receive.
+ *
+ * The owner sees the operational stream ("manager") AND their own ("owner") —
+ * they are the superior, so nothing is hidden from them. A HIRED manager sees
+ * only the operational stream: billing, the subscription and account-level
+ * events are not theirs.
+ *
+ * Ownership comes from the database, not the token, so an owner holding a
+ * session minted before this feature shipped still gets their notifications,
+ * and a demoted manager stops getting them immediately.
+ */
+async function resolveAudience(req: AuthenticatedRequest): Promise<{
+  roles: string[];
+  isOwner: boolean;
+}> {
+  const role = req.user?.role ?? "manager";
+  const roles = [role, "all"];
+
+  if (role !== "manager") return { roles, isOwner: false };
+
+  const isOwner = await isOwnerAccount(String((req.user as any)?._id ?? req.user?.id ?? ""));
+  if (isOwner) roles.push("owner");
+
+  return { roles, isOwner };
+}
 
 // Resolves all station IDs visible to the current user.
-// Super managers see their root station + all branches.
-// Everyone else sees only their own station.
+// The owner sees their root station + all branches.
+// Everyone else — hired managers included — sees only their own station.
 async function getAccessibleStationIds(
   stationId: string,
-  isSuperManager: boolean,
+  isOwner: boolean,
   managerId: string
 ): Promise<string[]> {
-  if (!isSuperManager) return [stationId];
+  if (!isOwner) return [stationId];
 
   const [manager, station] = await Promise.all([
     Staff.findById(managerId).lean() as any,
@@ -44,9 +72,9 @@ export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const { roles, isOwner } = await resolveAudience(req);
     const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
-    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationIds = await getAccessibleStationIds(stationId, isOwner, managerId);
     const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
 
     // Cleanup stale bad notifications (own station only to avoid excessive writes)
@@ -69,7 +97,7 @@ export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
         { staff: new Types.ObjectId(staffId) },
         {
           staff: null,
-          targetRole: { $in: [req.user?.role ?? "manager", "all"] },
+          targetRole: { $in: roles },
           createdAt: { $gte: userCreatedAt },
         },
       ],
@@ -108,9 +136,9 @@ export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const { roles, isOwner } = await resolveAudience(req);
     const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
-    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationIds = await getAccessibleStationIds(stationId, isOwner, managerId);
     const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
 
     // Cleanup (own station only)
@@ -133,7 +161,7 @@ export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
         { staff: new Types.ObjectId(staffId) },
         {
           staff: null,
-          targetRole: { $in: [req.user?.role ?? "manager", "all"] },
+          targetRole: { $in: roles },
           createdAt: { $gte: userCreatedAt },
         },
       ],
@@ -173,9 +201,9 @@ export const markMessageRead = async (req: AuthenticatedRequest, res: Response) 
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const { roles, isOwner } = await resolveAudience(req);
     const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
-    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationIds = await getAccessibleStationIds(stationId, isOwner, managerId);
     const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
 
     const staffId = (req.user as any)?._id ?? req.user?.id;
@@ -185,7 +213,7 @@ export const markMessageRead = async (req: AuthenticatedRequest, res: Response) 
       fillingStation: { $in: stationObjectIds },
       type: "message",
       $or: [
-        { targetRole: { $in: [req.user?.role ?? "manager", "all"] }, staff: null },
+        { targetRole: { $in: roles }, staff: null },
         { staff: new Types.ObjectId(staffId) },
       ],
     });
@@ -212,9 +240,9 @@ export const markAlertRead = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const { roles, isOwner } = await resolveAudience(req);
     const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
-    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationIds = await getAccessibleStationIds(stationId, isOwner, managerId);
     const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
 
     const staffId = (req.user as any)?._id ?? req.user?.id;
@@ -224,7 +252,7 @@ export const markAlertRead = async (req: AuthenticatedRequest, res: Response) =>
       fillingStation: { $in: stationObjectIds },
       type: "alert",
       $or: [
-        { targetRole: { $in: [req.user?.role ?? "manager", "all"] }, staff: null },
+        { targetRole: { $in: roles }, staff: null },
         { staff: new Types.ObjectId(staffId) },
       ],
     });
@@ -250,9 +278,9 @@ export const markAllMessagesRead = async (req: AuthenticatedRequest, res: Respon
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const { roles, isOwner } = await resolveAudience(req);
     const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
-    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationIds = await getAccessibleStationIds(stationId, isOwner, managerId);
     const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
 
     const staffId = (req.user as any)?._id ?? req.user?.id;
@@ -263,7 +291,7 @@ export const markAllMessagesRead = async (req: AuthenticatedRequest, res: Respon
         type: "message",
         expiresAt: { $gt: new Date() },
         $or: [
-          { targetRole: { $in: [req.user?.role ?? "manager", "all"] }, staff: null },
+          { targetRole: { $in: roles }, staff: null },
           { staff: new Types.ObjectId(staffId) },
         ],
       },
@@ -284,9 +312,9 @@ export const markAllAlertsRead = async (req: AuthenticatedRequest, res: Response
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    const isSuperManager = !!(req.user as any)?.isSuperManager;
+    const { roles, isOwner } = await resolveAudience(req);
     const managerId = String((req.user as any)?._id ?? req.user?.id ?? "");
-    const stationIds = await getAccessibleStationIds(stationId, isSuperManager, managerId);
+    const stationIds = await getAccessibleStationIds(stationId, isOwner, managerId);
     const stationObjectIds = stationIds.map((id) => new Types.ObjectId(id));
 
     const staffId = (req.user as any)?._id ?? req.user?.id;
@@ -297,7 +325,7 @@ export const markAllAlertsRead = async (req: AuthenticatedRequest, res: Response
         type: "alert",
         expiresAt: { $gt: new Date() },
         $or: [
-          { targetRole: { $in: [req.user?.role ?? "manager", "all"] }, staff: null },
+          { targetRole: { $in: roles }, staff: null },
           { staff: new Types.ObjectId(staffId) },
         ],
       },

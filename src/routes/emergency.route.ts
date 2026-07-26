@@ -1,6 +1,6 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
-import { checkRole } from "../middlewares/checkRole";
+import { requireOwner } from "../middlewares/requireOwner";
 import {
   activateEmergency,
   deactivateEmergency,
@@ -10,7 +10,11 @@ import {
 const router = express.Router();
 
 router.get("/status", requireAuth, getEmergencyStatus);
-router.post("/activate", requireAuth, checkRole("manager"), activateEmergency);
-router.post("/deactivate", requireAuth, checkRole("manager"), deactivateEmergency);
+
+// Emergency mode locks every non-manager out of the entire system (see the
+// gate in auth.middleware). Halting the business is the owner's call — one
+// hired manager should not be able to shut the station down for everyone.
+router.post("/activate", requireAuth, requireOwner, activateEmergency);
+router.post("/deactivate", requireAuth, requireOwner, deactivateEmergency);
 
 export default router;

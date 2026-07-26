@@ -5,6 +5,7 @@ import Lubricant from "../models/lubricant.model";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
 import Activity from "../models/activity.model";
+import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
 
@@ -189,6 +190,7 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
     await procurement.save();
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationId,
       type: "procurement",
       status: "success",
@@ -336,6 +338,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
     );
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationId,
       type: "procurement",
       status: "success",
@@ -419,6 +422,7 @@ export const recordPayment = async (req: AuthenticatedRequest, res: Response) =>
     const paidByName = staff ? `${(staff as any).firstName} ${(staff as any).lastName}`.trim() : "Unknown";
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationId,
       type:      "procurement",
       status:    "success",
