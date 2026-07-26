@@ -18,6 +18,35 @@ export interface IShift extends Document {
   pricePerLtr: number;
   totalAmount?: number; // Calculated: litresSold * pricePerLtr
   status: "Scheduled" | "Active" | "Completed" | "Cancelled";
+  /**
+   * Priced segments of the shift.
+   *
+   * A pump totaliser counts LITRES; money is litres × the price in force at the
+   * moment of sale. If the owner changes the price mid-shift, the shift really
+   * does have two prices, and valuing the whole shift at either one produces a
+   * cash discrepancy that gets blamed on the attendant.
+   *
+   * One segment is opened at shift start. A price change closes nothing on its
+   * own — it appends a new segment and asks the attendant for the meter reading
+   * at that instant, which becomes the boundary between the two.
+   */
+  priceSegments: {
+    pricePerLtr: number;
+    from: Date;
+    openingMeter: number | null;
+    closingMeter: number | null;
+  }[];
+  /**
+   * True between a price change and the attendant entering their meter reading.
+   * While set, the shift's value cannot be computed exactly.
+   */
+  awaitingPriceChangeMeter: boolean;
+  /**
+   * Set when a shift is closed while a segment boundary is still unknown. The
+   * reconciliation must NOT treat the resulting difference as the attendant's
+   * fault — a supervisor resolves the split.
+   */
+  priceSplitUnresolved: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -94,17 +123,50 @@ const shiftSchema = new Schema<IShift>(
       enum: ["Scheduled", "Active", "Completed", "Cancelled"],
       default: "Active",
     },
+    priceSegments: {
+      type: [
+        {
+          _id: false,
+          pricePerLtr: { type: Number, required: true, min: 0 },
+          from: { type: Date, required: true },
+          openingMeter: { type: Number, default: null },
+          closingMeter: { type: Number, default: null },
+        },
+      ],
+      default: [],
+    },
+    awaitingPriceChangeMeter: { type: Boolean, default: false },
+    priceSplitUnresolved: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
 // Calculate litresSold and totalAmount before saving
 shiftSchema.pre("save", function (next) {
-  if (this.closingMeterReading !== undefined && this.openingMeterReading !== undefined) {
-    this.litresSold = Math.max(0, this.closingMeterReading - this.openingMeterReading);
-    if (this.litresSold > 0 && this.pricePerLtr > 0) {
-      this.totalAmount = this.litresSold * this.pricePerLtr;
-    }
+  if (this.closingMeterReading === undefined || this.openingMeterReading === undefined) {
+    return next();
+  }
+
+  this.litresSold = Math.max(0, this.closingMeterReading - this.openingMeterReading);
+  if (this.litresSold <= 0) return next();
+
+  // Segments only matter once the price actually changed during the shift. A
+  // single-segment shift is the ordinary case and behaves exactly as before.
+  const segments = (this.priceSegments ?? []).filter(
+    (s: any) => s.openingMeter !== null && s.closingMeter !== null
+  );
+
+  if (segments.length > 1) {
+    // Value each stretch of litres at the price that was in force for it.
+    this.totalAmount = segments.reduce((sum: number, s: any) => {
+      const litres = Math.max(0, (s.closingMeter ?? 0) - (s.openingMeter ?? 0));
+      return sum + litres * (s.pricePerLtr ?? 0);
+    }, 0);
+    return next();
+  }
+
+  if (this.pricePerLtr > 0) {
+    this.totalAmount = this.litresSold * this.pricePerLtr;
   }
   next();
 });

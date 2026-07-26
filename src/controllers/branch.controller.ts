@@ -9,6 +9,7 @@ import Staff from "../models/staff.model";
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Shift from "../models/shift.model";
 import Activity from "../models/activity.model";
+import { actorFrom } from "../utils/actor";
 import InviteToken from "../models/inviteToken.model";
 import Tank from "../models/tanks.model";
 import { transporter } from "../middlewares/transporter.middleware";
@@ -144,12 +145,16 @@ export const createBranch = async (req: AuthenticatedRequest, res: Response) => 
       $push: { branches: branch._id },
     });
 
+    // Only managedStations changes here. The caller already passed requireOwner,
+    // so their Staff.isOwner is the authority — writing a separate
+    // `isSuperManager: true` flag would be a second, divergable source of truth
+    // for the same fact.
     await Staff.findByIdAndUpdate(managerId, {
       $push: { managedStations: branch._id },
-      isSuperManager: true,
     });
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: parentStationId,
       type: "stock",
       title: "New Branch Created",
@@ -296,15 +301,12 @@ export const switchStation = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(404).json({ error: "Station not found" });
     }
 
-    // Derive ownership from the manager's HOME station (Staff.station never changes
-    // on switch), NOT a hardcoded `true`. Otherwise a branch manager could switch to
-    // their own station and mint an isSuperManager token — a privilege-escalation
-    // trusted by createStaff/updateStaff/bulkImport/salary. Ownership is constant
-    // regardless of which station the owner is currently viewing.
-    const homeStation = manager?.station
-      ? (await FillingStation.findById(manager.station).select("parentStation").lean()) as any
-      : null;
-    const isOwner = req.user?.role === "manager" && !!homeStation && !homeStation.parentStation;
+    // Read ownership from the manager's own Staff record, NOT a hardcoded `true`
+    // and no longer from "my home station is a root station" — that was true for
+    // hired managers too. Ownership is a property of the person and is constant
+    // regardless of which station the owner is currently viewing, so switching
+    // stations can never mint owner rights for someone who lacks them.
+    const isOwner = req.user?.role === "manager" && (manager as any)?.isOwner === true;
 
     const newToken = jwt.sign(
       {
@@ -315,6 +317,7 @@ export const switchStation = async (req: AuthenticatedRequest, res: Response) =>
         station: targetStationId,
         email: req.user?.email,
         isSuperManager: isOwner,
+        isOwner,
       },
       process.env.JWT_SECRET!,
       { expiresIn: "7d" }
@@ -491,6 +494,7 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
     const inviteUrl = `${process.env.FRONTEND_URL}/accept-invite?token=${token}`;
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: superManagerStation,
       type: "stock",
       title: "Branch Manager Invited",
@@ -666,6 +670,11 @@ export const acceptInvite = async (req: any, res: Response) => {
     const parentStation = await FillingStation.findOne({ branches: invite.station });
     if (parentStation) {
       Activity.create({
+        // Public route (invite acceptance) — there is no req.user yet, so the
+        // actor is the manager who just created their own account.
+        user: newManager._id,
+        userName: `${newManager.firstName} ${newManager.lastName}`.trim(),
+        userRole: "manager",
         fillingStation: parentStation._id,
         type: "stock",
         title: "Branch Manager Joined",
@@ -735,6 +744,7 @@ export const removeManager = async (req: AuthenticatedRequest, res: Response) =>
     await Staff.findByIdAndDelete(manager._id);
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: superManagerStation,
       type: 'stock',
       title: 'Branch Manager Removed',
@@ -1043,6 +1053,7 @@ export const transferStaff = async (req: AuthenticatedRequest, res: Response) =>
     ]);
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: superManagerStation,
       type: "stock",
       title: "Staff Transferred",
@@ -1106,6 +1117,7 @@ export const deleteBranch = async (req: AuthenticatedRequest, res: Response) => 
 
     // Log on the parent station
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: branch.parentStation,
       type: 'stock',
       title: 'Branch Deleted',

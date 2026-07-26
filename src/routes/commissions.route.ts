@@ -1,6 +1,7 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
+import { requireOwner } from "../middlewares/requireOwner";
 import {
   getCommissionsOverview,
   getStaffTracking,
@@ -24,13 +25,15 @@ router.get("/overview", checkRole("manager", "accountant", "supervisor"), getCom
 // Staff Tracking - accessible to manager, accountant, supervisor
 router.get("/staff-tracking", checkRole("manager", "accountant", "supervisor"), getStaffTracking);
 
-// Commission Structure - GET accessible to all, PUT only manager
+// Commission Structure — readable by the roles that work with it, but writing
+// it changes what every staff member earns. That is a pay decision, so it
+// belongs to the owner, not to a hired manager.
 router.get("/structure", checkRole("manager", "accountant", "supervisor"), getCommissionStructure);
-router.put("/structure", checkRole("manager"), updateCommissionStructure);
+router.put("/structure", requireOwner, updateCommissionStructure);
 
-// Bonus Structure - GET accessible to all, PUT only manager
+// Bonus Structure — same reasoning as the commission structure above.
 router.get("/bonus-structure", checkRole("manager", "accountant", "supervisor"), getBonusStructure);
-router.put("/bonus-structure", checkRole("manager"), updateBonusStructure);
+router.put("/bonus-structure", requireOwner, updateBonusStructure);
 
 // Payment History - accessible to manager, accountant
 router.get("/payment-history", checkRole("manager", "accountant"), getPaymentHistory);

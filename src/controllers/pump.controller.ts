@@ -4,7 +4,11 @@ import Pump from "../models/pump.model";
 import mongoose from "mongoose";
 import Tank from "../models/tanks.model";
 import Activity from "../models/activity.model";
+import { auditLog } from "../utils/auditLog";
+import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
+import { notifyStation } from "../utils/notifyHelpers";
+import { propagatePriceToShifts } from "../services/priceChange.service";
 
 // Fuel-type synonyms — industry codes and common names for the same product.
 // Any key in a group resolves to the full group so matching is always exhaustive.
@@ -389,6 +393,7 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
     // Log maintenance activity + notify supervisor when pump is set to Maintenance (fire-and-forget)
     if (status === "Maintenance") {
       Activity.create({
+        ...actorFrom(req.user),
         fillingStation,
         type: "maintenance",
         title: "Maintenance Scheduled",
@@ -492,6 +497,13 @@ export const deletePump = async (req: AuthenticatedRequest, res: Response) => {
     const tankSub = (stationTankDoc.tanks as any[]).find((t) => String(t._id) === String(deletedTankId));
     const fuelType = tankSub ? tankSub.fuelType : undefined;
 
+    auditLog(req, {
+      action: "Pump Deleted",
+      description: `Pump "${deletedPump?.title ?? pumpId}"${fuelType ? ` (${fuelType})` : ""} removed from the station`,
+      status: "Critical",
+      metadata: { pumpId, tankId: deletedTankId, fuelType },
+    });
+
     return res.status(200).json({
       message: "Pump deleted successfully",
       data: {
@@ -579,18 +591,40 @@ export const updatePricesByFuelTypes = async (req: AuthenticatedRequest, res: Re
       };
 
       if (Number(modified) > 0) {
-        Notification.create({
-          fillingStation,
+        // Everyone at the station, pushed live — the attendant on the forecourt
+        // needs this immediately, not on their next poll.
+        notifyStation(fillingStation, {
           type: "message",
           category: "price_update",
           title: "Fuel Price Updated",
           body: `${fuelType} price has been updated to ₦${newPrice.toLocaleString()} per litre`,
           severity: "info",
-          timestamp: new Date(),
           targetRole: "all",
-        }).catch((err) => console.error(`Notification error (price update ${fuelType}):`, err));
+          expiresInDays: 2,
+        });
+
+        // The price change has to reach the shifts too, or the pump sells at the
+        // new price while the shift is still valued at the old one and the
+        // difference lands on the attendant as a cash discrepancy.
+        await propagatePriceToShifts(
+          String(fillingStation),
+          objectIds,
+          fuelType,
+          newPrice
+        );
       }
     }
+
+    // Pump price sets revenue on every litre sold. Of everything a manager can
+    // touch this is the one most worth being able to trace back to a person and
+    // a minute, so it goes in the audit trail with the exact prices requested.
+    auditLog(req, {
+      action: "Fuel Price Updated",
+      description: entries
+        .map(([fuelType, price]) => `${fuelType} → ₦${price.toLocaleString()}/L`)
+        .join(", "),
+      metadata: { prices: Object.fromEntries(entries), summary: results },
+    });
 
     return res.status(200).json({
       message: "Prices updated",
@@ -659,6 +693,7 @@ export const scheduleMaintenance = async (req: AuthenticatedRequest, res: Respon
     const dateRange = `${start.toLocaleDateString()} to ${end.toLocaleDateString()}`;
 
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation,
       type: "maintenance",
       title: "Maintenance Scheduled",

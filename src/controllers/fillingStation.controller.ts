@@ -1,5 +1,7 @@
 ﻿import { Request, Response } from "express";
 import bcrypt from "bcrypt";
+import { AuthenticatedRequest } from "../interfaces";
+import { invalidateStationAuthCache } from "../config/redis";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
 import AdminLog from "../models/adminLog.model";
@@ -78,6 +80,10 @@ export const createFillingStation = async (req: Request, res: Response) => {
       role: "manager",
       station: newStation._id,
       password: hashedPassword,
+      // The registrant IS the business owner. Every manager hired later is a
+      // hired manager (isOwner defaults to false) and is barred from billing,
+      // payroll, pay structures and manager administration.
+      isOwner: true,
       twoFactorAuthEnabled,
       notificationPreferences,
     });
@@ -207,16 +213,31 @@ export const createFillingStation = async (req: Request, res: Response) => {
 
 export const getAllFillingStations = async (req: Request, res: Response) => {
   try {
-    const stations = await FillingStation.find().populate("staff");
+    // Admin-only at the route layer. `staff` is deliberately NOT populated —
+    // it would return every staff document, password hashes included.
+    const stations = await FillingStation.find().lean();
     res.json(stations);
   } catch (error: any) {
     res.status(500).json({ message: "Failed to fetch filling stations", error: error.message });
   }
 };
 
-export const getFillingStationById = async (req: Request, res: Response) => {
+export const getFillingStationById = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const station = await FillingStation.findById(req.params.id).populate("staff");
+    const { id } = req.params;
+    if (!Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid station id" });
+    }
+
+    // Staff may only read their own station; admins may read any.
+    if (req.user?.role !== "admin" && req.user?.station?.toString() !== id) {
+      return res.status(403).json({ message: "You can only view your own station" });
+    }
+
+    const station = await FillingStation.findById(id).populate(
+      "staff",
+      "-password -twoFactorAuthEnabled"
+    );
     if (!station) {
       return res.status(404).json({ message: "Filling station not found" });
     }
@@ -226,9 +247,67 @@ export const getFillingStationById = async (req: Request, res: Response) => {
   }
 };
 
-export const updateFillingStation = async (req: Request, res: Response) => {
+/**
+ * Fields the station owner may edit — business profile only.
+ *
+ * Everything commercial (plan, planId, planStatus, planExpiryDate, staffLimits,
+ * maxBranches, isActive, isDeleted, parentStation, staff, subscription dates) is
+ * excluded on purpose: those are set by the payment flow and by admins. Without
+ * this allowlist a single PUT could grant an unlimited plan, extend expiry
+ * forever, raise staff limits or suspend the station.
+ */
+const OWNER_EDITABLE_STATION_FIELDS = [
+  "name",
+  "address",
+  "email",
+  "phone",
+  "city",
+  "state",
+  "country",
+  "zipCode",
+  "ownerName",
+  "licenseNumber",
+  "taxId",
+  "establishmentDate",
+  "image",
+  "businessType",
+  "numberOfPumps",
+  "operationHours",
+  "tankCapacity",
+  "averageMonthlyRevenue",
+  "fuelTypesOffered",
+  "additionalServices",
+] as const;
+
+export const updateFillingStation = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const updated = await FillingStation.findByIdAndUpdate(req.params.id, req.body, {
+    const { id } = req.params;
+    if (!Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid station id" });
+    }
+
+    const isAdmin = req.user?.role === "admin";
+
+    // Owners edit their own station only. Admins may edit any station.
+    if (!isAdmin && req.user?.station?.toString() !== id) {
+      return res.status(403).json({ message: "You can only update your own station" });
+    }
+
+    // Admins bypass the allowlist — support genuinely needs to fix plan state.
+    const updates: Record<string, any> = {};
+    if (isAdmin) {
+      Object.assign(updates, req.body);
+    } else {
+      for (const field of OWNER_EDITABLE_STATION_FIELDS) {
+        if (req.body[field] !== undefined) updates[field] = req.body[field];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: "No editable fields supplied" });
+    }
+
+    const updated = await FillingStation.findByIdAndUpdate(id, updates, {
       new: true,
       runValidators: true,
     });
@@ -236,6 +315,10 @@ export const updateFillingStation = async (req: Request, res: Response) => {
     if (!updated) {
       return res.status(404).json({ message: "Filling station not found" });
     }
+
+    // The auth gate caches plan/active state per station — drop it so an admin
+    // edit to those fields takes effect immediately instead of after the TTL.
+    await invalidateStationAuthCache(id);
 
     res.json({ message: "Filling station updated successfully", station: updated });
   } catch (error: any) {

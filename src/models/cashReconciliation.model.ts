@@ -16,6 +16,13 @@ export interface ICashReconciliation extends Document {
   discrepancy: number; // cashReceived - expectedAmount (can be positive or negative)
   reconciledBy: mongoose.Types.ObjectId; // Cashier who reconciled
   status: "Pending" | "Matched" | "Flagged"; // Matched = discrepancy is 0, Flagged = discrepancy exists
+  /**
+   * The shift spanned a price change and the boundary meter reading was never
+   * recorded, so its expected amount is an estimate. Any discrepancy here is
+   * likely arithmetic, not a cash shortage — it must not be read as the
+   * attendant being short until a supervisor resolves the split.
+   */
+  priceSplitUnresolved?: boolean;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -90,6 +97,7 @@ const cashReconciliationSchema = new Schema<ICashReconciliation>(
       enum: ["Pending", "Matched", "Flagged"],
       default: "Pending",
     },
+    priceSplitUnresolved: { type: Boolean, default: false },
     notes: {
       type: String,
       trim: true,

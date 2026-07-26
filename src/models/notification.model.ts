@@ -29,7 +29,27 @@ export interface INotification extends Document {
   isRead: boolean;
   severity: "info" | "warning" | "critical" | null;
   timestamp: Date;
-  targetRole: "manager" | "supervisor" | "accountant" | "cashier" | "attendant" | "all";
+  /**
+   * Who this notification is for.
+   *
+   * "owner"   — the business owner ONLY. Money, the subscription, the account
+   *             itself. Hired managers never see these.
+   * "manager" — station management: the owner AND every hired manager. Day-to-day
+   *             operations both are responsible for.
+   * "all"     — everyone at the station.
+   *
+   * The owner's audience is ["manager", "owner", "all"], so they see the
+   * operational stream plus their own. See resolveAudience() in
+   * notification.controller.
+   */
+  targetRole:
+    | "owner"
+    | "manager"
+    | "supervisor"
+    | "accountant"
+    | "cashier"
+    | "attendant"
+    | "all";
   expiresAt: Date;
 }
 
@@ -100,7 +120,7 @@ const NotificationSchema = new Schema<INotification>(
     },
     targetRole: {
       type: String,
-      enum: ["manager", "supervisor", "accountant", "cashier", "attendant", "all"],
+      enum: ["owner", "manager", "supervisor", "accountant", "cashier", "attendant", "all"],
       default: "manager",
     },
     expiresAt: {

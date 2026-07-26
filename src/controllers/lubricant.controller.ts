@@ -6,7 +6,8 @@ import lubricantSaleModels from "../models/lubricant-sale.models";
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import mongoose from "mongoose";
 import Activity from "../models/activity.model";
-import Notification from "../models/notification.model";
+import { actorFrom } from "../utils/actor";
+import { notifyStation } from "../utils/notifyHelpers";
 import { emitToStation } from "../services/socket.service";
 
 export const addLubricant = async (req: AuthenticatedRequest, res: Response) => {
@@ -360,6 +361,7 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
 
     // Log sale activity (fire-and-forget)
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation,
       type: "sale",
       title: `Sale completed â€” ${lubricant.productName}`,
@@ -965,16 +967,17 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       const newQty = lubricant.qtyInStock;
       const reOrder = lubricant.reOrderLevel || 0;
       if (reOrder > 0 && newQty <= reOrder) {
-        Notification.create({
-          fillingStation: stationObjectId,
+        // Owner + every hired manager (see the "manager" audience rule), pushed
+        // live rather than waiting for the next bell poll.
+        notifyStation(stationObjectId, {
           type: "alert",
           category: "low_stock",
           title: "Lubricant Low Stock",
           body: lubricant.productName + " is running low — " + newQty + " unit(s) remaining (reorder level: " + reOrder + ").",
           severity: newQty === 0 ? "critical" : "warning",
-          timestamp: new Date(),
           targetRole: "manager",
-        }).catch((err) => console.error("Notification error (lubricant low stock):", err));
+          expiresInDays: 1,
+        });
       }
 
       // ðŸ“ Prepare item for transaction
@@ -1016,6 +1019,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       .map((i) => `${i.productName} Ã—${i.qtySold}`)
       .join(", ");
     Activity.create({
+      ...actorFrom(req.user),
       fillingStation: stationObjectId,
       type: "sale",
       title: `Sale completed â€” ${processedItems.length > 1 ? `${processedItems.length} items` : processedItems[0].productName}`,

@@ -1,6 +1,7 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
+import { requireOwner, requireOwnerOrRoles } from "../middlewares/requireOwner";
 import {
   getOrCreateDraft,
   saveDraft,
@@ -12,6 +13,7 @@ import {
   getConsolidatedPayroll,
   getSalaryConfig,
   configureSalary,
+  getSalaryStructure,
 } from "../controllers/salary.controller";
 
 const router = express.Router();
@@ -27,23 +29,36 @@ router.put("/draft/:id", checkRole("accountant"), saveDraft);
 // Accountant: submit draft to manager
 router.post("/draft/:id/submit", checkRole("accountant"), submitDraft);
 
-// Manager: list submitted & validated drafts
-router.get("/pending", checkRole("manager"), getPendingDrafts);
+// Read-only salary structure. Owner and accountant see every row; a hired
+// manager sees their own. Creates nothing — safe to open in any month.
+router.get(
+  "/structure",
+  checkRole("manager", "accountant"),
+  getSalaryStructure
+);
 
-// Manager: validate a submitted draft
-router.post("/:id/validate", checkRole("manager"), validateDraft);
+// Payroll is the owner's, not the station's. A hired manager runs operations;
+// what everyone earns — including the other managers and the owner — is not
+// theirs to see or approve. The accountant still prepares it.
 
-// Both: list validated history (summary only)
-router.get("/history", checkRole("manager", "accountant"), getHistory);
+// Owner: list submitted & validated drafts
+router.get("/pending", requireOwner, getPendingDrafts);
 
-// Manager (self) or super manager: read/write salary config for a staff member
+// Owner: validate (approve) a submitted draft
+router.post("/:id/validate", requireOwner, validateDraft);
+
+// Owner or accountant: list validated history (summary only — the wage bill)
+router.get("/history", requireOwnerOrRoles("accountant"), getHistory);
+
+// Own record, or the owner for anyone else's — enforced in the controller so a
+// hired manager can still read their OWN salary config here.
 router.get("/staff/:staffId/config", checkRole("manager"), getSalaryConfig);
 router.patch("/staff/:staffId/config", checkRole("manager"), configureSalary);
 
-// Super manager: consolidated payroll across all branches
-router.get("/consolidated", checkRole("manager"), getConsolidatedPayroll);
+// Owner: consolidated payroll across all branches
+router.get("/consolidated", requireOwner, getConsolidatedPayroll);
 
-// Both: get a full salary record by id
-router.get("/:id", checkRole("manager", "accountant"), getRecord);
+// Owner or accountant: full salary record by id
+router.get("/:id", requireOwnerOrRoles("accountant"), getRecord);
 
 export default router;

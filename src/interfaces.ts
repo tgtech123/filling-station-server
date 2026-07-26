@@ -10,7 +10,10 @@ export interface IUserPayload {
   lastName?: string;
   permissions?: string[];
   station?: Types.ObjectId;
+  /** Derived from Staff.isOwner — kept under the old name so existing clients keep working. */
   isSuperManager?: boolean;
+  /** The station owner (business owner), as opposed to a hired manager. */
+  isOwner?: boolean;
 }
 
 export interface AuthenticatedRequest extends Request {

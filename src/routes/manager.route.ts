@@ -1,6 +1,7 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
+import { requireOwner } from "../middlewares/requireOwner";
 import {
   getSalesOverview,
   getCashOverview,
@@ -25,7 +26,9 @@ router.post("/reports/export", exportReport);
 // Tax report (read-only view of accountant-computed data)
 router.get("/tax-report", getTaxReport);
 
-// Activity Logs
-router.get("/activity-logs", getActivityLogs);
+// Activity Logs — the audit trail of who did what, including the managers
+// themselves. The people it holds accountable should not be the ones reading
+// it, so this stays with the owner.
+router.get("/activity-logs", requireOwner, getActivityLogs);
 
 export default router;

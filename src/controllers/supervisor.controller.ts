@@ -1597,9 +1597,14 @@ export const getStaffPerformanceDetail = async (req: AuthenticatedRequest, res: 
 
     const shiftTypeData = Object.values(shiftTypeStats);
 
-    // Calculate efficiency and ratings (placeholders - would need actual data)
-    const efficiency = completedShifts > 0 ? 93 + Math.random() * 5 : 0;
-    const customerRating = 4.5 + Math.random() * 0.5;
+    // Efficiency: same discrepancy-based formula as the staff-performance list —
+    // start at 100, deduct as discrepancies mount, floor at 0. Deterministic, not random.
+    const efficiency =
+      completedShifts > 0
+        ? Math.max(0, 100 - (discrepancyCount / completedShifts) * 50)
+        : 0;
+    // No customer-rating source exists yet — return null rather than a fabricated score.
+    const customerRating: number | null = null;
     const errorCount = discrepancyCount;
 
     // Sales target
@@ -1618,7 +1623,7 @@ export const getStaffPerformanceDetail = async (req: AuthenticatedRequest, res: 
         },
         quarterSalesPerformance: shiftTypeData.length > 0 ? shiftTypeData[0] : null,
         performanceRating: {
-          customerRating: Math.round(customerRating * 10) / 10,
+          customerRating, // null until a real rating source is wired
           errorCount,
           efficiency: Math.round(efficiency * 10) / 10,
         },
@@ -1626,7 +1631,7 @@ export const getStaffPerformanceDetail = async (req: AuthenticatedRequest, res: 
           current: totalSales,
           monthly: monthlyTarget,
           progress: Math.round(targetProgress * 10) / 10,
-          fromLastQuarter: 1.5, // Placeholder
+          fromLastQuarter: null, // no prior-period comparison computed yet
         },
         totalLitresSold,
         totalSales,

@@ -201,7 +201,9 @@ export async function applyDueDowngrade(
       ? `Your plan has changed to ${(plan as any).name}, valid for 30 days.${overageNote}`
       : `Your plan has changed to ${(plan as any).name}. Please renew to activate the new billing period.${overageNote}`,
     severity: conflicts.length ? "warning" : "info",
-    targetRole: "manager",
+    // Plan state is billing. The owner acts on it; hired managers only feel it
+    // as staff limits, which surface where they try to add staff.
+    targetRole: "owner",
     expiresInDays: 30,
   });
 

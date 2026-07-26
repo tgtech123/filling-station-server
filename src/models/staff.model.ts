@@ -36,6 +36,18 @@ export interface IStaff extends Document {
   };
   managedStations: mongoose.Types.ObjectId[];
   isSuperManager: boolean;
+  /**
+   * The station OWNER — the person who registered the business. Exactly one per
+   * root station (the manager created by createFillingStation). Every other
+   * `manager` is a HIRED manager: they run day-to-day operations but must not
+   * reach the owner's controls (billing, payroll, pay structures, other
+   * managers, station identity).
+   *
+   * This is the authoritative flag. `isSuperManager` in the JWT is derived from
+   * it — do not infer ownership from `role === "manager"`, which is true for
+   * hired managers too.
+   */
+  isOwner: boolean;
   gasStation: boolean;
   department: "fuel" | "gas" | "both";
   createdAt?: Date;
@@ -89,6 +101,7 @@ const StaffSchema = new Schema<IStaff>(
     },
     managedStations: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
     isSuperManager: { type: Boolean, default: false },
+    isOwner: { type: Boolean, default: false },
     gasStation: { type: Boolean, default: false },
     department: { type: String, enum: ["fuel", "gas", "both"], default: "fuel" },
   },

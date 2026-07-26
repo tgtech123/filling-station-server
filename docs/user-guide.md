@@ -54,19 +54,40 @@ FuelDesk is web-based — you only need a browser (Chrome, Edge, Firefox, or Saf
 
 ## 2. User Roles — Who Does What?
 
-Every person who uses FuelDesk is given a **role**. Your role decides what you can see and what you can do. There are seven roles:
+Every person who uses FuelDesk is given a **role**. Your role decides what you can see and what you can do.
 
 | Role | Who it is | What they can do |
 |------|-----------|-----------------|
-| **Manager** | The station owner | Full access to everything — staff, finances, reports, settings, subscriptions |
-| **Super Manager** | Owner of multiple branches | Same as Manager but across all branches at once |
+| **Owner** | The person who registered the station — the business owner | Everything a Manager can do, **plus** billing, payroll, pay structures, hiring and removing managers, fuel pricing and station settings |
+| **Manager** | A manager the owner hired to run the station | Runs day-to-day operations: staff, shifts, stock, procurement, reports. Cannot touch billing, payroll or fuel prices |
+| **Super Manager** | An owner who runs multiple branches | Same as Owner, but across all branches at once |
 | **Supervisor** | Senior operations lead | Approve shifts, manage attendants, view reports, submit dip readings |
-| **Accountant** | Finance/accounting staff | View all financial data, run statements, manage payroll drafts and expenses, and operate the full **Accounting Suite** (chart of accounts, journals, payables, receivables, tax, close) |
+| **Accountant** | Finance/accounting staff | View all financial data, run statements, prepare payroll drafts and expenses, and operate the full **Accounting Suite** (chart of accounts, journals, payables, receivables, tax, close) |
 | **Cashier** | POS operator | Record sales, manage daily reconciliation, handle lubricant transactions |
 | **Attendant** | Pump operator | Start and end shifts, record pump readings, view own performance |
 | **Admin** | FuelDesk platform team | Manage all stations, subscriptions, and platform settings (not your station staff) |
 
-> **Important:** Only the Manager can create staff accounts, set roles, and delete records. If you are not sure what you can access, ask your station manager.
+### Owner and Manager — what's the difference?
+
+Both log in as a **manager**, and both see the same dashboards, shifts, stock and reports. The difference is that some things belong to the **business**, not to the day-to-day running of the station — and those stay with the owner alone.
+
+**Only the Owner can:**
+
+- Pay for, upgrade, renew or downgrade the subscription, and see billing history
+- See and set **anyone's salary**, approve payroll, and view the total wage bill
+- Change **commission and bonus structures** — what everyone earns
+- **Add or remove managers**, and edit another manager's account
+- Change **fuel prices**
+- Delete a pump or a tank
+- Edit the station's profile (name, address, licence, tax ID)
+- Turn **Emergency Lockdown** on or off
+- Read the **Activity Logs** — the record of who did what
+
+**Every manager, owner or hired, can:** run the dashboard, add and manage attendants, cashiers, supervisors and accountants, approve shifts and stock reconciliations, manage tanks, pumps, deliveries and procurement, handle lubricants and gas, record expenses, and run every report.
+
+> **Important:** There is only ever **one owner** per station. If ownership needs to change hands — the business was sold, or the owner has left — contact FuelDesk support; they can transfer it to another manager.
+
+> **A hired manager cannot see what anyone else is paid**, including the owner. They can see their own salary and nobody else's.
 
 ---
 
@@ -232,7 +253,7 @@ The manager sees a full overview of their station:
 
 ## 7. Managing Your Staff
 
-> **Who can do this:** Manager only
+> **Who can do this:** the Owner and any Manager. **Creating, editing or removing a *manager* is the Owner's alone**, and the Owner's own account cannot be deleted or edited by anyone else.
 
 ### 7.1 Adding a New Staff Member
 
@@ -244,7 +265,7 @@ The manager sees a full overview of their station:
    - **Phone Number**
    - **Address, City, State, Zip Code**
    - **Emergency Contact**
-   - **Role** — choose from: Supervisor, Accountant, Cashier, Attendant
+   - **Role** — choose from: Supervisor, Accountant, Cashier, Attendant. **Manager** appears in this list only if you are the station owner
    - **Department** — Fuel, Gas, or Both
    - **Shift Type** — pick a built-in type (One-Day-Morning, One-Day-Evening, Full-Time, 24/7, Day-Off) **or create your own**: click **+ New shift type**, enter a name (e.g. "Night Shift"), optional start/end times, and whether it belongs to the morning or evening schedule group, then click **Create & Select**. Custom types are saved for your station and appear automatically in the supervisor's shift scheduling page.
    - **Password** — a temporary password for first login (advise them to change it)
@@ -253,7 +274,27 @@ The manager sees a full overview of their station:
 
 The staff member can now log in with the email and password you set.
 
-> **Tip:** After adding staff, share their login credentials privately. Advise them to change their password immediately after first login.
+> **Tip:** After adding staff, share their login credentials privately. Advise them to change their password immediately after first login — they can do this themselves under **System Settings > Change Password** (see Section 19.2). Nobody else needs to be involved.
+
+**Hiring a manager (owner only):**
+
+Only the station owner can create a manager account. The process is the same as above — you choose the password and pass it to them privately, and they change it themselves on first login.
+
+Two things happen automatically when a manager is onboarded:
+
+- They appear in the **salary structure** straight away, prefilled with the pay type, salary, tax rate and bank details you entered. The accountant does not have to add them by hand.
+- They get every operational permission immediately, but **not** billing, payroll or pricing — see Section 2.
+
+**How many managers can I have?** It depends on your plan, and **the owner counts as one of them**:
+
+| Plan | Managers | Meaning in practice |
+|------|----------|---------------------|
+| Free | 1 | Just you |
+| Pro | 2 | You + 1 hired manager |
+| Pro Max | 3 | You + 2 hired managers |
+| Enterprise and above | Unlimited | — |
+
+If you try to add one more than your plan allows, FuelDesk will tell you the limit has been reached and offer an upgrade.
 
 ### 7.2 Editing a Staff Member
 
@@ -314,6 +355,8 @@ Your shift is now active. The system has recorded your start time and opening re
 
 Your shift will now appear as **Pending Approval** in the supervisor's queue.
 
+> **Note:** if the fuel price changed while you were working, the amount is worked out from both prices — see Section 8.4 below.
+
 ### 8.3 For Supervisors — Approving Shifts
 
 1. Click **Shift Approval** in the left menu (or it appears on your dashboard)
@@ -322,14 +365,35 @@ Your shift will now appear as **Pending Approval** in the supervisor's queue.
 4. If everything is correct, click **Approve**
 5. If there is an error, you can note the issue before approval
 
-### 8.4 Viewing Shift History
+### 8.4 For Attendants — If the Price Changes During Your Shift
+
+Sometimes the owner changes the fuel price while you are still on the pump. When that happens you will get an alert on your screen and phone:
+
+> **Record your meter reading now**
+
+**What to do — it takes ten seconds:**
+
+1. Look at your pump's totaliser and read the number **right now**
+2. Open your shift screen — the prompt is waiting there
+3. Type the reading in exactly as it appears
+4. Click **Submit**
+
+That is all. Carry on selling as normal at the new price.
+
+**Why it matters to you:** the reading is the line between the old price and the new one. Litres you sold *before* it are counted at the old price; litres after, at the new price. This is what makes the cash you hand in at the end of your shift match exactly what the system expects — so a price change never shows up as money missing from your shift.
+
+> **If you were busy and missed it:** don't worry, and don't guess a number. Your shift is marked **"price change — under review"** and a supervisor sorts out the split. You will **not** be recorded as short.
+
+**You can keep working normally while the prompt is open** — it does not block sales, and you can enter the reading a moment later. Just do it as soon as you safely can, because the longer you wait, the more litres end up on the wrong side of the line.
+
+### 8.5 Viewing Shift History
 
 1. Go to **Shifts** in the menu
 2. You will see a table with all past shifts — date, attendant, pump, litres, amount, status
 3. Use the search or date filter to narrow down results
 4. Click any row to see the full shift detail
 
-### 8.5 Scheduling Attendants
+### 8.6 Scheduling Attendants
 
 Supervisors and managers can create attendance schedules:
 1. Go to **Schedule Shift** in the menu
@@ -396,14 +460,50 @@ The system will compare this against expected levels based on recorded sales and
 
 ### 9.5 Updating Fuel Prices
 
-> Done by the Manager
+> **Owner only.** Fuel price sets what the business earns on every litre, so it is not something a hired manager can change.
 
 1. Go to **Product Management** > **Pricing** (or look for a **Prices** option in the menu)
 2. Click **Edit Price** for the fuel type you want to update
 3. Enter the new price per litre
 4. Click **Save**
 
-All future shift calculations will use the new price. Historical shifts keep their original prices.
+The new price applies to **every pump of that fuel type, for everyone, immediately** — attendants, cashiers, supervisors and your other managers all see the same figure. There is no separate price to update anywhere else.
+
+**Who gets told:** everyone at the station receives a notification the moment the price changes, so nobody sells at yesterday's rate by mistake.
+
+#### What happens to shifts that are already running
+
+This is the part that used to cause arguments about missing cash, so it is worth understanding.
+
+A pump meter counts **litres**. Money is litres × the price at the moment of sale. If you change the price at 10:20 and an attendant has been selling since 06:00, that shift genuinely has *two* prices in it.
+
+FuelDesk handles it like this:
+
+| Shift state | What happens |
+|-------------|--------------|
+| **Not started yet** (scheduled for later today or a future day) | Simply picks up the new price. Nothing has been sold, so there is nothing to split |
+| **Currently running** | The attendant is asked to record their meter reading right now. Everything sold before that reading is counted at the old price, everything after at the new one |
+| **Already finished** | Untouched. Completed shifts always keep the price they were sold at |
+
+**What the attendant does** — see Section 8.4. It takes about ten seconds and it is the only thing they need to do.
+
+**Worked example:**
+
+```
+Shift 06:00–14:00, PMS
+  Opening meter        12,000 L
+  Price changed 10:20   ₦1,000 → ₦1,150
+  Meter at change      12,300 L   ← attendant enters this
+  Closing meter        12,500 L
+
+  300 L × ₦1,000 = ₦300,000
+  200 L × ₦1,150 = ₦230,000
+  Expected cash  = ₦530,000   ← exactly what they should hand over
+```
+
+> **If the attendant misses the prompt:** the shift is marked **"price change — under review"** and is passed to a supervisor to confirm the split. It is *not* recorded as the attendant being short. A price change is never treated as a cash discrepancy against the person on the pump.
+
+**Historical shifts keep their original prices** — changing today's price never rewrites yesterday's takings.
 
 ### 9.6 Viewing Pump Performance
 
@@ -739,6 +839,8 @@ At the end of the day, the cashier counts the physical cash and reconciles it wi
 
 A copy of the reconciliation is saved and visible to the Manager and Accountant.
 
+> **"Price change — under review"**: if a shift spanned a fuel price change and the attendant did not record their meter reading at the changeover (Section 8.4), the expected cash for that shift is an **estimate**, and the reconciliation says so. Treat the difference as arithmetic to be confirmed, **not** as the attendant being short. A supervisor confirms how many litres were sold at each price, and the figure settles.
+
 ### 12.2 Dip Reading Submission (Supervisor)
 
 See Section 9.4 above. After submitting a dip reading, the system compares tank levels against expected consumption from shift records. Any large variance triggers an alert.
@@ -872,16 +974,49 @@ Salary is processed monthly through an approval workflow:
 4. Review and adjust individual amounts if needed
 5. Click **Save Draft**
 
-**Step 2 — Accountant Submits to Manager:**
+**Step 2 — Accountant Submits to the Owner:**
 1. Once the draft is reviewed, click **Submit Draft**
-2. It moves to the manager's review queue
+2. It moves to the owner's review queue
 
-**Step 3 — Manager Approves:**
+**Step 3 — Owner Approves:**
 1. Go to **Payroll** > **Pending Drafts**
 2. Review the salary batch
 3. Click **Validate** to approve it
 
 Once validated, the salaries are recorded and appear in the payroll history.
+
+> Payroll approval is the **owner's** — a hired manager cannot approve a salary batch or see the total wage bill.
+
+#### Managers in the salary structure
+
+Managers are paid staff, so they appear in the salary table like everyone else and count toward the payroll total. Their rows are **read-only to the accountant** — shown, included in the totals, but not editable there.
+
+That is deliberate: what a manager earns is the **owner's** decision. To change it, the owner goes to **Staff Management > (the manager) > Salary Configuration**. If the accountant tries to edit a manager's row, it simply reverts and a note explains why.
+
+**Newly hired managers appear automatically.** When the owner onboards a manager, they are added to the current month's salary structure right away — prefilled with their pay type, salary, tax rate and bank details. Nobody has to key them in.
+
+> If the month has already been **submitted or validated**, a new hire is not inserted into it — that month is closed. They appear in the next month's draft.
+
+#### Who can see the salary structure
+
+| Who | What they see |
+|-----|---------------|
+| **Owner** | Every row, plus the total payroll |
+| **Accountant** | Every row (manager rows read-only), plus the total payroll |
+| **Hired manager** | **Their own row only** — their salary, bonuses, deductions and take-home |
+| Everyone else | No access |
+
+The structure can be opened for any month, including one where payroll has not been started yet — it is a read-only view and opening it changes nothing.
+
+#### Payroll history by month
+
+> Owner and Accountant
+
+1. Go to **Payroll** > **History**
+2. Use the **month filter** to jump to a specific month, or set a **from / to** range to see a period
+3. Leave the filter empty to see every validated month, newest first
+
+Each row shows the month, the total payroll, who prepared it, who approved it and when. Click a month to open the full breakdown per staff member.
 
 ### 14.2 Commission Structures
 
@@ -1018,6 +1153,10 @@ Note also: only the **owner** can assign the **Manager** role to a staff member,
 
 ## 17. Subscription & Billing
 
+> **Who can do this:** the **Owner only**. The subscription is the owner's financial relationship with FuelDesk — their card, their invoices, their plan. Hired managers do not see billing at all, and cannot upgrade, renew, downgrade or cancel.
+>
+> Everyone can see **which plan** the station is on, because that determines which features are available — but not what it costs or what has been paid.
+
 ### 17.1 Viewing Your Current Plan
 
 1. Go to **System Settings** (click the gear icon or find it in the menu)
@@ -1064,7 +1203,7 @@ If you are already on the highest available plan (e.g., Enterprise Max), there i
 
 ### 17.4 Downgrading Your Plan
 
-> **Who can do this:** Manager only
+> **Who can do this:** Owner only
 
 You can move to a lower-priced plan if your station's usage fits within that plan's limits (staff count, branch count, etc.). The downgrade does **not** happen immediately — it is scheduled for the end of your current billing period so you keep all your current features until you have paid for.
 
@@ -1150,16 +1289,48 @@ Click the bell to open the notification dropdown:
 
 ### 18.2 Types of Notifications
 
-| Notification | Who receives it | What it means |
-|-------------|----------------|---------------|
-| Low stock alert | Manager, Supervisor | A tank or product is running low |
-| Shift completed | Supervisor, Manager | An attendant has ended a shift |
-| Shift approval needed | Supervisor | A shift is waiting for your sign-off |
-| Payment confirmed | Manager | A subscription payment was successful |
-| New staff added | Manager | A new account was created on your station |
-| Plan expiring | Manager | Your subscription expires in 7 days or fewer |
-| Emergency mode activated | All staff | The station has entered emergency lockdown |
-| Maintenance due | Manager, Supervisor | A pump is due for maintenance |
+Notifications are split between the **business** and the **station**. Anything about money, the subscription or the account itself goes to the **owner alone**; anything about running the station goes to the owner *and* the hired managers.
+
+**Operational — Owner and all Managers:**
+
+| Notification | Also goes to | What it means |
+|-------------|--------------|---------------|
+| Low stock alert (fuel, lubricant, cylinder, gas tank) | Supervisor | A tank or product is running low |
+| Shift completed | Supervisor | An attendant has ended a shift |
+| Shift approval needed | Supervisor | A shift is waiting for sign-off |
+| New staff added | — | A new account was created on your station |
+| Maintenance due | Supervisor | A pump is due for maintenance |
+| Cash discrepancy flagged | Accountant | A reconciliation did not balance |
+| Delivery arrived / stock received | — | Product has been added to inventory |
+
+**Business — Owner only:**
+
+| Notification | What it means |
+|-------------|---------------|
+| Payment confirmed | A subscription payment was successful |
+| Subscription activated | Your new plan is live |
+| SMS credits activated | Your credit purchase has been applied |
+| Downgrade scheduled / applied | Your plan is changing |
+| Plan expiring | Your subscription expires in 7 days or fewer |
+| Account suspended / reactivated | FuelDesk has changed your account status |
+| Password reset requested on the owner account | Someone asked to reset **your** login |
+
+**Everyone at the station:**
+
+| Notification | What it means |
+|-------------|---------------|
+| Fuel price updated | The price per litre has changed — sell at the new rate |
+| Emergency mode activated | The station has entered emergency lockdown |
+
+**Attendant, personal:**
+
+| Notification | What it means |
+|-------------|---------------|
+| Record your meter reading now | The price changed during your shift — see Section 8.4 |
+| Cash discrepancy on your shift | Your reconciliation did not balance |
+| Price change on your shift — under review | The price moved mid-shift; a supervisor is confirming the split. **No action needed, and you are not recorded as short** |
+
+> Notifications about *you* — a failed login on your account, a support ticket you raised, your own shift — only ever go to you, whatever your role.
 
 ### 18.3 Notification Preferences
 
@@ -1195,6 +1366,12 @@ All staff can edit their own profile:
 
 > Choose a password that is at least 8 characters long. Use a mix of uppercase letters, lowercase letters, numbers, and symbols.
 
+**This applies to everyone — including managers.** Whoever created your account gave you a starting password; change it here the first time you log in, and only you will know it from then on. Nobody else can change your password for you, and the owner cannot see it.
+
+You can also change your **email address** here at the same time. Either way you must enter your current password first, which is what stops someone using an unattended screen to take over your account.
+
+> Still works if your subscription has expired — you are never locked out of your own credentials.
+
 ### 19.3 Two-Factor Authentication (2FA)
 
 2FA adds an extra layer of security. Every time you log in, you will need to enter a one-time code sent to your email.
@@ -1217,7 +1394,7 @@ All staff can edit their own profile:
 
 Or click the **sun/moon icon** in the top navigation bar for a quick toggle.
 
-### 19.5 Active Sessions (Manager Only)
+### 19.5 Active Sessions (Managers)
 
 You can see which devices are currently logged into your account:
 1. Go to **System Settings** > **Security** > **Active Sessions**
@@ -1391,6 +1568,27 @@ If you cannot log in at all:
 **Q: I am a new cashier. What do I need to do first?**
 Your manager will create your account and share your login credentials. Log in, change your password immediately (Section 19.2), and then start recording daily sales and reconciliations.
 
+**Q: I am a manager, but Billing / Payroll / Fuel Prices are missing or say "owner only". Is my account broken?**
+No — that is how it is meant to work. A station has one **owner** (the person who registered it) and up to two other managers, depending on the plan. Anything to do with the business itself — the subscription, salaries, pay structures, fuel pricing, hiring managers, station details — stays with the owner. Everything about **running** the station is yours as normal. See Section 2 for the full split.
+
+**Q: I created my account for a manager. Do they have to keep the password I gave them?**
+No, and they shouldn't. Give them the password privately, and they change it themselves at **System Settings > Change Password** the first time they log in (Section 19.2). After that only they know it — you cannot see or recover it, which is exactly the point: it means actions in the system can be traced to a real person.
+
+**Q: I hired a manager. Do I need to tell the accountant to add them to payroll?**
+No. The moment you onboard them they appear in the current month's salary structure, prefilled with the pay type, salary, tax rate and bank details you entered. If the month has already been submitted or approved, they appear in next month's instead. Their row is read-only to the accountant — only you can change a manager's pay, from **Staff Management > (the manager) > Salary Configuration**.
+
+**Q: I changed the fuel price while attendants were selling. Is their cash going to come up wrong?**
+No. Attendants on an active shift are asked to record their pump meter reading at that moment. Litres sold before it are counted at the old price and litres after at the new one, so the expected cash matches exactly what they hand in. If an attendant misses the prompt, the shift is marked **"price change — under review"** for a supervisor to confirm the split — it is never counted as the attendant being short. See Sections 8.4 and 9.5.
+
+**Q: An attendant says they got a "record your meter reading" alert. What is it?**
+The fuel price changed during their shift. They read the pump totaliser and enter that number — it takes about ten seconds and marks the boundary between the old price and the new one. They can carry on selling normally, and the sooner they enter it, the more accurate the split.
+
+**Q: Why can't I see the other managers' salaries?**
+Only the owner sees what everyone earns. As a hired manager you can see your **own** salary, bonuses, deductions and take-home in the salary structure — and nobody else's, including the owner's.
+
+**Q: Our owner has left the business. How do we move ownership to someone else?**
+Contact FuelDesk support. Ownership can be transferred to any existing manager on the station; the previous owner becomes an ordinary manager in the same step. It cannot be done from inside the station's own dashboard, precisely because it is the kind of change that needs to be verified.
+
 **Q: An attendant started a shift but forgot to enter the correct meter reading. What now?**
 A Supervisor or Manager can review the shift detail and flag it. Contact your supervisor — they can note the discrepancy before approving the shift.
 
@@ -1462,5 +1660,11 @@ The VAT is added at checkout, collected from you (the customer), and settled int
 
 ---
 
-*FuelDesk User Guide — Version 2.1*
+*FuelDesk User Guide — Version 2.2 (July 2026)*
 *For support, contact the FuelDesk team through the Help section inside the application.*
+
+**What changed in 2.2:**
+- **Owner and Manager are now separate** — a station can have several managers, but only one owner. Billing, payroll, pay structures, fuel pricing, manager administration, station settings, emergency lockdown and activity logs are the owner's (Sections 2, 7, 9.5, 14, 17)
+- **Fuel price changes now handle running shifts correctly** — an attendant records their meter reading at the changeover, and the shift is valued at both prices, so a price change is never recorded as missing cash (Sections 8.4, 9.5, 12.1)
+- **Managers appear in the salary structure**, prefilled the moment they are onboarded, and read-only to the accountant. Payroll history can be filtered by month (Section 14.1)
+- **Notifications are split** between owner-only business alerts and shared operational ones (Section 18.2)
