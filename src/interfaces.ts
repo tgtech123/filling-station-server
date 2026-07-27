@@ -14,6 +14,8 @@ export interface IUserPayload {
   isSuperManager?: boolean;
   /** The station owner (business owner), as opposed to a hired manager. */
   isOwner?: boolean;
+  /** Display label only — "Owner" for the owner, otherwise the capitalised role. */
+  displayRole?: string;
 }
 
 export interface AuthenticatedRequest extends Request {
