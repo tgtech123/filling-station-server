@@ -17,6 +17,10 @@ const router = express.Router();
 const mgr     = checkRole("manager", "admin");
 const staff   = checkRole("manager", "admin", "cashier", "attendant", "supervisor");
 const mgrAcct = checkRole("manager", "admin", "accountant");
+// Anyone who may log a loyalty sale, plus the accountant. Reading the settings
+// is what gives them the points rate and the price per litre — without it the
+// sale form cannot prefill a price or preview the points being earned.
+const anyStaff = checkRole("manager", "admin", "cashier", "attendant", "supervisor", "accountant");
 
 const portalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -29,7 +33,9 @@ const portalLimiter = rateLimit({
 // ─── Authenticated staff routes ───────────────────────────────────────────────
 router.use("/staff", requireAuth);
 
-router.get("/staff/settings",         mgrAcct,     getSettings);
+// Readable by everyone who logs sales — it carries the points rate and prices,
+// not anything sensitive. Changing it stays with the manager/owner.
+router.get("/staff/settings",         anyStaff,    getSettings);
 router.patch("/staff/settings",       mgr,         updateSettings);
 router.get("/staff/sms-credits",      mgr,         getSmsCreditsStatus);
 

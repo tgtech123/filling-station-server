@@ -12,6 +12,7 @@ import {
   getGasStaff, assignGasStaff, unassignGasStaff,
 } from "../controllers/gasSettings.controller";
 import { requireGasEnabled } from "../middlewares/gasEnabled.middleware";
+import { requireGasDepartment } from "../middlewares/requireDepartment";
 import {
   createProcurement, listProcurements, getProcurement,
   confirmDelivery, validateProcurement, cancelProcurement, resendOrderEmail,
@@ -57,6 +58,13 @@ router.patch("/toggle", mgr,   toggleGasDepartment);
 
 // ─── All routes below require gas to be enabled ──────────────────────────────
 router.use(requireGasEnabled);
+
+// …and, for cashiers and attendants, require that THEY are assigned to gas.
+// One chokepoint for the whole module rather than a flag on each route, so a
+// route added later is confined by default instead of being open until someone
+// remembers. Managers, owners, accountants, supervisors and admins pass through
+// — they are not tied to a single department.
+router.use(requireGasDepartment);
 
 // ─── Settings & Pricing ─────────────────────────────────────────────────────
 router.get("/pricing",         allGas,    getCurrentPricing);

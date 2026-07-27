@@ -35,9 +35,25 @@ export const toggleGasDepartment = async (req: AuthenticatedRequest, res: Respon
       { new: true }
     ).select("gasEnabled");
 
+    // Turning the department OFF returns its floor staff to fuel. Otherwise
+    // they are stranded: assigned to a department whose every route now 503s,
+    // with no access to the fuel side either.
+    let reassigned = 0;
+    if (!newValue) {
+      const result = await Staff.updateMany(
+        { station, role: { $in: ["cashier", "attendant"] }, department: { $in: ["gas", "both"] } },
+        { $set: { department: "fuel", gasStation: false } }
+      );
+      reassigned = (result as any).modifiedCount ?? 0;
+    }
+
     return res.status(200).json({
-      message: newValue ? "Gas department enabled" : "Gas department disabled",
-      data: { gasEnabled: updated?.gasEnabled },
+      message: newValue
+        ? "Gas department enabled"
+        : `Gas department disabled${
+            reassigned > 0 ? ` — ${reassigned} staff moved back to Fuel & Lubricants` : ""
+          }`,
+      data: { gasEnabled: updated?.gasEnabled, reassignedStaff: reassigned },
     });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
@@ -406,10 +422,30 @@ export const assignGasStaff = async (req: AuthenticatedRequest, res: Response) =
   try {
     const station = req.user?.station;
     if (!station) return res.status(403).json({ message: "Unauthorized" });
-    const { department } = req.body;
+    // The department has to be switched on before anyone can be posted to it.
+    // Assigning into a disabled department would put staff behind
+    // requireGasEnabled, which 503s every gas route — they would be able to do
+    // nothing at all.
+    const stationDoc = await FillingStation.findById(station).select("gasEnabled").lean();
+    if ((stationDoc as any)?.gasEnabled === false) {
+      return res.status(409).json({
+        message:
+          "Turn the Gas department on before assigning staff to it. Gas Settings → Gas Department → Enable.",
+        gasDisabled: true,
+      });
+    }
+
+    const requested = String(req.body?.department ?? "gas").toLowerCase();
+    if (!["gas", "both"].includes(requested)) {
+      return res.status(400).json({
+        message: 'department must be "gas" or "both" when assigning gas staff',
+      });
+    }
+
     const staff = await Staff.findOneAndUpdate(
       { _id: req.params.id, station },
-      { gasStation: true, department: department || "gas" },
+      // Both fields written together, always — see unassignGasStaff for why.
+      { gasStation: true, department: requested },
       { new: true }
     ).select("firstName lastName role gasStation department");
     if (!staff) return res.status(404).json({ message: "Staff not found" });
