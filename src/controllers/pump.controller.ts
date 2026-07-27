@@ -10,20 +10,10 @@ import Notification from "../models/notification.model";
 import { notifyStation } from "../utils/notifyHelpers";
 import { propagatePriceToShifts } from "../services/priceChange.service";
 
-// Fuel-type synonyms — industry codes and common names for the same product.
-// Any key in a group resolves to the full group so matching is always exhaustive.
-const FUEL_ALIASES: Record<string, string[]> = {
-  ago:      ["ago", "diesel"],
-  diesel:   ["diesel", "ago"],
-  pms:      ["pms", "petrol"],
-  petrol:   ["petrol", "pms"],
-  kerosene: ["kerosene", "dpk"],
-  dpk:      ["dpk", "kerosene"],
-};
-
-function resolveFuelAliases(fuelType: string): string[] {
-  return FUEL_ALIASES[fuelType.toLowerCase()] ?? [fuelType.toLowerCase()];
-}
+// Fuel-type synonyms now live in utils/fuelPrices so the loyalty module (and
+// anything else that has to match a product to a tank) shares one definition
+// instead of keeping a copy that drifts.
+import { resolveFuelAliases } from "../utils/fuelPrices";
 
 export const addPump = async (req: AuthenticatedRequest, res: Response) => {
   try {

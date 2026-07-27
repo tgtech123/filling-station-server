@@ -9,6 +9,7 @@ import FuelLoyaltySettings from "../models/fuelLoyaltySettings.model";
 import FillingStation from "../models/fillingStation.model";
 import Shift from "../models/shift.model";
 import { sendSms } from "../utils/smsHelper";
+import { getLivePumpPrices } from "../utils/fuelPrices";
 
 const FRONTEND_URL = process.env.FRONTEND_URL || "https://filling-station-system.vercel.app";
 
@@ -38,7 +39,20 @@ export const getSettings = async (req: AuthenticatedRequest, res: Response) => {
     const station = req.user?.station;
     if (!station) return res.status(403).json({ message: "Unauthorized" });
     const settings = await getOrCreateSettings(String(station));
-    return res.status(200).json({ data: settings });
+
+    // The configured pricePerLitre defaults to 0 for every product, so on a
+    // station that never filled in Loyalty > Settings there is nothing to
+    // prefill a sale with. Return the LIVE pump prices alongside it — that is
+    // the number the owner actually maintains, it is always current, and it
+    // means logging a loyalty sale works with no extra setup.
+    const livePricePerLitre = await getLivePumpPrices(String(station));
+
+    return res.status(200).json({
+      data: {
+        ...(settings as any).toObject?.() ?? settings,
+        livePricePerLitre,
+      },
+    });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }

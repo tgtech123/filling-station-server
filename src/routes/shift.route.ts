@@ -1,6 +1,7 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
+import { requireFuelDepartment } from "../middlewares/requireDepartment";
 import * as shiftController from "../controllers/shift.controller";
 import { listShiftTypes, createShiftType, updateShiftType, toggleBuiltInShiftType } from "../controllers/shiftType.controller";
 // getTodaySchedule is exported from the same controller
@@ -20,11 +21,17 @@ router.post("/types", requireAuth, checkRole("manager"), createShiftType);
 router.patch("/types/builtin/:name", requireAuth, checkRole("manager"), toggleBuiltInShiftType);
 router.patch("/types/:id", requireAuth, checkRole("manager"), updateShiftType);
 
+// ─── Fuel pump shifts ────────────────────────────────────────────────────────
+// Applied per-route rather than to the whole router on purpose: shift TYPES
+// above are shared configuration that gas staff also need, so confining them
+// would break the gas shift screen. Gas has its own shifts under /api/gas/shifts.
+
 // Start a shift - only accessible by attendants
 router.post(
   "/start",
   requireAuth,
   checkRole("attendant"),
+  requireFuelDepartment,
   shiftController.startShift
 );
 
@@ -33,6 +40,7 @@ router.put(
   "/:shiftId/end",
   requireAuth,
   checkRole("attendant"),
+  requireFuelDepartment,
   shiftController.endShift
 );
 
@@ -42,6 +50,7 @@ router.post(
   "/:shiftId/price-change-reading",
   requireAuth,
   checkRole("attendant"),
+  requireFuelDepartment,
   shiftController.submitPriceChangeReading
 );
 
@@ -50,6 +59,7 @@ router.get(
   "/",
   requireAuth,
   checkRole("attendant", "manager", "cashier"),
+  requireFuelDepartment,
   shiftController.getShifts
 );
 
@@ -58,6 +68,7 @@ router.get(
   "/active",
   requireAuth,
   checkRole("attendant", "manager"),
+  requireFuelDepartment,
   shiftController.getActiveShifts
 );
 
@@ -66,6 +77,7 @@ router.get(
   "/current",
   requireAuth,
   checkRole("attendant"),
+  requireFuelDepartment,
   shiftController.getCurrentShift
 );
 
@@ -74,6 +86,7 @@ router.get(
   "/today-schedule",
   requireAuth,
   checkRole("attendant"),
+  requireFuelDepartment,
   shiftController.getTodaySchedule
 );
 

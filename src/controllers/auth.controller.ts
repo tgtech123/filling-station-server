@@ -111,6 +111,22 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
+    // Department decides which side of the station this person can work, so it
+    // is validated at hire and `gasStation` is derived from it rather than left
+    // to default to false — otherwise a new gas cashier would be created
+    // "gas" but absent from the gas staff list.
+    const dept = String(department || "fuel").toLowerCase();
+    if (!["fuel", "gas", "both"].includes(dept)) {
+      return res.status(400).json({ message: 'department must be "fuel", "gas" or "both"' });
+    }
+    if (dept !== "fuel" && (station as any).gasEnabled === false) {
+      return res.status(409).json({
+        message:
+          "Turn the Gas department on before hiring staff into it. Gas Settings → Gas Department → Enable.",
+        gasDisabled: true,
+      });
+    }
+
     // Check for duplicate email
     const existingStaff = await Staff.findOne({ email });
     if (existingStaff) {
@@ -137,7 +153,8 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       addSaleTarget: addSaleTarget ?? false,
       payType,
       amount,
-      department: department || "fuel",
+      department: dept,
+      gasStation: dept !== "fuel",
       twoFactorAuthEnabled: twoFactorAuthEnabled ?? false,
       notificationPreferences: {
         email: notificationPreferences?.email ?? false,
@@ -683,6 +700,33 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     // Prevent changing station via this route even if provided
     if ("station" in req.body) {
       return res.status(400).json({ message: "Cannot change staff station via this endpoint" });
+    }
+
+    // Department drives real access now, so it cannot be set to anything the
+    // station cannot honour — and `gasStation` must move with it. They are two
+    // records of one fact, and letting the staff editor change only one is how
+    // you end up with someone who is "gas" but missing from the gas staff list.
+    if (updates.department !== undefined) {
+      const dept = String(updates.department).toLowerCase();
+      if (!["fuel", "gas", "both"].includes(dept)) {
+        return res.status(400).json({ message: 'department must be "fuel", "gas" or "both"' });
+      }
+
+      if (dept !== "fuel") {
+        const stationDoc = await FillingStation.findById(managerStation)
+          .select("gasEnabled")
+          .lean();
+        if ((stationDoc as any)?.gasEnabled === false) {
+          return res.status(409).json({
+            message:
+              "Turn the Gas department on before assigning staff to it. Gas Settings → Gas Department → Enable.",
+            gasDisabled: true,
+          });
+        }
+      }
+
+      updates.department = dept;
+      updates.gasStation = dept !== "fuel";
     }
 
     // Pay is set by the owner (see /api/salary), never through the staff editor.
