@@ -15,6 +15,7 @@ import StationStatus from "../models/stationStatus.model";
 import redis from "../config/redis";
 import { emitToStation } from "../services/socket.service";
 import { isOwnerAccount } from "../middlewares/requireOwner";
+import { roleLabel } from "../utils/actor";
 import { auditLog } from "../utils/auditLog";
 import { addStaffToOpenPayrollDraft } from "../services/payrollSync.service";
 
@@ -322,6 +323,7 @@ export const loginStaff = async (
         station: staff.station?.toString(),
         isSuperManager,
         isOwner,
+        displayRole: roleLabel(staff.role, isOwner),
         loginAt: Date.now(),
       },
       process.env.JWT_SECRET!,
@@ -368,6 +370,10 @@ export const loginStaff = async (
         image: staff.image,
         createdAt: staff.createdAt,
         role: staff.role,
+        // What the UI shows. "Owner" for the station owner, otherwise the
+        // capitalised role — `role` itself stays "manager" because every
+        // permission check is keyed on it.
+        displayRole: roleLabel(staff.role, isOwner),
         department: staff.department || "fuel",
         station: station
           ? {
@@ -838,6 +844,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
         station: staff.station?.toString(),
         isSuperManager,
         isOwner,
+        displayRole: roleLabel(staff.role, isOwner),
         loginAt: Date.now(),
       },
       process.env.JWT_SECRET!,
@@ -880,6 +887,10 @@ export const verifyOtp = async (req: Request, res: Response) => {
         image: staff.image,
         createdAt: staff.createdAt,
         role: staff.role,
+        // What the UI shows. "Owner" for the station owner, otherwise the
+        // capitalised role — `role` itself stays "manager" because every
+        // permission check is keyed on it.
+        displayRole: roleLabel(staff.role, isOwner),
         department: staff.department || "fuel",
         station: station
           ? {

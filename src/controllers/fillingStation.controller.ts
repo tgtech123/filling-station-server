@@ -327,9 +327,30 @@ export const updateFillingStation = async (req: AuthenticatedRequest, res: Respo
 };
 
 
-export const deleteFillingStation = async (req: Request, res: Response) => {
+export const deleteFillingStation = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const deleted = await FillingStation.findByIdAndDelete(req.params.id);
+    // Hard delete: wipes the station AND every staff account on it, with no
+    // undo. This endpoint was once reachable without any authentication at all,
+    // so the role check is repeated here rather than trusted to the route —
+    // a future routing change must not be able to expose it again.
+    //
+    // Tenants never delete their own station. A station owner who wants to
+    // leave contacts support, which soft-deletes via /api/admin/stations/:id
+    // (recoverable). Branch closures go through /api/branches/:branchId, which
+    // is owner-only and refuses to target the main station.
+    if (req.user?.role !== "admin") {
+      return res.status(403).json({
+        message: "Only a FuelDesk platform administrator can delete a station.",
+        adminOnly: true,
+      });
+    }
+
+    const { id } = req.params;
+    if (!Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid station id" });
+    }
+
+    const deleted = await FillingStation.findByIdAndDelete(id);
 
     if (!deleted) {
       return res.status(404).json({ message: "Filling station not found" });
@@ -337,6 +358,17 @@ export const deleteFillingStation = async (req: Request, res: Response) => {
 
     // Optionally delete related staff
     await Staff.deleteMany({ station: deleted._id });
+
+    await invalidateStationAuthCache(id);
+
+    AdminLog.create({
+      eventType: "station_deleted",
+      description: `Station "${deleted.name}" was PERMANENTLY deleted along with its staff accounts`,
+      stationOrUser: deleted.name,
+      status: "critical",
+      fillingStation: deleted._id,
+      performedBy: req.user?.email || "Admin",
+    }).catch((err: any) => console.error("AdminLog error (hard delete):", err));
 
     res.json({ message: "Filling station and associated staff deleted" });
   } catch (error: any) {
