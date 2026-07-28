@@ -2,7 +2,7 @@
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 
-import Pump from "../models/pump.model";
+import Pump, { effectivePumpStatus } from "../models/pump.model";
 import Staff from "../models/staff.model";
 import Tank from "../models/tanks.model";
 import Shift from "../models/shift.model";
@@ -69,8 +69,9 @@ export const getDashboardMetrics = async (req: AuthenticatedRequest, res: Respon
       for (const pumpDoc of pumpDocs) {
         for (const pump of pumpDoc.pumps) {
           totalPumps += 1;
-          if (pump.status === "Active") activePumps += 1;
-          if (pump.status === "Maintenance") pumpsUnderMaintenance += 1;
+          const effective = effectivePumpStatus(pump as any);
+          if (effective === "Active" || effective === "Scheduled") activePumps += 1;
+          if (effective === "Maintenance") pumpsUnderMaintenance += 1;
         }
       }
     }
@@ -270,8 +271,11 @@ export const getPumpControl = async (req: AuthenticatedRequest, res: Response) =
       for (const pumpDoc of pumpDocs) {
         for (const pump of pumpDoc.pumps) {
           totalPumps += 1;
-          if (pump.status === "Active") activePumpCount += 1;
-          if (pump.status === "Maintenance") underMaintenance += 1;
+          // Derived, not stored: a pump booked for FUTURE maintenance is still
+          // working today, and one whose window has passed is working again.
+          const effective = effectivePumpStatus(pump as any);
+          if (effective === "Active" || effective === "Scheduled") activePumpCount += 1;
+          if (effective === "Maintenance") underMaintenance += 1;
         }
       }
     }
