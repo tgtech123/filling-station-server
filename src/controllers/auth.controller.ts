@@ -986,6 +986,71 @@ export const changePassword = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+/**
+ * PATCH /api/auth/me
+ *
+ * Lets any signed-in user edit their OWN basic profile.
+ *
+ * There was no way to do this before: updateStaff is manager-only, so an admin
+ * — who has no manager above them — could not change their own name or phone
+ * at all, and the admin profile screen was quietly discarding the edit.
+ *
+ * Deliberately excluded, because each needs more than being signed in:
+ *   • email / password → /api/auth/change-credentials, which re-checks the
+ *     current password before letting either change
+ *   • role, station, department, pay, isOwner → privilege boundaries; changing
+ *     your own would be self-promotion
+ */
+export const updateOwnProfile = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const EDITABLE = [
+      "firstName",
+      "lastName",
+      "phone",
+      "address",
+      "city",
+      "state",
+      "zipCode",
+      "emergencyContact",
+      "image",
+    ] as const;
+
+    const updates: Record<string, any> = {};
+    for (const field of EDITABLE) {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: "No editable fields supplied" });
+    }
+
+    if (updates.firstName !== undefined && !String(updates.firstName).trim()) {
+      return res.status(400).json({ message: "First name cannot be empty" });
+    }
+    if (updates.lastName !== undefined && !String(updates.lastName).trim()) {
+      return res.status(400).json({ message: "Last name cannot be empty" });
+    }
+
+    const updated = await Staff.findByIdAndUpdate(userId, updates, {
+      new: true,
+      runValidators: true,
+    }).select("-password -__v");
+
+    if (!updated) return res.status(404).json({ message: "Account not found" });
+
+    return res.status(200).json({
+      message: "Profile updated successfully",
+      user: updated,
+    });
+  } catch (err: any) {
+    console.error("updateOwnProfile error:", err);
+    return res.status(500).json({ message: err?.message ?? "Server error" });
+  }
+};
+
 // POST /api/auth/change-credentials
 // Allows a logged-in user to change their own email and/or password.
 // Always requires the current password for verification.

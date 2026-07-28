@@ -99,13 +99,19 @@ export const getOverview = async (req: AuthenticatedRequest, res: Response) => {
       thisMonthNewExpired,
       thisMonthRevenueAgg,
       lastMonthRevenueAgg,
+      totalBranchSites,
     ] = await Promise.all([
-      FillingStation.countDocuments({ isDeleted: { $ne: true } }),
-      FillingStation.countDocuments({ isDeleted: { $ne: true }, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
-      FillingStation.countDocuments({ isActive: true, isDeleted: { $ne: true } }),
-      FillingStation.countDocuments({ isActive: true, isDeleted: { $ne: true }, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
-      FillingStation.countDocuments({ isActive: false, isDeleted: { $ne: true } }),
-      FillingStation.countDocuments({ isActive: false, isDeleted: { $ne: true }, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
+      // ROOT stations only. A branch is a SITE, not a customer — it inherits
+      // the parent's plan and expiry (see createBranch) and is never billed
+      // separately. Counting branches here made one Enterprise account with 5
+      // branches read as 6 registered stations and 6 active subscriptions,
+      // overstating both the customer base and the number of paying accounts.
+      FillingStation.countDocuments({ ...ROOT_ONLY }),
+      FillingStation.countDocuments({ ...ROOT_ONLY, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
+      FillingStation.countDocuments({ ...ROOT_ONLY, isActive: true }),
+      FillingStation.countDocuments({ ...ROOT_ONLY, isActive: true, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
+      FillingStation.countDocuments({ ...ROOT_ONLY, isActive: false }),
+      FillingStation.countDocuments({ ...ROOT_ONLY, isActive: false, createdAt: { $gte: startOfMonth, $lte: endOfMonth } }),
       SubscriptionPayment.aggregate([
         { $match: { status: "paid", paidAt: { $gte: startOfMonth, $lte: endOfMonth } } },
         { $group: { _id: null, total: { $sum: "$amount" } } },
@@ -114,6 +120,13 @@ export const getOverview = async (req: AuthenticatedRequest, res: Response) => {
         { $match: { status: "paid", paidAt: { $gte: lastMonthStart, $lte: lastMonthEnd } } },
         { $group: { _id: null, total: { $sum: "$amount" } } },
       ]),
+      // Reported separately rather than folded into the station count, so the
+      // number of physical sites is still visible without inflating how many
+      // customers or subscriptions there are.
+      FillingStation.countDocuments({
+        isDeleted: { $ne: true },
+        parentStation: { $ne: null, $exists: true },
+      }),
     ]);
 
     const monthlyRevenue = thisMonthRevenueAgg[0]?.total ?? 0;
@@ -131,6 +144,9 @@ export const getOverview = async (req: AuthenticatedRequest, res: Response) => {
       data: {
         totalRegisteredStations,
         totalRegisteredStationsGrowth: calcGrowth(totalRegisteredStations, totalRegisteredStations - thisMonthNewStations),
+        // Physical branch sites belonging to the accounts above — shown so the
+        // real footprint is visible without being mistaken for paying accounts.
+        totalBranchSites,
         activeSubscriptions,
         activeSubscriptionsGrowth: calcGrowth(activeSubscriptions, activeSubscriptions - thisMonthNewActive),
         expiredSubscriptions,
@@ -223,6 +239,18 @@ export const getNetworkGrowth = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
+/**
+ * Root (billable) stations only — excludes branch sites.
+ *
+ * Branches inherit their parent's plan and expiry date and are never charged
+ * on their own, so anything counting CUSTOMERS or SUBSCRIPTIONS must use this.
+ * Anything counting physical SITES should not.
+ */
+const ROOT_ONLY = {
+  isDeleted: { $ne: true },
+  $or: [{ parentStation: null }, { parentStation: { $exists: false } }],
+};
+
 export const getAllStations = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { search } = req.query;
@@ -257,6 +285,19 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
       ])
     );
 
+    // Name of each parent, and how many branches each one has — so the admin
+    // list can group branch sites under the account that owns them instead of
+    // listing them as if they were separate customers.
+    const nameById = new Map<string, string>(
+      stations.map((s: any) => [String(s._id), s.name])
+    );
+    const branchCountByParent = new Map<string, number>();
+    for (const s of stations as any[]) {
+      if (!s.parentStation) continue;
+      const key = String(s.parentStation);
+      branchCountByParent.set(key, (branchCountByParent.get(key) ?? 0) + 1);
+    }
+
     const stationsWithDetails = await Promise.all(
       stations.map(async (station) => {
         const [manager, staffCount] = await Promise.all([
@@ -287,6 +328,12 @@ export const getAllStations = async (req: AuthenticatedRequest, res: Response) =
           phone: station.phone,
           isActive: station.isActive ?? true,
           isBranch,
+          // Grouping keys for the admin stations list.
+          parentStationId: isBranch ? String((station as any).parentStation) : null,
+          parentName: isBranch
+            ? nameById.get(String((station as any).parentStation)) || null
+            : null,
+          branchCount: isBranch ? 0 : branchCountByParent.get(String(station._id)) ?? 0,
           createdAt: station.createdAt,
           staffCount,
           ownerName,

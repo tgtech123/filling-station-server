@@ -84,7 +84,10 @@
       "Bash(grep -n '^#\\\\{1,3\\\\} ' docs/user-guide.md)",
       "Bash(grep -n 'Last Updated\\\\|Last updated\\\\|Version\\\\|^---$' docs/user-guide.md)",
       "Bash(grep -v '^src/controllers/admin.controller.ts:.*//')",
-      "Bash(grep -v '^\\\\s*//')"
+      "Bash(grep -v '^\\\\s*//')",
+      "Bash(grep -v '^\\\\s*[0-9]*-\\\\s*$')",
+      "Bash(grep -v '^\\\\S*:[0-9]*: *//')",
+      "Bash(grep -v '//')"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",
