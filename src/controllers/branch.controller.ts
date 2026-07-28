@@ -10,6 +10,7 @@ import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Shift from "../models/shift.model";
 import Activity from "../models/activity.model";
 import { actorFrom } from "../utils/actor";
+import { auditLog } from "../utils/auditLog";
 import InviteToken from "../models/inviteToken.model";
 import Tank from "../models/tanks.model";
 import { transporter } from "../middlewares/transporter.middleware";
@@ -1019,7 +1020,46 @@ export const transferStaff = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(404).json({ error: "Staff member not found" });
     }
 
+    // The staff member must actually WORK at the station they are being moved
+    // from. Without this, only the two station ids were validated against the
+    // caller's network while `staffId` was taken on trust — so any staff id on
+    // the platform, including another company's, could be moved into this
+    // network. It also guarantees the $pull below hits the right station
+    // instead of silently leaving a dangling reference behind.
+    if (String((staffMember as any).station) !== String(fromStationId)) {
+      return res.status(403).json({
+        error: "That staff member does not belong to the station you are transferring from",
+      });
+    }
+
+    // The owner's account anchors the whole network — their home station is
+    // what every branch lookup resolves from. Moving it would leave the
+    // business without a root.
+    if ((staffMember as any).isOwner) {
+      return res.status(403).json({
+        error: "The station owner's account cannot be transferred between stations.",
+      });
+    }
+
+    if (String(staffId) === String(req.user?._id || req.user?.id)) {
+      return res.status(400).json({ error: "You cannot transfer your own account" });
+    }
+
+    // An attendant mid-shift would leave the shift, its meter readings and its
+    // cash reconciliation stranded on the old station.
+    const activeShift = await Shift.findOne({ attendant: staffId, status: "Active" }).lean();
+    if (activeShift) {
+      return res.status(409).json({
+        error:
+          "This staff member has an active shift. End the shift before transferring them.",
+        activeShift: true,
+      });
+    }
+
     const toStation = await FillingStation.findById(toStationId);
+    if (!toStation) {
+      return res.status(404).json({ error: "Target station not found" });
+    }
 
     const currentCount = await Staff.countDocuments({
       station: toStationId,
@@ -1040,7 +1080,20 @@ export const transferStaff = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
-    await Staff.findByIdAndUpdate(staffId, { station: toStationId });
+    // A gas-department cashier or attendant landing at a station where gas is
+    // switched off would be assigned to a department whose every route 503s —
+    // able to do nothing at all. Move them to fuel, the default, and say so.
+    const staffUpdate: Record<string, any> = { station: toStationId };
+    let departmentReset = false;
+
+    const dept = String((staffMember as any).department ?? "fuel").toLowerCase();
+    if (dept !== "fuel" && (toStation as any).gasEnabled === false) {
+      staffUpdate.department = "fuel";
+      staffUpdate.gasStation = false;
+      departmentReset = true;
+    }
+
+    await Staff.findByIdAndUpdate(staffId, staffUpdate);
 
     await Promise.all([
       FillingStation.findByIdAndUpdate(fromStationId, { $pull: { staff: staffId } }),
@@ -1062,8 +1115,23 @@ export const transferStaff = async (req: AuthenticatedRequest, res: Response) =>
       severity: null,
     }).catch(console.error);
 
+    // Moving a person between stations changes who can see what — it belongs in
+    // the audit trail, not only the 24-hour activity feed.
+    auditLog(req, {
+      action: "Staff Transferred",
+      description:
+        `${(staffMember as any).firstName} ${(staffMember as any).lastName} ` +
+        `(${(staffMember as any).role}) moved from ${(fromStation as any)?.name} ` +
+        `to ${(toStationDoc as any)?.name}` +
+        (departmentReset ? " — reassigned to Fuel (gas is off at the destination)" : ""),
+      status: "Critical",
+      metadata: { staffId, fromStationId, toStationId, departmentReset },
+    });
+
     return res.status(200).json({
-      message: "Staff transferred successfully",
+      message: departmentReset
+        ? "Staff transferred. They were moved to the Fuel department because Gas is switched off at the destination."
+        : "Staff transferred successfully",
       data: {
         staff: `${(staffMember as any).firstName} ${(staffMember as any).lastName}`,
         from: (fromStation as any)?.name,
