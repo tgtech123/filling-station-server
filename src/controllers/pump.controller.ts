@@ -1,6 +1,6 @@
 ﻿import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces";
-import Pump from "../models/pump.model";
+import Pump, { effectivePumpStatus } from "../models/pump.model";
 import mongoose from "mongoose";
 import Tank from "../models/tanks.model";
 import Activity from "../models/activity.model";
@@ -214,10 +214,18 @@ export const getAllPumps = async (req: AuthenticatedRequest, res: Response) => {
             fuelType,
             pumpId: pumpItem._id,
             title: pumpItem.title,
-            status: pumpItem.status,
+            // Derived from the maintenance window, so a pump booked for work
+            // next week still shows as working today and comes back on its own
+            // once the window passes. `rawStatus` keeps the stored value for
+            // anything that needs the underlying operational state.
+            status: effectivePumpStatus(pumpItem as any),
+            rawStatus: pumpItem.status,
             pricePerLtr: pumpItem.pricePerLtr,
             startDate: pumpItem.startDate,
             lastMaintenance: pumpItem.lastMaintenance ?? null,
+            maintenanceFrom: (pumpItem as any).maintenanceFrom ?? null,
+            maintenanceTo: (pumpItem as any).maintenanceTo ?? null,
+            maintenanceReason: (pumpItem as any).maintenanceReason ?? "",
             dailyLtrSales,
           });
         }
@@ -674,8 +682,24 @@ export const scheduleMaintenance = async (req: AuthenticatedRequest, res: Respon
     }
 
     const pumpSubdoc = pumpsArray[idx];
-    pumpSubdoc.status = "Maintenance";
-    pumpSubdoc.lastMaintenance = start;
+
+    // Record the WINDOW, and only take the pump out of service if that window
+    // is open right now. Booking work for next week must not stop the pump
+    // today — and because the status is derived from these dates at read time,
+    // the pump comes back on its own when the window ends.
+    pumpSubdoc.maintenanceFrom = start;
+    pumpSubdoc.maintenanceTo = end;
+    pumpSubdoc.maintenanceReason = reason || "";
+
+    const now = new Date();
+    const endOfDay = new Date(end);
+    endOfDay.setHours(23, 59, 59, 999);
+    const windowOpenNow = now >= start && now <= endOfDay;
+
+    if (windowOpenNow) {
+      pumpSubdoc.status = "Maintenance";
+      pumpSubdoc.lastMaintenance = start;
+    }
 
     (pumpDoc as any).markModified("pumps");
     await pumpDoc.save();
