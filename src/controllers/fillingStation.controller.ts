@@ -38,6 +38,41 @@ export const createFillingStation = async (req: Request, res: Response) => {
 
     const chosenPlan: string = selectedPlan || "free";
 
+    // Duplicate email, checked explicitly.
+    //
+    // There was no check here at all: a repeat address hit the unique index,
+    // threw E11000, and came back as a generic 500 "Server error" with no
+    // indication of what was wrong. The message now says which case it is, and
+    // an address held only by a staff record whose station was deleted is
+    // reported as reusable rather than as a live account.
+    const emailOwner = await Staff.findOne({ email: String(email).toLowerCase().trim() })
+      .select("_id station role")
+      .lean();
+
+    if (emailOwner) {
+      const ownerStation = (emailOwner as any).station
+        ? await FillingStation.findById((emailOwner as any).station)
+            .select("name isDeleted")
+            .lean()
+        : null;
+
+      // Station gone (deleted or missing) — the account is a leftover, so the
+      // address should never have been blocking a new sign-up.
+      if (!ownerStation || (ownerStation as any).isDeleted) {
+        return res.status(409).json({
+          message:
+            "This email is attached to a closed station account. Contact FuelDesk support to release it, or use a different email.",
+          orphanedAccount: true,
+        });
+      }
+
+      return res.status(409).json({
+        message:
+          "An account with this email already exists. Please log in instead, or use the 'Forgot password' link.",
+        accountExists: true,
+      });
+    }
+
     // 1. Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 

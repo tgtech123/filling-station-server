@@ -48,6 +48,16 @@ export interface IStaff extends Document {
    * hired managers too.
    */
   isOwner: boolean;
+  /**
+   * The real address, parked here while the account's station is deleted.
+   *
+   * `email` is uniquely indexed, so a staff record left behind by a deleted
+   * station keeps its address reserved forever — the owner could never sign up
+   * again with the same email even though nothing usable remained. On delete
+   * the address moves here and `email` becomes a tombstone; on restore it moves
+   * back. Nothing is destroyed, and the address is free in the meantime.
+   */
+  releasedEmail?: string | null;
   gasStation: boolean;
   department: "fuel" | "gas" | "both";
   createdAt?: Date;
@@ -102,6 +112,7 @@ const StaffSchema = new Schema<IStaff>(
     managedStations: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
     isSuperManager: { type: Boolean, default: false },
     isOwner: { type: Boolean, default: false },
+    releasedEmail: { type: String, default: null },
     gasStation: { type: Boolean, default: false },
     department: { type: String, enum: ["fuel", "gas", "both"], default: "fuel" },
   },
