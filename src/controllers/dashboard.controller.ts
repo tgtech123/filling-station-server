@@ -364,15 +364,31 @@ export const getStaffManagement = async (req: AuthenticatedRequest, res: Respons
       // Staff model uses 'station' field, not 'fillingStation'
       Staff.countDocuments({ station: stationObjectId, role: { $ne: "manager" } }).exec(),
 
-      // onDuty â€” distinct attendants with an Active shift today
-      Shift.distinct("attendant", {
-        fillingStation: stationObjectId,
-        status: "Active",
-        $or: [
-          { shiftDate: { $gte: startOfDay, $lte: endOfDay } },
-          { createdAt: { $gte: startOfDay, $lte: endOfDay } },
-        ],
-      }).exec(),
+      // onDuty â€” anyone actually working right now.
+      //
+      // This counted ONLY attendants with an Active shift today, so a manager
+      // marking someone on duty from Staff Management saw the number never
+      // move — the flag they were toggling was not what the card read. It now
+      // counts both: an active shift, or the Staff.onDuty flag being set.
+      // Distinct ids, so a person with both is counted once.
+      (async () => {
+        const [withShift, flagged] = await Promise.all([
+          Shift.distinct("attendant", {
+            fillingStation: stationObjectId,
+            status: "Active",
+            $or: [
+              { shiftDate: { $gte: startOfDay, $lte: endOfDay } },
+              { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+            ],
+          }).exec(),
+          Staff.distinct("_id", {
+            station: stationObjectId,
+            role: { $ne: "manager" },
+            onDuty: true,
+          }).exec(),
+        ]);
+        return [...new Set([...withShift, ...flagged].map((id: any) => String(id)))];
+      })(),
 
       // averageStaffSalary â€” average of 'amount' field on non-manager staff
       // No separate salary model â€” Staff.amount stores each member's salary/wage

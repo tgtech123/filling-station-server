@@ -108,15 +108,17 @@ const cashReconciliationSchema = new Schema<ICashReconciliation>(
 
 // Calculate discrepancy before saving
 cashReconciliationSchema.pre("save", function (next) {
-  this.discrepancy = this.cashReceived - this.expectedAmount;
-  
-  // Auto-set status based on discrepancy
-  if (this.discrepancy === 0) {
-    this.status = "Matched";
-  } else {
-    this.status = "Flagged";
-  }
-  
+  // Rounded to kobo. An exact `=== 0` test on raw floats flagged attendants who
+  // handed over the correct money: a shift of 50.03 L × ₦1,200 stores as
+  // 60035.99999999997, so ₦60,036 in hand produced a "discrepancy" of
+  // 0.000000000029 and the reconciliation came back Flagged.
+  this.discrepancy =
+    Math.round((this.cashReceived - this.expectedAmount + Number.EPSILON) * 100) / 100;
+
+  // Anything under half a kobo is arithmetic, not a cash difference. Real
+  // shortages and surpluses are whole naira and still flag exactly as before.
+  this.status = Math.abs(this.discrepancy) < 0.005 ? "Matched" : "Flagged";
+
   next();
 });
 
