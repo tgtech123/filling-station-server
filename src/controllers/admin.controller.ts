@@ -19,6 +19,7 @@ import PlatformSettings, {
 } from "../models/platformSettings.model";
 import { getCache, setCache, deleteCache, invalidateStationAuthCache } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
+import { releaseStationEmails, reclaimStationEmails } from "../utils/emailRelease";
 import crypto from "crypto";
 import ResetPassword from "../models/resetPassword.model";
 import { transporter } from "../middlewares/transporter.middleware";
@@ -838,6 +839,11 @@ export const restoreStation = async (req: AuthenticatedRequest, res: Response) =
     await FillingStation.findByIdAndUpdate(stationId, { isDeleted: false, isActive: true });
     await invalidateStationAuthCache(stationId);
 
+    // Hand back the email addresses released when the station was deleted, so
+    // its staff can sign in again. Any address claimed by a live account in the
+    // meantime stays with that account and is reported instead.
+    const { reclaimed, conflicts } = await reclaimStationEmails(stationId);
+
     AdminLog.create({
       eventType: "station_reactivated",
       description: "Station restored by admin",
@@ -847,7 +853,14 @@ export const restoreStation = async (req: AuthenticatedRequest, res: Response) =
       performedBy: "Admin",
     }).catch((err: any) => console.error("AdminLog error (restore):", err));
 
-    return res.status(200).json({ message: "Station restored successfully" });
+    return res.status(200).json({
+      message:
+        conflicts.length > 0
+          ? `Station restored. ${reclaimed} email address(es) restored; ${conflicts.length} could not be — they now belong to newer accounts.`
+          : "Station restored successfully",
+      emailsReclaimed: reclaimed,
+      emailConflicts: conflicts,
+    });
   } catch (err: any) {
     console.error("Error in restoreStation:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });
@@ -868,6 +881,13 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     await FillingStation.findByIdAndUpdate(stationId, { isActive: false, isDeleted: true });
+
+    // Free the staff email addresses. The station is only soft-deleted, so its
+    // staff records survive — and because Staff.email is uniquely indexed, they
+    // would otherwise reserve those addresses forever. The owner would be told
+    // their email "already exists" while seeing no account anywhere.
+    // Reversible: restoreStation hands the addresses back.
+    const releasedEmails = await releaseStationEmails(stationId);
     await invalidateStationAuthCache(stationId);
 
     AdminLog.create({
@@ -889,7 +909,13 @@ export const deleteStation = async (req: AuthenticatedRequest, res: Response) =>
       triggeredBy: "admin",
     });
 
-    return res.status(200).json({ message: "Station deleted successfully" });
+    return res.status(200).json({
+      message:
+        releasedEmails > 0
+          ? `Station deleted. ${releasedEmails} email address(es) freed for re-use.`
+          : "Station deleted successfully",
+      emailsReleased: releasedEmails,
+    });
   } catch (err: any) {
     console.error("Error in deleteStation:", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });

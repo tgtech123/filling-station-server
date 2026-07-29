@@ -87,7 +87,8 @@
       "Bash(grep -v '^\\\\s*//')",
       "Bash(grep -v '^\\\\s*[0-9]*-\\\\s*$')",
       "Bash(grep -v '^\\\\S*:[0-9]*: *//')",
-      "Bash(grep -v '//')"
+      "Bash(grep -v '//')",
+      "Bash(xargs grep -ln 'headers')"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",
