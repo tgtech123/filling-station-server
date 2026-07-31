@@ -2,7 +2,7 @@
 import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Shift from "../models/shift.model";
-import LubricantSale from "../models/lubricant-sale.models";
+import LubricantTransaction from "../models/lubricant-transaction.model";
 import CashReconciliation from "../models/cashReconciliation.model";
 import Expense from "../models/expense.model";
 import Delivery from "../models/delivery.model";
@@ -100,7 +100,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
       },
     ]).exec();
 
-    const currentLubricantRevenue = await LubricantSale.aggregate([
+    const currentLubricantRevenue = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),
@@ -110,7 +110,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          total: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -134,7 +134,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
       },
     ]).exec();
 
-    const prevLubricantRevenue = await LubricantSale.aggregate([
+    const prevLubricantRevenue = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),
@@ -144,7 +144,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          total: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -253,7 +253,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
         },
       ]).exec();
 
-      const monthLubRevenue = await LubricantSale.aggregate([
+      const monthLubRevenue = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: new Types.ObjectId(stationId),
@@ -263,7 +263,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+            total: { $sum: "$totalAmount" },
           },
         },
       ]).exec();
@@ -304,7 +304,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
         },
       ]).exec();
 
-      const monthLubRevenue = await LubricantSale.aggregate([
+      const monthLubRevenue = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: new Types.ObjectId(stationId),
@@ -314,7 +314,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+            total: { $sum: "$totalAmount" },
           },
         },
       ]).exec();
@@ -342,17 +342,24 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
         });
       }
 
-      const lubricantSales = await LubricantSale.find({
+      // Cost of goods sold for lubricants.
+      //
+      // This read LubricantSale, which the POS never writes to — every sale is
+      // a LubricantTransaction — so lubricant COGS was always 0 and gross
+      // profit was overstated by the full cost of every lubricant sold.
+      // A transaction holds several line items, each with its own product.
+      const lubricantTxns = await LubricantTransaction.find({
         fillingStation: new Types.ObjectId(stationId),
         createdAt: { $gte: monthStart, $lte: monthEnd },
       })
-        .populate("lubricant", "unitCost")
+        .populate("items.lubricant", "unitCost")
         .lean();
 
-      lubricantSales.forEach((sale: any) => {
-        if (sale.lubricant && (sale.lubricant as any).unitCost) {
-          cogs += Number(sale.qtySold) * Number((sale.lubricant as any).unitCost);
-        }
+      lubricantTxns.forEach((txn: any) => {
+        (txn.items ?? []).forEach((item: any) => {
+          const unitCost = Number(item?.lubricant?.unitCost ?? 0);
+          if (unitCost > 0) cogs += Number(item.qtySold ?? 0) * unitCost;
+        });
       });
 
       // Expenses
@@ -386,7 +393,7 @@ export const getTrendsDashboard = async (req: AuthenticatedRequest, res: Respons
     // 4. Payment Methods Breakdown
     // For fuel sales, we'll infer from cash reconciliations
     // For lubricant sales, we have paymentMethod field
-    const lubricantPayments = await LubricantSale.aggregate([
+    const lubricantPayments = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),

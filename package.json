@@ -8,7 +8,9 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "create-admin": "ts-node-dev --transpile-only src/scripts/createAdmin.ts",
-    "recalc-stock": "ts-node-dev --transpile-only src/scripts/recalcTankStock.ts"
+    "recalc-stock": "ts-node-dev --transpile-only src/scripts/recalcTankStock.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -41,7 +43,10 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.15",
     "@types/nodemailer": "^7.0.2",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.2.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.10"
   }
 }
