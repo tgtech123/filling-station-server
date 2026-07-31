@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from "mongoose";
+import { calculateLitresSold, calculateShiftTotal } from "../utils/shiftMath";
 
 export interface IShift extends Document {
   _id: mongoose.Types.ObjectId;
@@ -153,43 +154,22 @@ const shiftSchema = new Schema<IShift>(
  * 2 dp (kobo). Rounding at the point of calculation keeps every downstream
  * report, export and reconciliation working from the same clean number.
  */
-const round = (value: number, dp: number) => {
-  const f = 10 ** dp;
-  return Math.round((value + Number.EPSILON) * f) / f;
-};
-
 shiftSchema.pre("save", function (next) {
   if (this.closingMeterReading === undefined || this.openingMeterReading === undefined) {
     return next();
   }
 
-  this.litresSold = round(
-    Math.max(0, this.closingMeterReading - this.openingMeterReading),
-    3
-  );
+  // Arithmetic lives in utils/shiftMath so it can be tested directly — these
+  // few lines decide what an attendant must hand over at end of shift.
+  this.litresSold = calculateLitresSold(this.openingMeterReading, this.closingMeterReading);
   if (this.litresSold <= 0) return next();
 
-  // Segments only matter once the price actually changed during the shift. A
-  // single-segment shift is the ordinary case and behaves exactly as before.
-  const segments = (this.priceSegments ?? []).filter(
-    (s: any) => s.openingMeter !== null && s.closingMeter !== null
+  this.totalAmount = calculateShiftTotal(
+    this.litresSold,
+    this.pricePerLtr,
+    (this.priceSegments ?? []) as any
   );
 
-  if (segments.length > 1) {
-    // Value each stretch of litres at the price that was in force for it.
-    this.totalAmount = round(
-      segments.reduce((sum: number, s: any) => {
-        const litres = round(Math.max(0, (s.closingMeter ?? 0) - (s.openingMeter ?? 0)), 3);
-        return sum + litres * (s.pricePerLtr ?? 0);
-      }, 0),
-      2
-    );
-    return next();
-  }
-
-  if (this.pricePerLtr > 0) {
-    this.totalAmount = round(this.litresSold * this.pricePerLtr, 2);
-  }
   next();
 });
 
