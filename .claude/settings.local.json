@@ -105,7 +105,15 @@
       "Bash(nslookup -type=TXT fueldesk-prod-user.rx3s9u7.mongodb.net 8.8.8.8)",
       "Bash(MONGO_URI=\"mongodb://fueldesksupport_db_user:Vaa53KIvG3i3EMKt@ac-uxkr5xf-shard-00-00.rx3s9u7.mongodb.net:27017,ac-uxkr5xf-shard-00-01.rx3s9u7.mongodb.net:27017,ac-uxkr5xf-shard-00-02.rx3s9u7.mongodb.net:27017/?ssl=true&replicaSet=atlas-w9p0sp-shard-0&authSource=admin&retryWrites=true&w=majority&appName=fueldesk-prod-user\" timeout 150 npx ts-node-dev --transpile-only src/scripts/createAdmin.ts)",
       "Bash(MONGO_URI='mongodb://fueldesksupport_db_user:Vaa53KIvG3i3EMKt@ac-uxkr5xf-shard-00-00.rx3s9u7.mongodb.net:27017,ac-uxkr5xf-shard-00-01.rx3s9u7.mongodb.net:27017,ac-uxkr5xf-shard-00-02.rx3s9u7.mongodb.net:27017/?ssl=true&replicaSet=atlas-w9p0sp-shard-0&authSource=admin&retryWrites=true&w=majority' node -e ' *)",
-      "Bash(echo \"--- landing//home pricing sections ---\")"
+      "Bash(echo \"--- landing//home pricing sections ---\")",
+      "Bash(MONGO_URI=\"mongodb://fueldesksupport_db_user:Vaa53KIvG3i3EMKt@ac-uxkr5xf-shard-00-00.rx3s9u7.mongodb.net:27017,ac-uxkr5xf-shard-00-01.rx3s9u7.mongodb.net:27017,ac-uxkr5xf-shard-00-02.rx3s9u7.mongodb.net:27017/fueldesk?ssl=true&replicaSet=atlas-w9p0sp-shard-0&authSource=admin&retryWrites=true&w=majority\" timeout 150 npx ts-node-dev --transpile-only src/scripts/createAdmin.ts)",
+      "Bash(curl -s -m 120 -o /tmp/lg.json -w \"HTTP %{http_code}\\\\n\" -X POST \"https://fueldesk-station-server.onrender.com/api/auth/login\" -H \"Content-Type: application/json\" -d '{\"email\":\"admin@flourishstation.com\",\"password\":\"Admin@123456\"}')",
+      "Bash(node -e 'const r=require\\(\"fs\"\\).readFileSync\\(\"/tmp/lg.json\",\"utf8\"\\);try{const j=JSON.parse\\(r\\);console.log\\(\"role:\",j.staff?.role??j.user?.role,\"| email:\",j.staff?.email??j.user?.email,\"| token:\",j.token?\"issued \\(\"+j.token.length+\" chars\\)\":\"none\"\\);if\\(j.message||j.error\\)console.log\\(\"msg:\",j.message||j.error\\);}catch{console.log\\(r.slice\\(0,300\\)\\)}')",
+      "Bash(curl -s -m 120 -o C:/Users/TGTECH/AppData/Local/Temp/claude/C--Users-TGTECH-Desktop-filling-station-server/c0cee268-c0ce-4273-9635-9d63eebf8942/scratchpad/lg.json -w 'HTTP %{http_code}\\\\n' -X POST https://fueldesk-station-server.onrender.com/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@flourishstation.com\",\"password\":\"Admin@123456\"}')",
+      "Bash(curl *)",
+      "Bash(nslookup -type=SRV _mongodb._tcp.fueldesk-dev-user.2bocexj.mongodb.net 8.8.8.8)",
+      "Bash(nslookup -type=TXT fueldesk-dev-user.2bocexj.mongodb.net 8.8.8.8)",
+      "Bash(MONGO_URI=\"mongodb://fueldesksupport_db_user:IEvnC0cdgKhUpgPI@ac-xpsdz2h-shard-00-00.2bocexj.mongodb.net:27017,ac-xpsdz2h-shard-00-01.2bocexj.mongodb.net:27017,ac-xpsdz2h-shard-00-02.2bocexj.mongodb.net:27017/fueldesk?ssl=true&replicaSet=atlas-q0w1b8-shard-0&authSource=admin&retryWrites=true&w=majority\" timeout 150 npx ts-node-dev --transpile-only src/scripts/createAdmin.ts)"
     ],
     "additionalDirectories": [
       "c:\\Users\\DELL\\Desktop\\filling-station-client\\src\\app\\dashboard\\gas\\procurement",
