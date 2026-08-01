@@ -26,6 +26,12 @@ logs/
 .env.*
 !.env.example
 
+# Claude Code local settings. This file records approved shell commands
+# VERBATIM, so any one-off command run with an inline credential ends up
+# stored here — that is how a live Atlas password reached this public repo.
+# It is per-developer state and must never be committed.
+.claude/settings.local.json
+
 # OS generated files
 .DS_Store
 Thumbs.db
