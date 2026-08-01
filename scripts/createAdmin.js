@@ -47,7 +47,16 @@
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
 
-const uri = 'mongodb+srv://admin:admin@emmanuel.q96slry.mongodb.net/filling_station?retryWrites=true&w=majority';
+// Never hardcode a connection string: this file is committed to a public repo,
+// and the credential that used to live here was picked up by Atlas's secret
+// scanner. Supply it at run time instead:
+//   MONGO_URI="mongodb+srv://..." node scripts/createAdmin.js
+const uri = process.env.MONGO_URI;
+if (!uri) {
+  console.error('❌ MONGO_URI is not set. Pass it in the environment, e.g.\n' +
+    '   MONGO_URI="mongodb+srv://user:pass@host/dbname" node scripts/createAdmin.js');
+  process.exit(1);
+}
 
 async function createAdmin() {
   const client = new MongoClient(uri);
