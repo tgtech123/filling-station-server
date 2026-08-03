@@ -207,9 +207,9 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
     const stationDoc  = await FillingStation.findById(stationId).select("name address phone").lean();
     const staffDoc    = await Staff.findById(req.user?._id || req.user?.id).select("firstName lastName").lean();
 
-    // Respond immediately â€” don't block on SMTP
+    // Respond immediately — don't block on SMTP
     res.status(200).json({
-      message: willEmail ? "Procurement submitted â€” sending order to supplier" : "Procurement submitted",
+      message: willEmail ? "Procurement submitted — sending order to supplier" : "Procurement submitted",
       data: { ...procurement.toObject(), emailPending: willEmail },
     });
 
@@ -217,7 +217,7 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
       transporter.sendMail({
         from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
         to:      recipient,
-        subject: `Lubricant Purchase Order â€” ${procurement.procurementNumber}`,
+        subject: `Lubricant Purchase Order — ${procurement.procurementNumber}`,
         html: buildLubricantOrderEmail({
           orderNumber:  procurement.procurementNumber,
           stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
@@ -289,7 +289,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(400).json({ message: "Only submitted or ordered procurements can be marked as received" });
     }
 
-    // receivedItems: [{ lubricantId, receivedQuantity, unitCost? }] â€” sent from client
+    // receivedItems: [{ lubricantId, receivedQuantity, unitCost? }] — sent from client
     // Falls back to stored values if not provided (backwards compatible)
     const receivedItems: { lubricantId: string; receivedQuantity: number; unitCost?: number }[] = req.body.receivedItems || [];
 
@@ -343,7 +343,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       type: "procurement",
       status: "success",
       title: "Procurement Received",
-      description: `Procurement ${procurement.procurementNumber} â€” ${procurement.items.length} product(s) stock levels updated${shortItems.length ? ` (${shortItems.length} item(s) short delivered)` : ""}`,
+      description: `Procurement ${procurement.procurementNumber} — ${procurement.items.length} product(s) stock levels updated${shortItems.length ? ` (${shortItems.length} item(s) short delivered)` : ""}`,
       timestamp: new Date(),
       severity: shortItems.length ? "warning" : "info",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -465,7 +465,7 @@ export const deleteProcurement = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-// â”€â”€â”€ Email template (no prices â€” supplier fills them in) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Email template (no prices — supplier fills them in) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildLubricantOrderEmail(p: {
   orderNumber: string; stationName: string; stationAddr: string; stationPhone: string;
   managerName: string; supplierName: string;
@@ -475,8 +475,8 @@ function buildLubricantOrderEmail(p: {
   const rows = p.items.map((i, idx) => `
     <tr style="${idx % 2 === 0 ? "background:#f9fafb;" : ""}">
       <td style="padding:10px 14px;border:1px solid #e5e7eb;font-weight:600;">${i.productName}</td>
-      <td style="padding:10px 14px;border:1px solid #e5e7eb;">${i.brand || "â€”"}</td>
-      <td style="padding:10px 14px;border:1px solid #e5e7eb;">${i.productType || "â€”"}</td>
+      <td style="padding:10px 14px;border:1px solid #e5e7eb;">${i.brand || "—"}</td>
+      <td style="padding:10px 14px;border:1px solid #e5e7eb;">${i.productType || "—"}</td>
       <td style="padding:10px 14px;border:1px solid #e5e7eb;text-align:center;font-weight:700;">${i.quantityToProcure}</td>
       <td style="padding:10px 14px;border:1px solid #bfdbfe;background:#eff6ff;text-align:center;color:#9ca3af;font-style:italic;">___________</td>
     </tr>`).join("");
@@ -540,7 +540,7 @@ function buildLubricantOrderEmail(p: {
 
     <p style="margin-top:20px;font-size:13px;color:#888;">
       This is an official purchase order from <strong>${p.stationName}</strong> powered by FuelDesk.
-      Please do not reply to this automated email â€” contact the station directly using the details above.
+      Please do not reply to this automated email — contact the station directly using the details above.
     </p>
   </div>
   <div style="background:#f9fafb;padding:14px;text-align:center;border-radius:0 0 12px 12px;border:1px solid #e5e7eb;border-top:none;">

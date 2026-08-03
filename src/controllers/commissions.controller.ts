@@ -7,7 +7,9 @@ import CashReconciliation from "../models/cashReconciliation.model";
 import CommissionPayment from "../models/commissionPayment.model";
 import CommissionStructure from "../models/commissionStructure.model";
 import BonusStructure from "../models/bonusStructure.model";
-import LubricantSale from "../models/lubricant-sale.models";
+// LubricantSale has no writer anywhere in the codebase; the POS writes
+// LubricantTransaction. Reading the old model returned zero every time.
+import LubricantTransaction from "../models/lubricant-transaction.model";
 
 // Helper function to get commission rate for a role
 const getCommissionRate = async (stationId: string, role: string): Promise<number> => {
@@ -319,7 +321,7 @@ export const getCommissionsOverview = async (req: AuthenticatedRequest, res: Res
         },
       ]).exec();
 
-      const lubricantSales = await LubricantSale.aggregate([
+      const lubricantSales = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: new Types.ObjectId(stationId),
@@ -329,7 +331,7 @@ export const getCommissionsOverview = async (req: AuthenticatedRequest, res: Res
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+            total: { $sum: "$totalAmount" },
           },
         },
       ]).exec();

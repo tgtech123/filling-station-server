@@ -504,7 +504,7 @@ export const inviteBranchManager = async (req: AuthenticatedRequest, res: Respon
       severity: null,
     }).catch(console.error);
 
-    // Respond immediately â€” don't block on SMTP
+    // Respond immediately — don't block on SMTP
     res.status(200).json({
       message: `Invitation sent to ${email}. They have 48 hours to accept.`,
       data: {

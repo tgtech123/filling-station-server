@@ -229,7 +229,7 @@ export const loginStaff = async (
     // 1. Find staff by email
     const staff = await Staff.findOne({ email });
     if (!staff) {
-      // No station available â€” skip activity log
+      // No station available — skip activity log
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -247,7 +247,7 @@ export const loginStaff = async (
     // 2. Compare passwords
     const isMatch = await bcrypt.compare(password, staff.password);
     if (!isMatch) {
-      // Staff was found so we have a station â€” log the failed attempt
+      // Staff was found so we have a station — log the failed attempt
       if (staff.station) {
         Activity.create({
           // Attributed to the account that was targeted — the actor is unknown
@@ -281,7 +281,7 @@ export const loginStaff = async (
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // 2b. If 2FA is enabled, attempt OTP flow â€” fall back to normal login if Redis is down
+    // 2b. If 2FA is enabled, attempt OTP flow — fall back to normal login if Redis is down
     if (staff.twoFactorAuthEnabled) {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       let redisAvailable = false;
@@ -291,11 +291,12 @@ export const loginStaff = async (
           redisAvailable = true;
         }
       } catch (redisErr: any) {
-        console.warn("Redis unavailable â€” skipping 2FA and issuing JWT directly:", redisErr.message);
+        console.warn("Redis unavailable — skipping 2FA and issuing JWT directly:", redisErr.message);
       }
 
       if (redisAvailable) {
-        await transporter.sendMail({
+        try {
+          await transporter.sendMail({
           from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
           to: staff.email,
           subject: "Your Login Verification Code",
@@ -310,10 +311,23 @@ export const loginStaff = async (
               <p style="color:#888;font-size:13px;">If you did not request this, please ignore this email.</p>
             </div>
           `,
-        });
+          });
+        } catch (mailErr: any) {
+          // The code is sitting in Redis but never reached the user. Leaving it
+          // would let a code nobody received satisfy a later attempt, so clear
+          // it — and say what actually happened instead of returning a bare 500,
+          // which on a login screen reads as "wrong password".
+          try { await redis?.del(`otp:${staff._id}`); } catch { /* best effort */ }
+          console.error("2FA code could not be delivered:", mailErr?.message);
+          return res.status(503).json({
+            message:
+              "We could not send your verification code right now. Please try again in a moment.",
+            otpDeliveryFailed: true,
+          });
+        }
         return res.status(200).json({ requiresOtp: true, userId: staff._id.toString() });
       }
-      // Redis unavailable â€” fall through to normal JWT login below
+      // Redis unavailable — fall through to normal JWT login below
     }
 
     // 3. Get associated station
@@ -479,7 +493,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
         </div>
 
         <p style="color: #e63946; font-size: 14px;">
-          âš  This link is valid for only <strong>1 hour</strong>.
+          ⚠ This link is valid for only <strong>1 hour</strong>.
         </p>
 
         <p style="font-size: 14px; color: #666;">
@@ -702,6 +716,26 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ message: "Cannot change staff station via this endpoint" });
     }
 
+    // Appointing the chain's group accountant (CFO) grants approval rights over
+    // every branch, so it is deliberately NOT in allowedFields — that list is
+    // open to any manager. Only the owner may make this appointment, and only on
+    // an accountant, because the role is what keeps maker and checker distinct.
+    if (Object.prototype.hasOwnProperty.call(req.body, "isGroupAccountant")) {
+      if (!callerIsOwner) {
+        return res.status(403).json({
+          error: "Only the station owner can appoint or remove a group accountant",
+          ownerOnly: true,
+        });
+      }
+      const targetRole = updates.role ?? (staff as any).role;
+      if (targetRole !== "accountant") {
+        return res.status(400).json({
+          error: "Only an accountant can be made a group accountant",
+        });
+      }
+      updates.isGroupAccountant = Boolean(req.body.isGroupAccountant);
+    }
+
     // Department drives real access now, so it cannot be set to anything the
     // station cannot honour — and `gasStation` must move with it. They are two
     // records of one fact, and letting the staff editor change only one is how
@@ -863,7 +897,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
     try {
       if (redis) await redis.del(`otp:${userId}`);
     } catch {
-      // Non-critical â€” OTP will expire on its own via the 5-min TTL
+      // Non-critical — OTP will expire on its own via the 5-min TTL
     }
 
     const staff = await Staff.findById(userId);

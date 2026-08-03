@@ -17,7 +17,8 @@ import {
 import { LedgerAccount, JournalEntry } from "../models/accounting.model";
 import FixedAsset, { calcNetBookValue } from "../models/fixedAsset.model";
 import Shift from "../models/shift.model";
-import LubricantSale from "../models/lubricant-sale.models";
+// LubricantSale has no writer; the POS writes LubricantTransaction.
+import LubricantTransaction from "../models/lubricant-transaction.model";
 import GasSale from "../models/gasSale.model";
 import {
   postJournal,
@@ -905,9 +906,12 @@ export const runSalesPosting = async (req: AuthenticatedRequest, res: Response) 
     ]);
 
     // Lubricant POS — qty × unit price; qtySold drives the COGS leg
-    const lubAgg = await LubricantSale.aggregate([
+    const lubAgg = await LubricantTransaction.aggregate([
       { $match: { fillingStation: stationId, createdAt: { $gte: from, $lte: to } } },
-      { $group: { _id: null, amount: { $sum: { $multiply: ["$qtySold", "$priceSold"] } }, qty: { $sum: "$qtySold" }, count: { $sum: 1 } } },
+      // Unwind first: amount, qty and count are all per line item, and the old
+      // model stored one document per item, so this preserves the meaning.
+      { $unwind: "$items" },
+      { $group: { _id: null, amount: { $sum: { $multiply: ["$items.qtySold", "$items.priceSold"] } }, qty: { $sum: "$items.qtySold" }, count: { $sum: 1 } } },
     ]);
 
     // Gas POS — confirmed/dispensed sales only (voided and pending excluded)
@@ -1079,9 +1083,10 @@ export const previewSalesPosting = async (req: AuthenticatedRequest, res: Respon
         { $match: { fillingStation: stationId, status: "Completed", shiftDate: { $gte: from, $lte: to } } },
         { $group: { _id: "$product", amount: { $sum: "$totalAmount" }, qty: { $sum: "$litresSold" }, count: { $sum: 1 } } },
       ]),
-      LubricantSale.aggregate([
+      LubricantTransaction.aggregate([
         { $match: { fillingStation: stationId, createdAt: { $gte: from, $lte: to } } },
-        { $group: { _id: null, amount: { $sum: { $multiply: ["$qtySold", "$priceSold"] } }, qty: { $sum: "$qtySold" }, count: { $sum: 1 } } },
+        { $unwind: "$items" },
+        { $group: { _id: null, amount: { $sum: { $multiply: ["$items.qtySold", "$items.priceSold"] } }, qty: { $sum: "$items.qtySold" }, count: { $sum: 1 } } },
       ]),
       GasSale.aggregate([
         { $match: { fillingStation: stationId, status: { $in: ["confirmed", "dispensed"] }, createdAt: { $gte: from, $lte: to } } },

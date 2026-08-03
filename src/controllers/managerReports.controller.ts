@@ -6,7 +6,9 @@ import CashReconciliation from "../models/cashReconciliation.model";
 import Staff from "../models/staff.model";
 import Pump from "../models/pump.model";
 import Tank from "../models/tanks.model";
-import LubricantSale from "../models/lubricant-sale.models";
+// LubricantSale has no writer anywhere in the codebase; the POS writes
+// LubricantTransaction. Reading the old model returned zero every time.
+import LubricantTransaction from "../models/lubricant-transaction.model";
 import ActivityLog from "../models/activityLog.model";
 import Expense from "../models/expense.model";
 
@@ -715,24 +717,28 @@ export const exportReport = async (req: AuthenticatedRequest, res: Response) => 
         break;
       }
       case "lubricant_inventory": {
-        const rows = await LubricantSale.find({
+        const rows = await LubricantTransaction.find({
           fillingStation: sid,
           createdAt: { $gte: start, $lte: end },
         })
-          .populate("lubricant", "productName barcode")
+          .populate("items.lubricant", "productName barcode")
           .populate("staff", "firstName lastName role")
           .lean();
         payload = rows;
-        csvRows = rows.map((r: any) => ({
-          id: r._id?.toString(),
-          createdAt: r.createdAt,
-          txnId: r.txnId,
-          qtySold: r.qtySold,
-          priceSold: r.priceSold,
-          paymentMethod: r.paymentMethod,
-          lubricant: r.lubricant?.productName || "",
-          staff: isPopulated(r.staff) ? `${r.staff.firstName} ${r.staff.lastName}` : "",
-        }));
+        // A transaction is a basket, so a two-product sale becomes two report
+        // lines — one per product, which is what this report always showed.
+        csvRows = rows.flatMap((r: any) =>
+          (r.items || []).map((item: any) => ({
+            id: r._id?.toString(),
+            createdAt: r.createdAt,
+            txnId: r.txnId,
+            qtySold: item.qtySold,
+            priceSold: item.priceSold,
+            paymentMethod: r.paymentMethod,
+            lubricant: item.lubricant?.productName || item.productName || "",
+            staff: isPopulated(r.staff) ? `${r.staff.firstName} ${r.staff.lastName}` : "",
+          }))
+        );
         break;
       }
       case "activity_logs": {

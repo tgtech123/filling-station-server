@@ -49,6 +49,19 @@ export interface IStaff extends Document {
    */
   isOwner: boolean;
   /**
+   * Group accountant — the chain's CFO / financial controller.
+   *
+   * An accountant carrying this flag sits at the HEAD-OFFICE station and may act
+   * as the approving checker for any branch beneath it. It is a flag rather than
+   * a new role because `role` drives plan staff limits, the sidebar, department
+   * confinement and dozens of checkRole() gates; a flag adds the capability
+   * without disturbing any of them — the same reasoning as [isOwner].
+   *
+   * It grants APPROVAL rights across the chain only. It never lets its holder
+   * create entries in a branch, so the maker and the checker stay distinct.
+   */
+  isGroupAccountant: boolean;
+  /**
    * The real address, parked here while the account's station is deleted.
    *
    * `email` is uniquely indexed, so a staff record left behind by a deleted
@@ -112,6 +125,7 @@ const StaffSchema = new Schema<IStaff>(
     managedStations: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
     isSuperManager: { type: Boolean, default: false },
     isOwner: { type: Boolean, default: false },
+    isGroupAccountant: { type: Boolean, default: false },
     releasedEmail: { type: String, default: null },
     gasStation: { type: Boolean, default: false },
     department: { type: String, enum: ["fuel", "gas", "both"], default: "fuel" },

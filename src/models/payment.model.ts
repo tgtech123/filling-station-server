@@ -13,6 +13,7 @@ export interface IPayment extends Document {
   transactionRef: string;
   paidAt: Date;
   billingCycle: "monthly" | "yearly" | "free";
+  receiptSentAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,6 +71,18 @@ const PaymentSchema = new Schema<IPayment>(
       type: String,
       enum: ["monthly", "yearly", "free"],
       default: "monthly",
+    },
+    /**
+     * When the receipt email went out — and the lock that guarantees it goes out
+     * ONCE. A successful payment is confirmed from three places (the two
+     * verifyPayment branches and the Paystack webhook), any of which can run for
+     * the same reference; the webhook in particular retries. Claiming this field
+     * atomically is what stops a customer receiving three receipts for one
+     * payment. Null means "not sent yet", so a failed send can be retried.
+     */
+    receiptSentAt: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }

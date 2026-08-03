@@ -11,6 +11,7 @@ import AdminLog from "../models/adminLog.model";
 import Staff from "../models/staff.model";
 import { deleteCachePattern, invalidateStationAuthCache } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
+import { sendPaymentReceipt } from "../services/paymentReceipt.service";
 import {
   computeDowngradeConflicts,
   buildStaffLimits,
@@ -379,6 +380,23 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
         { status: "success", paidAt: new Date() }
       );
 
+      // Receipt for the guest flow. Deliberately not awaited: the charge has
+      // already succeeded, and a mail failure must not turn that into an error
+      // on the customer's screen. sendPaymentReceipt never throws and de-dupes
+      // against the webhook, so firing it here is safe.
+      sendPaymentReceipt({
+        transactionRef: reference,
+        to: guestEmail,
+        customerName: guestName,
+        stationName: metadata.stationName,
+        planName,
+        billingCycle,
+        baseAmount: metadata.baseAmount,
+        taxAmount: metadata.taxAmount,
+        taxPercentage: metadata.taxPercentage,
+        totalAmount: chargedAmount,
+      });
+
       // Check if this email already has a manager account
       const existingManager = await Staff.findOne({
         email: guestEmail?.toLowerCase().trim(),
@@ -502,6 +520,29 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
       { transactionRef: reference },
       { status: "success", paidAt: now }
     );
+
+    // Receipt for an existing station upgrading or renewing. The owner is the
+    // billing contact — they are the one who can act on it. Not awaited, for the
+    // same reason as the guest branch above.
+    Staff.findOne({ station: stationId, isOwner: true })
+      .select("email firstName lastName")
+      .lean()
+      .then((owner: any) =>
+        sendPaymentReceipt({
+          transactionRef: reference,
+          to: owner?.email,
+          customerName: owner ? `${owner.firstName} ${owner.lastName}`.trim() : null,
+          stationName: metadata.stationName,
+          planName,
+          billingCycle,
+          baseAmount: metadata.baseAmount,
+          taxAmount: metadata.taxAmount,
+          taxPercentage: metadata.taxPercentage,
+          totalAmount: chargedAmount,
+          expiryDate,
+        })
+      )
+      .catch((e) => console.error("[receipt] owner lookup failed:", e?.message));
 
     await deleteCachePattern(`dashboard:*:${stationId}`);
 
@@ -647,6 +688,26 @@ export const paystackWebhook = async (req: any, res: Response) => {
         ? await FillingStation.findById(stationId).select("name").lean()
         : null;
       const webhookStationName = (station as any)?.name || meta?.guestName || customer?.email || "Unknown";
+
+      // Receipt from the webhook. This is the path that matters when the
+      // customer closes the tab before the browser ever calls verify — without
+      // it, a paying customer who navigated away would get nothing at all.
+      // SMS-credit top-ups are excluded: this template describes a subscription.
+      if (meta.type !== "sms_credits") {
+        sendPaymentReceipt({
+          transactionRef: reference,
+          to: customer?.email || meta?.guestEmail,
+          customerName: meta?.guestName,
+          stationName: (station as any)?.name,
+          planName: meta?.planName || "Subscription",
+          billingCycle,
+          baseAmount: meta?.baseAmount,
+          taxAmount: meta?.taxAmount,
+          taxPercentage: meta?.taxPercentage,
+          totalAmount: amount / 100,
+          expiryDate,
+        });
+      }
 
       AdminLog.create({
         eventType: "subscription_payment",
