@@ -3,7 +3,9 @@ import mongoose, { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import Pump from "../models/pump.model";
 import Tank from "../models/tanks.model";
-import LubricantSale from "../models/lubricant-sale.models";
+// The POS writes LubricantTransaction; LubricantSale has no writer anywhere in
+// the codebase, so these figures always read an empty collection and returned 0.
+import LubricantTransaction from "../models/lubricant-transaction.model";
 import Lubricant from "../models/lubricant.model";
 import Delivery from "../models/delivery.model";
 import Expense from "../models/expense.model";
@@ -107,7 +109,7 @@ export const getFinancialOverview = async (req: AuthenticatedRequest, res: Respo
     const fuelRevenue = Number(fuelRevenueResult[0]?.fuelRevenue || 0);
 
     // Lubricant revenue
-    const lubricantRevenueResult = await LubricantSale.aggregate([
+    const lubricantRevenueResult = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: stationObjectId,
@@ -117,7 +119,7 @@ export const getFinancialOverview = async (req: AuthenticatedRequest, res: Respo
       {
         $group: {
           _id: null,
-          lubricantRevenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          lubricantRevenue: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -238,7 +240,7 @@ export const getRevenueBreakdown = async (req: AuthenticatedRequest, res: Respon
     });
 
     // Get lubricant revenue
-    const lubricantRevenueResult = await LubricantSale.aggregate([
+    const lubricantRevenueResult = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: stationObjectId,
@@ -248,7 +250,7 @@ export const getRevenueBreakdown = async (req: AuthenticatedRequest, res: Respon
       {
         $group: {
           _id: null,
-          revenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          revenue: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -448,7 +450,7 @@ export const getRevenueAnalysis = async (req: AuthenticatedRequest, res: Respons
     };
 
     const getLubricantRevenue = async (startDate: Date, endDate: Date) => {
-      const result = await LubricantSale.aggregate([
+      const result = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: stationObjectId,
@@ -458,7 +460,7 @@ export const getRevenueAnalysis = async (req: AuthenticatedRequest, res: Respons
         {
           $group: {
             _id: null,
-            revenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+            revenue: { $sum: "$totalAmount" },
           },
         },
       ]).exec();
@@ -618,18 +620,22 @@ export const getProfitMargins = async (req: AuthenticatedRequest, res: Response)
     }
 
     // Get lubricant revenue and cost
-    const lubricantRevenueResult = await LubricantSale.aggregate([
+    const lubricantRevenueResult = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: stationObjectId,
           createdAt: { $gte: startDate, $lte: endDate },
         },
       },
+      // Quantity lives on the basket's line items, so unwind before summing.
+      // Revenue is summed from the same unwound items to stay consistent with
+      // it — using the basket total here would multiply it by the item count.
+      { $unwind: "$items" },
       {
         $group: {
           _id: null,
-          revenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
-          qtySold: { $sum: "$qtySold" },
+          revenue: { $sum: { $multiply: ["$items.qtySold", "$items.priceSold"] } },
+          qtySold: { $sum: "$items.qtySold" },
         },
       },
     ]).exec();
@@ -645,19 +651,21 @@ export const getProfitMargins = async (req: AuthenticatedRequest, res: Response)
     const lubricantRevenue = Number(lubricantRevenueResult[0]?.revenue || 0);
     
     // Get lubricant sales with populated lubricant to get unitCost
-    const lubricantSales = await LubricantSale.find({
+    const lubricantTxns = await LubricantTransaction.find({
       fillingStation: stationObjectId,
       createdAt: { $gte: startDate, $lte: endDate },
     })
-      .populate("lubricant", "unitCost")
+      .populate("items.lubricant", "unitCost")
       .lean();
-    
-    // Calculate total cost: sum of (qtySold * unitCost) for each sale
+
+    // Cost accrues per line item — a transaction is a basket, not a single sale.
     let lubricantCost = 0;
-    lubricantSales.forEach((sale: any) => {
-      if (sale.lubricant && sale.lubricant.unitCost) {
-        lubricantCost += Number(sale.qtySold) * Number(sale.lubricant.unitCost);
-      }
+    lubricantTxns.forEach((txn: any) => {
+      (txn.items || []).forEach((item: any) => {
+        if (item.lubricant && item.lubricant.unitCost) {
+          lubricantCost += Number(item.qtySold) * Number(item.lubricant.unitCost);
+        }
+      });
     });
 
     // Map fuel types to display names

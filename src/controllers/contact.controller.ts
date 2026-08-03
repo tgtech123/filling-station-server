@@ -10,7 +10,13 @@ export const ContactUs = async (req:Request, res:Response) => {
 try {
     await transporter.sendMail({
         from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
-        to: "fueldesksupport@gmail.com",
+        // Where contact-form messages land. This was hardcoded to a Gmail
+        // address, so moving the sender to a company domain would have left
+        // enquiries still arriving in the old inbox with nothing in the config
+        // to explain why. SUPPORT_EMAIL overrides it; EMAIL_USER is the fallback
+        // so it follows the sender by default rather than a stale literal.
+        to: process.env.SUPPORT_EMAIL || process.env.EMAIL_USER || "fueldesksupport@gmail.com",
+        replyTo: email,
         subject: `Contact Message from ${firstName + " " + lastName}`,
         html: `
   <div style="font-family: Arial, sans-serif; background-color:#f4f6f8; padding:20px;">
@@ -34,7 +40,7 @@ try {
         </div>
 
         <p style="font-size:13px; color:#666; margin-top:30px;">
-          âš  Please respond to this message as soon as possible.
+          ⚠ Please respond to this message as soon as possible.
         </p>
       </div>
 

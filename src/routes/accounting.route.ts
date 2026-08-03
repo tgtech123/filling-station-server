@@ -1,6 +1,7 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { checkRole } from "../middlewares/checkRole";
+import { requireApprover } from "../middlewares/requireApprover";
 
 import {
   listAccounts, createAccount, updateAccount, deleteAccount,
@@ -48,8 +49,15 @@ router.use(requireAuth);
 // overview ONLY (see /reports/dashboard below) — every working endpoint is
 // accountant-exclusive by product decision.
 const acct = checkRole("accountant");
+// Senior accounting actions. Same role as `acct` — the distinction is intent,
+// not privilege, and it deliberately does NOT include the owner: these are
+// bookkeeping operations, not authorisations.
 const acctSenior = checkRole("accountant");
 const overview = checkRole("accountant", "manager", "admin");
+// The checker in maker-checker. Wider than `acct` on purpose: a one-accountant
+// station has nobody else of that role, so approvals would deadlock. See
+// requireApprover for who qualifies and why.
+const approver = requireApprover;
 
 // ─── Chart of Accounts ────────────────────────────────────────────────────────
 router.get("/accounts",            acct,       listAccounts);
@@ -60,11 +68,14 @@ router.get("/accounts/export",     acct,       exportAccounts);
 router.post("/accounts/import",    acctSenior, importAccounts);
 
 // ─── Journal Entries ─────────────────────────────────────────────────────────
-router.get("/journals",            acct, listJournals);
-router.get("/journals/:id",        acct, getJournal);
+// Readable by the approver set, not just accountants: an owner or group
+// accountant who cannot open the entry they are being asked to authorise can
+// only rubber-stamp it, which defeats the point of a checker.
+router.get("/journals",            approver, listJournals);
+router.get("/journals/:id",        approver, getJournal);
 router.post("/journals",           acct, createJournal);
-router.patch("/journals/:id/approve", acctSenior, approveJournal);
-router.patch("/journals/:id/reject",  acctSenior, rejectJournal);
+router.patch("/journals/:id/approve", approver, approveJournal);
+router.patch("/journals/:id/reject",  approver, rejectJournal);
 router.post("/journals/:id/reverse",  acctSenior, reverseJournal);
 
 // ─── Periods ─────────────────────────────────────────────────────────────────
@@ -87,10 +98,10 @@ router.post("/ap/invoices/:id/book",    acct,       bookAPInvoice);
 router.post("/ap/invoices/:id/void",    acctSenior, voidAPInvoice);
 router.get("/ap/open-pos",              acct,       listOpenPOs);
 
-router.get("/ap/batches",               acct,       listPaymentBatches);
+router.get("/ap/batches",               approver,   listPaymentBatches);
 router.post("/ap/batches",              acct,       createPaymentBatch);
-router.patch("/ap/batches/:id/approve", acctSenior, approvePaymentBatch);
-router.post("/ap/batches/:id/execute",  acctSenior, executePaymentBatch);
+router.patch("/ap/batches/:id/approve", approver, approvePaymentBatch);
+router.post("/ap/batches/:id/execute",  approver, executePaymentBatch);
 router.post("/ap/batches/:id/reverse",  acctSenior, reversePaymentBatch);
 router.get("/ap/batches/:id/eft-file",  acct,       generateEFTFile);
 router.get("/ap/batches/:id/checks",    acct,       getCheckPrintData);

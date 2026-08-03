@@ -79,14 +79,14 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
     const recipient = supplierEmail?.trim() || "";
     const willEmail = !!(sendEmail && recipient);
 
-    // Respond immediately â€” don't block on SMTP
+    // Respond immediately — don't block on SMTP
     if (willEmail) {
       procurement.status = "awaiting_delivery";
       await GasProcurement.findByIdAndUpdate(procurement._id, { status: "awaiting_delivery" });
     }
 
     res.status(201).json({
-      message: willEmail ? "Order placed â€” sending email to supplier" : "Order placed",
+      message: willEmail ? "Order placed — sending email to supplier" : "Order placed",
       data: { ...procurement.toObject(), emailSent: false, emailPending: willEmail },
     });
 
@@ -95,7 +95,7 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
       transporter.sendMail({
         from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
         to:      recipient,
-        subject: `Gas Purchase Order â€” ${orderNumber}`,
+        subject: `Gas Purchase Order — ${orderNumber}`,
         html: buildOrderEmail({
           orderNumber,
           stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
@@ -165,13 +165,13 @@ export const confirmDelivery = async (req: AuthenticatedRequest, res: Response) 
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     }).catch((e: any) => console.error("Notification error (gas PO delivered -> accountant):", e));
 
-    return res.status(200).json({ message: "Delivery confirmed â€” awaiting manager validation", data: order });
+    return res.status(200).json({ message: "Delivery confirmed — awaiting manager validation", data: order });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
 };
 
-// â”€â”€ 3. Manager validates â€” stock added to specific tank here â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ 3. Manager validates — stock added to specific tank here â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const validateProcurement = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const station = req.user?.station;
@@ -225,7 +225,7 @@ export const validateProcurement = async (req: AuthenticatedRequest, res: Respon
     ]);
 
     return res.status(200).json({
-      message: `Validated â€” ${finalQty} kg added to "${tank.name}"`,
+      message: `Validated — ${finalQty} kg added to "${tank.name}"`,
       data: order,
     });
   } catch (err: any) {
@@ -274,7 +274,7 @@ export const resendOrderEmail = async (req: AuthenticatedRequest, res: Response)
     transporter.sendMail({
       from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
       to:      recipient,
-      subject: `Gas Purchase Order â€” ${order.orderNumber}`,
+      subject: `Gas Purchase Order — ${order.orderNumber}`,
       html: buildOrderEmail({
         orderNumber:  order.orderNumber,
         stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
@@ -411,7 +411,7 @@ function buildOrderEmail(p: {
 
     <p style="margin-top:20px;font-size:13px;color:#888;">
       This is an official purchase order from <strong>${p.stationName}</strong> powered by FuelDesk.
-      Please do not reply to this email â€” contact the station directly using the details above.
+      Please do not reply to this email — contact the station directly using the details above.
     </p>
   </div>
 

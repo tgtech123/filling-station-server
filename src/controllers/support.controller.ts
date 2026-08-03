@@ -75,7 +75,7 @@ export const createTicket = async (req: AuthenticatedRequest, res: Response) => 
       transporter.sendMail({
         from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
         to: settings.contactEmail,
-        subject: `[${priority.toUpperCase()}] New Support Ticket â€” ${title}`,
+        subject: `[${priority.toUpperCase()}] New Support Ticket — ${title}`,
         html: `
           <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #eee;border-radius:8px;overflow:hidden;">
             <div style="background:#0080ff;padding:20px;color:white;">
@@ -221,7 +221,7 @@ export const respondToTicket = async (req: AuthenticatedRequest, res: Response) 
     transporter.sendMail({
       from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
       to: ticket.userEmail,
-      subject: `Re: ${ticket.title} â€” Your support ticket has been answered`,
+      subject: `Re: ${ticket.title} — Your support ticket has been answered`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #eee;border-radius:8px;overflow:hidden;">
           <div style="background:#0080ff;padding:20px;color:white;">

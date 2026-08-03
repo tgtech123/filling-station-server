@@ -4,7 +4,12 @@ import { AuthenticatedRequest } from "../interfaces";
 import CashReconciliation from "../models/cashReconciliation.model";
 import Shift from "../models/shift.model";
 import Expense from "../models/expense.model";
-import LubricantSale from "../models/lubricant-sale.models";
+// The POS writes LubricantTransaction, never LubricantSale — that model has no
+// writer anywhere in the codebase, so every lubricant figure on the accountant's
+// pages read an empty collection and came back as zero. trends.controller.ts was
+// already corrected; these pages were missed. A transaction is a basket, so
+// revenue is its totalAmount and per-product detail lives in items[].
+import LubricantTransaction from "../models/lubricant-transaction.model";
 import Delivery from "../models/delivery.model";
 import Tank from "../models/tanks.model";
 import Pump from "../models/pump.model";
@@ -259,7 +264,7 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
         },
       ]).exec();
 
-      const lubricantSales = await LubricantSale.aggregate([
+      const lubricantSales = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: new Types.ObjectId(stationId),
@@ -269,7 +274,7 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
         {
           $group: {
             _id: null,
-            totalSales: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+            totalSales: { $sum: "$totalAmount" },
           },
         },
       ]).exec();
@@ -499,7 +504,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
       },
     ]).exec();
 
-    const lubricantRevenue = await LubricantSale.aggregate([
+    const lubricantRevenue = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),
@@ -509,7 +514,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          total: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -535,7 +540,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
         },
       ]).exec();
 
-      const prevLubricantRevenue = await LubricantSale.aggregate([
+      const prevLubricantRevenue = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: new Types.ObjectId(stationId),
@@ -545,7 +550,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+            total: { $sum: "$totalAmount" },
           },
         },
       ]).exec();
@@ -576,18 +581,21 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
     }
 
     // Lubricant COGS = cost price of lubricants sold (qty sold Ã— unit cost)
-    const lubricantSales = await LubricantSale.find({
+    const lubricantTxns = await LubricantTransaction.find({
       fillingStation: new Types.ObjectId(stationId),
       createdAt: { $gte: currentStart, $lte: currentEnd },
     })
-      .populate("lubricant", "unitCost")
+      .populate("items.lubricant", "unitCost")
       .lean();
 
+    // One transaction is a basket, so cost accrues per line item, not per doc.
     let currentLubricantCOGS = 0;
-    lubricantSales.forEach((sale: any) => {
-      if (sale.lubricant && (sale.lubricant as any).unitCost) {
-        currentLubricantCOGS += Number(sale.qtySold) * Number((sale.lubricant as any).unitCost);
-      }
+    lubricantTxns.forEach((txn: any) => {
+      (txn.items || []).forEach((item: any) => {
+        if (item.lubricant && item.lubricant.unitCost) {
+          currentLubricantCOGS += Number(item.qtySold) * Number(item.lubricant.unitCost);
+        }
+      });
     });
 
     const currentCOGS = currentFuelCOGS + currentLubricantCOGS;
@@ -614,17 +622,19 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
         });
       }
 
-      const prevLubricantSales = await LubricantSale.find({
+      const prevLubricantTxns = await LubricantTransaction.find({
         fillingStation: new Types.ObjectId(stationId),
         createdAt: { $gte: previousStart, $lte: previousEnd },
       })
-        .populate("lubricant", "unitCost")
+        .populate("items.lubricant", "unitCost")
         .lean();
 
-      prevLubricantSales.forEach((sale: any) => {
-        if (sale.lubricant && (sale.lubricant as any).unitCost) {
-          previousLubricantCOGS += Number(sale.qtySold) * Number((sale.lubricant as any).unitCost);
-        }
+      prevLubricantTxns.forEach((txn: any) => {
+        (txn.items || []).forEach((item: any) => {
+          if (item.lubricant && item.lubricant.unitCost) {
+            previousLubricantCOGS += Number(item.qtySold) * Number(item.lubricant.unitCost);
+          }
+        });
       });
 
       previousCOGS = previousFuelCOGS + previousLubricantCOGS;
@@ -732,14 +742,14 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
       const prevFuelMap: Record<string, number> = {};
       prevFuelByTypeAgg.forEach((item: any) => { prevFuelMap[(item._id || "OTHER").toUpperCase()] = Number(item.total || 0); });
 
-      const prevLubAgg = await LubricantSale.aggregate([
+      const prevLubAgg = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: new Types.ObjectId(stationId),
             createdAt: { $gte: previousStart, $lte: previousEnd },
           },
         },
-        { $group: { _id: null, total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+        { $group: { _id: null, total: { $sum: "$totalAmount" } } },
       ]).exec();
       const prevLubRev = Number(prevLubAgg[0]?.total || 0);
 
@@ -862,9 +872,9 @@ export const getBalanceSheet = async (req: AuthenticatedRequest, res: Response) 
       { $match: { fillingStation: new Types.ObjectId(stationId), shiftDate: { $gte: currentStart, $lte: currentEnd }, status: "Completed" } },
       { $group: { _id: null, total: { $sum: "$totalAmount" } } },
     ]).exec();
-    const bsLubRevAgg = await LubricantSale.aggregate([
+    const bsLubRevAgg = await LubricantTransaction.aggregate([
       { $match: { fillingStation: new Types.ObjectId(stationId), createdAt: { $gte: currentStart, $lte: currentEnd } } },
-      { $group: { _id: null, total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
     ]).exec();
     const bsExpAgg = await Expense.aggregate([
       { $match: { fillingStation: new Types.ObjectId(stationId), createdAt: { $gte: currentStart, $lte: currentEnd }, status: "Approved" } },
@@ -937,11 +947,11 @@ export const getBalanceSheet = async (req: AuthenticatedRequest, res: Response) 
       },
       { $group: { _id: null, total: { $sum: "$totalAmount" } } },
     ]).exec();
-    const balLubRevAgg = await LubricantSale.aggregate([
+    const balLubRevAgg = await LubricantTransaction.aggregate([
       {
         $match: { fillingStation: new Types.ObjectId(stationId), createdAt: { $gte: currentStart, $lte: currentEnd } },
       },
-      { $group: { _id: null, total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
     ]).exec();
     const balExpAgg = await Expense.aggregate([
       {
@@ -1040,7 +1050,7 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
     ]).exec();
 
     // Lubricant sales
-    const lubricantInflow = await LubricantSale.aggregate([
+    const lubricantInflow = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),
@@ -1050,7 +1060,7 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          total: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -1166,7 +1176,7 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
         },
       ]).exec();
 
-      const monthLubInflow = await LubricantSale.aggregate([
+      const monthLubInflow = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: new Types.ObjectId(stationId),
@@ -1176,7 +1186,7 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+            total: { $sum: "$totalAmount" },
           },
         },
       ]).exec();
@@ -1248,7 +1258,7 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
       .limit(10)
       .lean();
 
-    const recentLubricantSales = await LubricantSale.find({
+    const recentLubricantSales = await LubricantTransaction.find({
       fillingStation: new Types.ObjectId(stationId),
       createdAt: { $gte: startDate, $lte: endDate },
     })
@@ -1272,10 +1282,11 @@ export const getCashflow = async (req: AuthenticatedRequest, res: Response) => {
         amount: shift.totalAmount || 0,
         type: "Inflow",
       })),
-      ...recentLubricantSales.map((sale: any) => ({
-        date: sale.createdAt,
+      ...recentLubricantSales.map((txn: any) => ({
+        date: txn.createdAt,
+        // A transaction already carries the basket total — no line maths needed.
         service: "Lubricant sales",
-        amount: Number(sale.qtySold) * Number(sale.priceSold),
+        amount: Number(txn.totalAmount) || 0,
         type: "Inflow",
       })),
       ...recentExpenses.map((exp: any) => ({
@@ -1344,7 +1355,7 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
       },
     ]).exec();
 
-    const lubricantRevenue = await LubricantSale.aggregate([
+    const lubricantRevenue = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),
@@ -1354,7 +1365,7 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          total: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -1382,17 +1393,19 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
       });
     }
 
-    const lubricantSales = await LubricantSale.find({
+    const lubricantTxns = await LubricantTransaction.find({
       fillingStation: new Types.ObjectId(stationId),
       createdAt: { $gte: currentStart, $lte: currentEnd },
     })
-      .populate("lubricant", "unitCost")
+      .populate("items.lubricant", "unitCost")
       .lean();
 
-    lubricantSales.forEach((sale: any) => {
-      if (sale.lubricant && (sale.lubricant as any).unitCost) {
-        cogs += Number(sale.qtySold) * Number((sale.lubricant as any).unitCost);
-      }
+    lubricantTxns.forEach((txn: any) => {
+      (txn.items || []).forEach((item: any) => {
+        if (item.lubricant && item.lubricant.unitCost) {
+          cogs += Number(item.qtySold) * Number(item.lubricant.unitCost);
+        }
+      });
     });
 
     const expenses = await Expense.aggregate([
@@ -1440,9 +1453,9 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
       { $match: { fillingStation: new Types.ObjectId(stationId), shiftDate: { $gte: currentStart, $lte: currentEnd }, status: "Completed" } },
       { $group: { _id: null, total: { $sum: "$totalAmount" } } },
     ]).exec();
-    const krLubRevAgg = await LubricantSale.aggregate([
+    const krLubRevAgg = await LubricantTransaction.aggregate([
       { $match: { fillingStation: new Types.ObjectId(stationId), createdAt: { $gte: currentStart, $lte: currentEnd } } },
-      { $group: { _id: null, total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
     ]).exec();
     const krPeriodRevenue  = Number(krRevAgg[0]?.total || 0) + Number(krLubRevAgg[0]?.total || 0);
     const cash             = Math.max(0, krPeriodRevenue - totalExpenses);
@@ -1571,7 +1584,7 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
       },
     ]).exec();
 
-    const lubricantRevenue = await LubricantSale.aggregate([
+    const lubricantRevenue = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),
@@ -1581,7 +1594,7 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          total: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -1635,7 +1648,7 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
         },
       ]).exec();
 
-      const monthLubRevenue = await LubricantSale.aggregate([
+      const monthLubRevenue = await LubricantTransaction.aggregate([
         {
           $match: {
             fillingStation: new Types.ObjectId(stationId),
@@ -1645,7 +1658,7 @@ export const getProfitLoss = async (req: AuthenticatedRequest, res: Response) =>
         {
           $group: {
             _id: null,
-            total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+            total: { $sum: "$totalAmount" },
           },
         },
       ]).exec();
@@ -1728,7 +1741,7 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
       },
     ]).exec();
 
-    const lubricantRevenue = await LubricantSale.aggregate([
+    const lubricantRevenue = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),
@@ -1738,7 +1751,7 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          total: { $sum: "$totalAmount" },
         },
       },
     ]).exec();
@@ -1799,7 +1812,7 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
     });
 
     // Lubricant income breakdown
-    const lubricantBreakdown = await LubricantSale.aggregate([
+    const lubricantBreakdown = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(stationId),
@@ -1823,7 +1836,7 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
           barcode: { $first: "$lubricantDoc.barcode" },
           lubricantName: { $first: "$lubricantDoc.name" },
           unitSold: { $sum: "$qtySold" },
-          totalRevenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } },
+          totalRevenue: { $sum: "$totalAmount" },
           avgPricePerUnit: { $avg: "$priceSold" },
         },
       },
@@ -1901,9 +1914,9 @@ export const getTaxReport = async (req: AuthenticatedRequest, res: Response) => 
     const dpkRevenue  = revenueMap["DPK"]  || revenueMap["KEROSENE"] || 0;
     const totalFuelRevenue = Object.values(revenueMap).reduce((s, v) => s + v, 0);
 
-    const lubRevAgg = await LubricantSale.aggregate([
+    const lubRevAgg = await LubricantTransaction.aggregate([
       { $match: { fillingStation: stId, createdAt: { $gte: start, $lte: end } } },
-      { $group: { _id: null, revenue: { $sum: { $multiply: ["$qtySold", "$priceSold"] } } } },
+      { $group: { _id: null, revenue: { $sum: "$totalAmount" } } },
     ]).exec();
     const lubricantRevenue = Number(lubRevAgg[0]?.revenue || 0);
     const totalRevenue     = totalFuelRevenue + lubricantRevenue;
