@@ -13,6 +13,8 @@ export interface IPayment extends Document {
   transactionRef: string;
   paidAt: Date;
   billingCycle: "monthly" | "yearly" | "free";
+  guestEmail: string | null;
+  guestName: string | null;
   receiptSentAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -71,6 +73,31 @@ const PaymentSchema = new Schema<IPayment>(
       type: String,
       enum: ["monthly", "yearly", "free"],
       default: "monthly",
+    },
+    /**
+     * Who paid, for a guest checkout.
+     *
+     * This lived only in Paystack's metadata, which meant the payment belonged
+     * to nobody as far as our database was concerned. Two consequences: a
+     * customer who closed the tab had no way to claim what they had paid for,
+     * and registration accepted ANY matching reference — and references are
+     * `FS_GUEST_<timestamp>_<slug>`, which is guessable.
+     *
+     * Storing the payer's email binds the payment to a person. Recovery becomes
+     * "register with the email you paid with", and a stolen or guessed reference
+     * is useless without control of that mailbox.
+     */
+    guestEmail: {
+      type: String,
+      default: null,
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
+    guestName: {
+      type: String,
+      default: null,
+      trim: true,
     },
     /**
      * When the receipt email went out — and the lock that guarantees it goes out

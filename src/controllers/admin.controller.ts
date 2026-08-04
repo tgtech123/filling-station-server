@@ -1,5 +1,6 @@
 ﻿import { Request, Response } from "express";
 import mongoose, { Types } from "mongoose";
+import { activatePaidPlan, guestPlaceholderId } from "../services/planActivation.service";
 import { AuthenticatedRequest } from "../interfaces";
 import FillingStation from "../models/fillingStation.model";
 import Staff from "../models/staff.model";
@@ -1796,5 +1797,102 @@ export const transferStationOwnership = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'Server error', error: err.message });
   } finally {
     await session.endSession();
+  }
+};
+
+// ─── Unclaimed guest payments ────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/payments/unclaimed
+ *
+ * Customers who paid but never finished registering. Their money is captured
+ * and their plan is not active, and until now there was no way to even SEE
+ * them — they only surfaced when someone complained.
+ *
+ * This is the support queue for "I paid and nothing happened".
+ */
+export const getUnclaimedPayments = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const docs = await Payment.find({
+      status: "success",
+      fillingStation: guestPlaceholderId(),
+    })
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    const data = docs.map((p: any) => ({
+      _id: p._id,
+      transactionRef: p.transactionRef,
+      email: p.guestEmail || null,
+      name: p.guestName || null,
+      planName: p.planName,
+      billingCycle: p.billingCycle,
+      amount: p.amount,
+      paidAt: p.paidAt,
+      // Without an email the payment predates email binding and can only be
+      // matched by hand — worth flagging so support knows why.
+      claimable: Boolean(p.guestEmail),
+    }));
+
+    return res.status(200).json({
+      message: `${data.length} unclaimed payment(s)`,
+      data,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+/**
+ * POST /api/admin/payments/:paymentId/apply   { stationId }
+ *
+ * The manual lever for genuine edge cases — most often a customer who paid with
+ * one email and registered with another, which automatic recovery cannot and
+ * should not resolve on its own.
+ *
+ * Deliberately admin-only and audited: it grants a paid plan without a payment
+ * being made at that moment, so it must never be quiet.
+ */
+export const applyPaymentToStation = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { stationId } = req.body;
+    if (!stationId) return res.status(400).json({ message: "stationId is required" });
+
+    const payment = await Payment.findOne({
+      _id: req.params.paymentId,
+      status: "success",
+      fillingStation: guestPlaceholderId(),
+    });
+    if (!payment) {
+      return res.status(404).json({
+        message: "No unclaimed successful payment with that id — it may already have been applied.",
+      });
+    }
+
+    const station = await FillingStation.findById(stationId).select("name").lean();
+    if (!station) return res.status(404).json({ message: "Station not found" });
+
+    const { planSlug, expiryDate } = await activatePaidPlan(
+      payment,
+      stationId,
+      (station as any).name
+    );
+
+    await AdminLog.create({
+      eventType: "subscription_payment",
+      description:
+        `Admin applied payment ${payment.transactionRef} (${payment.planName}, ` +
+        `₦${payment.amount.toLocaleString()}) to station ${(station as any).name}`,
+      stationOrUser: (station as any).name,
+      status: "success",
+    }).catch(console.error);
+
+    return res.status(200).json({
+      message: `${payment.planName} activated on ${(station as any).name}`,
+      data: { planSlug, expiryDate, transactionRef: payment.transactionRef },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 };

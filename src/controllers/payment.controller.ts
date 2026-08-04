@@ -322,6 +322,10 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
       status: "pending",
       transactionRef: reference,
       billingCycle,
+      // Binds this payment to a person, so it can be claimed later by whoever
+      // controls the mailbox and by nobody else.
+      guestEmail: email.toLowerCase().trim(),
+      guestName: String(name).trim(),
     });
 
     return res.status(200).json({
@@ -452,7 +456,14 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
 
       await Payment.findOneAndUpdate(
         { transactionRef: reference },
-        { status: "success", paidAt: new Date() }
+        {
+          status: "success",
+          paidAt: new Date(),
+          // Backfill for payments created before guestEmail was stored, so older
+          // records become claimable too rather than being stranded.
+          ...(guestEmail ? { guestEmail: String(guestEmail).toLowerCase().trim() } : {}),
+          ...(guestName ? { guestName: String(guestName).trim() } : {}),
+        }
       );
 
       // Receipt for the guest flow. Deliberately not awaited: the charge has

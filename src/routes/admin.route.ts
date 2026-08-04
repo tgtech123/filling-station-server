@@ -22,6 +22,8 @@ import {
   deletePlan,
   getPaymentStats,
   getPayments,
+  getUnclaimedPayments,
+  applyPaymentToStation,
   getStationSubscriptions,
   getPlatformSettings,
   updatePlatformSettings,
@@ -77,6 +79,10 @@ router.delete("/plans/:planId", requireAuth, checkAdmin, deletePlan);
 
 router.get("/payments/stats", requireAuth, checkAdmin, getPaymentStats);
 router.get("/payments", requireAuth, checkAdmin, getPayments);
+// Customers who paid but never completed registration — the support queue for
+// "I paid and nothing happened", plus the manual lever to resolve one.
+router.get("/payments/unclaimed", requireAuth, checkAdmin, getUnclaimedPayments);
+router.post("/payments/:paymentId/apply", requireAuth, checkAdmin, applyPaymentToStation);
 router.get("/subscriptions", requireAuth, checkAdmin, getStationSubscriptions);
 
 // Public endpoint — no auth required

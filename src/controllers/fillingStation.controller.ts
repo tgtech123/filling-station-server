@@ -7,6 +7,7 @@ import Staff from "../models/staff.model";
 import AdminLog from "../models/adminLog.model";
 import SubscriptionPlan from "../models/subscriptionPlan.model";
 import Payment from "../models/payment.model";
+import { activatePaidPlan, findClaimablePayment } from "../services/planActivation.service";
 import { Types } from "mongoose";
 import { notifyAdmin } from "../utils/notifyHelpers";
 
@@ -149,60 +150,56 @@ export const createFillingStation = async (req: Request, res: Response) => {
     } else {
       // Check if there's a verified payment reference â€” activate plan immediately
       let planActivated = false;
-      if (paymentReference) {
-        // Two things this query MUST enforce, both of which it previously did not:
-        //
-        // 1. The payment must be UNCONSUMED. Guest payments are created against a
-        //    placeholder station id and repointed at the real station once used.
-        //    Without this filter the same successful reference could be replayed
-        //    to activate a paid plan on any number of new stations.
-        const GUEST_PLACEHOLDER = "000000000000000000000000";
-        const payment = await Payment.findOne({
-          transactionRef: paymentReference,
-          status: "success",
-          fillingStation: new Types.ObjectId(GUEST_PLACEHOLDER),
-        });
+      {
+        /**
+         * Claim a guest payment for this registration.
+         *
+         * Matched by the registrant's EMAIL, not by the reference. That single
+         * change fixes two things at once:
+         *
+         *  - Automatic recovery. A customer who paid and then closed the tab
+         *    lost the reference with their sessionStorage and had no way to
+         *    claim what they had bought. Now they simply register with the same
+         *    email and the plan is applied.
+         *
+         *  - Ownership. References are `FS_GUEST_<timestamp>_<slug>` and are
+         *    therefore guessable; previously any matching reference activated a
+         *    paid plan for whoever sent it. A payment now belongs to the address
+         *    that made it, so a guessed reference is worthless without the mailbox.
+         *
+         * The payment must also be UNCONSUMED — guest payments hold a placeholder
+         * station id until claimed — or one payment could activate any number of
+         * stations.
+         */
+        const registrantEmail = String(email || "").toLowerCase().trim();
+
+        // Shared with the admin "apply payment" action, so the money rules
+        // cannot drift between the two paths.
+        const payment = await findClaimablePayment(registrantEmail, paymentReference);
+
+        if (!payment && paymentReference) {
+          console.warn(
+            `[register] reference ${paymentReference} was supplied but does not match an ` +
+              `unclaimed payment for ${registrantEmail} — registering on trial instead.`
+          );
+        }
+
         if (payment) {
-          // 2. The plan comes from the PAYMENT, never from the request body.
-          //    `chosenPlan` is client-supplied: paying ₦15,000 for Pro and then
-          //    registering with selectedPlan "enterprise-max" would otherwise
-          //    have activated a ₦500,000 plan on a Pro payment.
-          const paidPlan = await SubscriptionPlan.findById(payment.plan);
-          if (paidPlan && paidPlan.slug !== chosenPlan) {
+          // The plan ALWAYS comes from the payment, never from the request body:
+          // `chosenPlan` is client-supplied, so paying ₦15,000 for Pro and then
+          // registering with selectedPlan "enterprise-max" must not grant a
+          // ₦500,000 plan. activatePaidPlan enforces that in one place.
+          const { planSlug } = await activatePaidPlan(
+            payment,
+            newStation._id as any,
+            stationName
+          );
+          if (planSlug !== chosenPlan) {
             console.warn(
-              `[register] plan mismatch for ${paymentReference}: request asked for "${chosenPlan}", ` +
-                `payment was for "${paidPlan.slug}" — honouring the payment.`
+              `[register] plan mismatch: request asked for "${chosenPlan}", ` +
+                `payment was for "${planSlug}" — honouring the payment.`
             );
           }
-          const now = new Date();
-          const expiryDate = new Date(now);
-          const billingCycle = payment.billingCycle || "monthly";
-          if (billingCycle === "yearly") {
-            expiryDate.setMonth(expiryDate.getMonth() + 12);
-          } else {
-            expiryDate.setMonth(expiryDate.getMonth() + 1);
-          }
-          const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
-          await FillingStation.findByIdAndUpdate(newStation._id, {
-            // The plan actually paid for, not the one the request asked for.
-            plan: paidPlan?.slug || chosenPlan,
-            planId: paidPlan?._id,
-            planStatus: "active",
-            planStartDate: now,
-            planExpiryDate: expiryDate,
-            staffLimits: {
-              attendants: mapLimit(paidPlan?.staffLimits?.attendants),
-              cashiers: mapLimit(paidPlan?.staffLimits?.cashiers),
-              accountants: mapLimit(paidPlan?.staffLimits?.accountants),
-              supervisors: mapLimit(paidPlan?.staffLimits?.supervisors),
-              managers: mapLimit(paidPlan?.staffLimits?.managers),
-            },
-          });
-          // Link this payment to the new station
-          await Payment.findByIdAndUpdate(payment._id, {
-            fillingStation: newStation._id,
-            stationName,
-          });
           planActivated = true;
         }
       }
