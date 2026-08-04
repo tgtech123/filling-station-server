@@ -20,11 +20,29 @@ import {
 
 const PAYSTACK_API = "https://api.paystack.co";
 
-const getFrontendUrl = () =>
-  process.env.FRONTEND_URL ||
-  (process.env.NODE_ENV === "production"
-    ? "https://filling-station-system.vercel.app"
-    : "http://localhost:3000");
+/**
+ * Where Paystack sends the customer after payment.
+ *
+ * This has to be the SAME ORIGIN the customer started checkout on: the verify
+ * page reads `payerInfo` and `selectedPlan` out of sessionStorage, which is
+ * origin-scoped, so a callback to a different host silently loses them.
+ *
+ * The old fallback pointed at filling-station-system.vercel.app, which now
+ * returns 404 — meaning an unset FRONTEND_URL sent every paying customer to a
+ * dead page AFTER their card was charged. Warn loudly instead of failing quietly.
+ */
+const getFrontendUrl = () => {
+  const configured = process.env.FRONTEND_URL;
+  if (configured) return configured.replace(/\/+$/, "");
+  if (process.env.NODE_ENV === "production") {
+    console.error(
+      "[payment] FRONTEND_URL is not set — falling back to https://fueldesks.com. " +
+        "Paystack callbacks and reset links depend on this; set it explicitly."
+    );
+    return "https://fueldesks.com";
+  }
+  return "http://localhost:3000";
+};
 
 const getPaystackHeaders = () => ({
   Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,

@@ -45,7 +45,7 @@ No query parameters or request body required.
   "data": {
     "_id": "664a1f2b3c4d5e6f7a8b9c0d",
     "platformName": "Flourish Station",
-    "contactEmail": "support@flourishstation.com",
+    "contactEmail": "support@fueldesks.com",
     "contactPhone": "+234 9030203547",
     "contactAddress": "Km 2 Airport Road, Rukpokwu, Port Harcourt, Rivers State",
     "currency": "Nigerian Naira (NGN)",
@@ -112,7 +112,7 @@ All fields are optional. Omitted fields are left unchanged.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `platformName` | string | `"Flourish Station"` | Platform display name |
-| `contactEmail` | string | `"support@flourishstation.com"` | Support email |
+| `contactEmail` | string | `"support@fueldesks.com"` | Support email |
 | `contactPhone` | string | `"+234 9030203547"` | Support phone |
 | `contactAddress` | string | `"Km 2 Airport Road..."` | Office address |
 | `currency` | string | `"Nigerian Naira (NGN)"` | Full currency label |
@@ -132,7 +132,7 @@ All fields are optional. Omitted fields are left unchanged.
 
 ```json
 {
-  "contactEmail": "hello@flourishstation.com",
+  "contactEmail": "info@fueldesks.com",
   "contactPhone": "+234 8012345678"
 }
 ```
@@ -167,7 +167,7 @@ Validation: each key must be a 2-letter country code and each value a number bet
   "data": {
     "_id": "664a1f2b3c4d5e6f7a8b9c0d",
     "platformName": "Flourish Station",
-    "contactEmail": "hello@flourishstation.com",
+    "contactEmail": "info@fueldesks.com",
     "contactPhone": "+234 8012345678",
     "updatedBy": "664a1f2b3c4d5e6f7a8b9c01",
     "updatedAt": "2026-04-13T10:30:00.000Z"
@@ -198,7 +198,7 @@ No query parameters, request body, or auth header required.
   "message": "Public settings retrieved",
   "data": {
     "platformName": "Flourish Station",
-    "contactEmail": "support@flourishstation.com",
+    "contactEmail": "support@fueldesks.com",
     "contactPhone": "+234 9030203547",
     "contactAddress": "Km 2 Airport Road, Rukpokwu, Port Harcourt, Rivers State",
     "currency": "Nigerian Naira (NGN)",

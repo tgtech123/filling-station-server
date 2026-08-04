@@ -246,7 +246,9 @@ export const submitCylinderProcurement = async (req: AuthenticatedRequest, res: 
             date: procurement.submittedAt!.toLocaleDateString("en-NG", { day: "numeric", month: "long", year: "numeric" }),
             notes: procurement.notes || "",
           }),
-        })
+        }).catch((err: any) =>
+      console.error("[mail] gas cylinder purchase order email failed:", err?.message)
+    )
         .then(() =>
           GasCylinderProcurement.findByIdAndUpdate(procurement._id, {
             emailSentAt: new Date(),

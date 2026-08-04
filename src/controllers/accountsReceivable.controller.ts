@@ -9,6 +9,8 @@ import {
   RecurringFrequency,
 } from "../models/accountsReceivable.model";
 import { TaxConfig, TaxRecord } from "../models/treasury.model";
+import FillingStation from "../models/fillingStation.model";
+import { sendARInvoiceEmail } from "../services/arInvoiceEmail.service";
 import {
   postJournal,
   nextDocNumber,
@@ -512,6 +514,92 @@ export const voidARInvoice = async (req: AuthenticatedRequest, res: Response) =>
     return res.status(200).json({ message: "Invoice voided", data: invoice });
   } catch (e: any) {
     return res.status(400).json({ message: e.message });
+  }
+};
+
+/**
+ * POST /api/accounting/ar/invoices/:id/send
+ *
+ * Emails the invoice to the customer. On demand, never on creation: accountants
+ * routinely raise an invoice, check it against the delivery note and correct a
+ * line before anyone outside should see it.
+ *
+ * Resending is allowed — chasing an unpaid invoice is a normal part of credit
+ * control — so this records a count rather than refusing a second send. Pass
+ * `{ reminder: true }` to reword it as a chase, and `{ email }` to override the
+ * destination for a one-off (a customer's accounts department, say) without
+ * altering the stored customer record.
+ */
+export const sendARInvoice = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const station = req.user?.station;
+    if (!station) return noStation(res);
+
+    const invoice = await ARInvoice.findOne({ _id: req.params.id, fillingStation: station });
+    if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+    if (invoice.status === "void") {
+      return res.status(400).json({ message: "This invoice is void and cannot be sent" });
+    }
+
+    const customer = await ARCustomer.findOne({ _id: invoice.customer, fillingStation: station }).lean();
+    const to = String(req.body?.email || (customer as any)?.email || "").trim();
+    if (!to || !to.includes("@")) {
+      return res.status(400).json({
+        message: `No email address for ${invoice.customerName}. Add one to the customer record, or pass an address to send to.`,
+        missingCustomerEmail: true,
+      });
+    }
+
+    const station_ = await FillingStation.findById(station).select("name").lean();
+    const balanceDue = round2(invoice.total - invoice.amountPaid - invoice.creditApplied);
+
+    // Deliberately awaited and NOT swallowed: the accountant is watching for a
+    // result. Reporting success on an email that never left is worse than an error.
+    await sendARInvoiceEmail({
+      to,
+      customerName: invoice.customerName,
+      invoiceNumber: invoice.invoiceNumber,
+      invoiceDate: invoice.invoiceDate,
+      dueDate: invoice.dueDate,
+      lines: invoice.lines.map((l: any) => ({
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        amount: l.amount,
+      })),
+      subtotal: invoice.subtotal,
+      taxAmount: invoice.taxAmount,
+      total: invoice.total,
+      amountPaid: invoice.amountPaid,
+      balanceDue,
+      currency: invoice.currency,
+      notes: invoice.notes,
+      stationName: (station_ as any)?.name || "FuelDesk",
+      isReminder: Boolean(req.body?.reminder),
+    });
+
+    invoice.emailSentAt = new Date();
+    invoice.emailSentTo = to;
+    invoice.emailSentCount = (invoice.emailSentCount || 0) + 1;
+    // A draft that has now reached the customer is, by definition, sent. Later
+    // statuses (partially_paid, paid, overdue) describe payment and must stand.
+    if (invoice.status === "draft") invoice.status = "sent";
+    await invoice.save();
+
+    audit({
+      stationId: station, userId: req.user!.id, action: "ar.invoice.send",
+      entity: "ARInvoice", entityId: invoice._id as Types.ObjectId,
+      summary: `${invoice.invoiceNumber} emailed to ${to}${req.body?.reminder ? " (reminder)" : ""}`,
+    });
+
+    return res.status(200).json({
+      message: `Invoice sent to ${to}`,
+      data: invoice,
+    });
+  } catch (e: any) {
+    // MailError already carries a human explanation (unverified sender, IP
+    // allowlist, timeout) — pass it through so the accountant can act on it.
+    return res.status(502).json({ message: e.message || "Could not send the invoice" });
   }
 };
 

@@ -15,7 +15,7 @@ try {
         // enquiries still arriving in the old inbox with nothing in the config
         // to explain why. SUPPORT_EMAIL overrides it; EMAIL_USER is the fallback
         // so it follows the sender by default rather than a stale literal.
-        to: process.env.SUPPORT_EMAIL || process.env.EMAIL_USER || "fueldesksupport@gmail.com",
+        to: process.env.SUPPORT_EMAIL || process.env.EMAIL_USER || "info@fueldesks.com",
         replyTo: email,
         subject: `Contact Message from ${firstName + " " + lastName}`,
         html: `

@@ -234,7 +234,9 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
           date:  procurement.submittedAt!.toLocaleDateString("en-NG", { day: "numeric", month: "long", year: "numeric" }),
           notes: procurement.notes || "",
         }),
-      })
+      }).catch((err: any) =>
+      console.error("[mail] lubricant purchase order email failed:", err?.message)
+    )
         .then(() =>
           LubricantProcurement.findByIdAndUpdate(procurement._id, {
             emailSentAt: new Date(),

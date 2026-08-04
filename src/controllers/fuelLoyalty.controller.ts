@@ -11,7 +11,9 @@ import Shift from "../models/shift.model";
 import { sendSms } from "../utils/smsHelper";
 import { getLivePumpPrices } from "../utils/fuelPrices";
 
-const FRONTEND_URL = process.env.FRONTEND_URL || "https://filling-station-system.vercel.app";
+// Fallback was the old Vercel deployment, which now 404s — a loyalty link sent
+// to a customer would have gone nowhere.
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://fueldesks.com";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

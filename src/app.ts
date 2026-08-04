@@ -99,6 +99,13 @@ app.use(
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Treat apex and www as the same site. Configuring one and serving the
+      // other is an easy mistake with no visible symptom on the server: the page
+      // loads fine and only its API calls are refused, so the app looks broken
+      // rather than misconfigured. This cost a live pricing page once already.
+      const stripWww = (u: string) => u.replace(/^(https?:\/\/)www\./i, "$1");
+      if (allowedOrigins.some((o) => stripWww(o) === stripWww(origin)))
+        return callback(null, true);
       // Vercel preview deployments are allowed outside production only;
       // production is pinned to the explicit allowlist above.
       if (process.env.NODE_ENV !== "production" && origin.endsWith(".vercel.app"))

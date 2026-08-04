@@ -23,7 +23,7 @@ const createAdmin = async () => {
     await Staff.create({
       firstName: "Super",
       lastName: "Admin",
-      email: "admin@flourishstation.com",
+      email: "admin@fueldesks.com",
       password: hashedPassword,
       role: "admin",
       responsibility: [],
@@ -33,7 +33,7 @@ const createAdmin = async () => {
 
     console.log("✅ Admin created!");
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("📧 Email: admin@flourishstation.com");
+    console.log("📧 Email: admin@fueldesks.com");
     console.log("🔑 Password: Admin@123456");
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━");
     console.log("⚠️  Change after first login!");
