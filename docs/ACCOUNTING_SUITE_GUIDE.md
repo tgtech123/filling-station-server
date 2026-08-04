@@ -12,10 +12,43 @@
 
 - **Base URL:** `/api/accounting`
 - **Auth:** `Authorization: Bearer <token>` on every request.
-- **Role:** the suite is **accountant-only**. The single exception is the
-  executive overview `GET /reports/dashboard`, which `manager` and `admin` may
-  also read (no document access). Managers see *only* the overview card in the
-  UI; every working screen is the accountant's.
+- **Role:** the suite is **accountant-only** for everything that creates or edits
+  a document. Two deliberate exceptions:
+  - the executive overview `GET /reports/dashboard`, which `manager` and `admin`
+    may also read (no document access);
+  - the **approver set** described below, which may read and authorise — but
+    never originate — journals and payment batches.
+
+  Managers see *only* the overview card in the UI; every working screen is the
+  accountant's.
+
+### Who may approve (maker-checker)
+
+Journals above the approval threshold and every supplier payment batch are held
+until a **second person** authorises them. The maker can never approve their own
+work — that rule is absolute and applies to everyone below.
+
+The problem this solves: the approver set used to be `accountant`, the same role
+as the maker. A station with **one** accountant therefore had a checker rule with
+no possible checker — large journals sat pending forever and no supplier batch
+could ever be released. The control did not merely fail to protect anything, it
+deadlocked the books.
+
+Three kinds of person may now approve:
+
+| Approver | When it applies |
+|---|---|
+| Another **accountant** at the same station | A finance team of two or more — the textbook arrangement |
+| The **station owner** | The one-accountant station. They approve only; they still cannot create entries, so maker and checker remain different people |
+| A **group accountant** (chain CFO) | Multi-branch chains. An accountant at the head-office station, flagged `isGroupAccountant`, may authorise for any branch beneath it |
+
+Appointing a group accountant is the **owner's** decision alone, made in the staff
+editor, and only on an accountant. It grants approval rights across the chain —
+never the ability to originate entries inside a branch.
+
+Approvers can also **read** journals and payment batches. An approver who cannot
+open the document they are authorising can only rubber-stamp it, which defeats
+the purpose of having a checker.
 - **Same-origin proxy:** the web app calls its own `/api/accounting/[...path]`
   Next.js route, which forwards to the backend. This avoids the cross-origin
   "Load failed" errors mobile browsers throw on direct API calls.
@@ -131,6 +164,7 @@ Each month-end run is once-per-period (blocked from double-posting) and audited.
 | GET | `/ar/customers/:id/open-invoices` | A | Open invoices for cash application |
 | GET/POST | `/ar/invoices` | A | List / create (per-product lines, recurring) |
 | POST | `/ar/invoices/:id/void` | A+ | Void |
+| POST | `/ar/invoices/:id/send` | A | Email the invoice to the customer (`{ reminder?, email? }`) |
 | POST | `/ar/recurring/run` | A | Generate due recurring invoices |
 | GET/POST | `/ar/credit-notes` | A | Credit notes |
 | GET/POST | `/ar/receipts` | A | Receipts + cash application |
@@ -209,7 +243,17 @@ cancelled before then (`POST /api/payments/downgrade/cancel`).
 - **Control accounts** (AP/AR/Inventory): no manual journal lines — only system
   documents post to them, so sub-ledgers never drift from the GL.
 - **Maker-checker**: large journals and all payment batches need a second
-  person; you cannot approve your own.
+  person; you cannot approve your own. The checker may be another accountant,
+  the station owner, or the chain's group accountant — see Section 1, "Who may
+  approve". The set is deliberately wider than `accountant` so a station with a
+  single accountant is not deadlocked.
+- **Invoices are sent deliberately, never automatically**: creating an AR
+  invoice does not email it. An accountant raises the invoice, checks it against
+  the delivery note, then presses **Send**. Sending records who it went to and
+  when, moves a `draft` to `sent`, and can be repeated to chase payment
+  (**Remind**), which rewords the email as a reminder. Unlike most background
+  email, a failure here is reported to the accountant rather than swallowed —
+  showing "Sent" over an email that never left would stop them chasing.
 - **Immutability**: posted entries are corrected by reversal, never edited.
 - **Period locks**: soft (reopenable) and hard (final) close; closed periods
   reject new postings.
