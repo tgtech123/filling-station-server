@@ -12,6 +12,7 @@ import Staff from "../models/staff.model";
 import { deleteCachePattern, invalidateStationAuthCache } from "../config/redis";
 import { notifyStation, notifyAdmin } from "../utils/notifyHelpers";
 import { sendPaymentReceipt } from "../services/paymentReceipt.service";
+import { findClaimablePayment } from "../services/planActivation.service";
 import {
   computeDowngradeConflicts,
   buildStaffLimits,
@@ -250,6 +251,37 @@ export const initializeGuestPayment = async (req: any, res: Response) => {
       return res.status(409).json({
         error: "account_exists",
         message: "An account with this email already exists. Please log in to upgrade your plan from your dashboard.",
+      });
+    }
+
+    /**
+     * Has this email already paid for something it never finished registering?
+     *
+     * Without this the customer is sent to Paystack again and charged a SECOND
+     * time for a plan they already own. That is exactly what happens after
+     * closing the browser: the reference lived in sessionStorage, so returning
+     * to the pricing page looks to the app like a brand-new buyer.
+     *
+     * Refusing to open a second charge is the only safe default — money taken
+     * twice is far harder to put right than an extra click.
+     */
+    const unclaimed = await findClaimablePayment(email);
+    if (unclaimed) {
+      const paidPlan: any = await SubscriptionPlan.findById(unclaimed.plan).lean();
+      return res.status(409).json({
+        error: "payment_pending_registration",
+        message:
+          `You have already paid for ${unclaimed.planName}. ` +
+          `Continue your registration — you will not be charged again.`,
+        data: {
+          reference: unclaimed.transactionRef,
+          planSlug: paidPlan?.slug || null,
+          planName: unclaimed.planName,
+          billingCycle: unclaimed.billingCycle,
+          amount: unclaimed.amount,
+          guestName: unclaimed.guestName,
+          guestEmail: unclaimed.guestEmail,
+        },
       });
     }
 
