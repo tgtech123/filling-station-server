@@ -112,6 +112,10 @@ If you are just starting out, select the **Free Plan**. You can upgrade later at
 
 > If you want to pay before registering, you can select a paid plan and complete payment through Paystack. Your plan will activate automatically once payment is confirmed.
 
+> **If something interrupts you after paying** — you close the browser, lose signal, or come back another day — **do not pay again.** Return to the Pricing page and start again using **the same email address you paid with**. FuelDesk will recognise the payment, skip checkout entirely, and take you straight to the registration form. See Section 17.6.
+>
+> The price shown on each plan card is **before VAT**; the VAT-inclusive total is shown at checkout before you confirm. Cards show **monthly** pricing by default — use **Bill Annually** for discounted yearly pricing.
+
 ### Step 3 — Fill in Your Personal Details (Step 1 of 4)
 
 You will need to enter:
@@ -892,6 +896,8 @@ Go to **Analytics** to see:
 ### 12.6 The Accounting Suite (Accountant)
 
 > **Who can use it:** Accountant only. The Manager sees a single read-only **Accounting Overview** (headline totals) but cannot open the working screens.
+>
+> **One exception — the Owner approves.** Large journals and supplier payment batches need a **second person**, and nobody may approve their own work. In a station with one accountant there is no second accountant, so the **owner** sees an **Approvals** entry in the Accounting menu and authorises there. The owner can only approve or reject — never create entries — so the two roles stay separate. Multi-branch chains can instead appoint a **group accountant** who approves across every branch (see 12.7).
 
 Beyond the simple reports above, FuelDesk includes a full **double-entry accounting system** — the kind a professional bookkeeper expects. Your accountant builds and runs it; nothing is pre-filled, so it is set up once at the start.
 
@@ -900,7 +906,7 @@ Beyond the simple reports above, FuelDesk includes a full **double-entry account
 - **Chart of Accounts** — your list of financial accounts (cash, bank, sales, cost of goods, VAT, etc.), created once at setup.
 - **Journal Entries** — manual double-entry postings. Every entry must balance (debits = credits). Large entries (₦500,000+) need a second person to approve — you cannot approve your own.
 - **Accounts Payable (money you owe)** — register supplier invoices and pay them in approved batches (with EFT file or cheque-printing data). Every PO-backed invoice goes through a **3-way match** — invoice vs what was ordered vs what was actually received — covering **lubricant POs, bulk gas POs, gas cylinder POs and fuel tanker deliveries**. An invoice that doesn't match within tolerance cannot be booked without an explicit, audited override. Whenever goods are received anywhere in the app, the accountant is **notified automatically** to register and match the supplier's invoice.
-- **Accounts Receivable (money owed to you)** — set up credit customers, raise invoices (including recurring ones), record receipts, and issue credit notes.
+- **Accounts Receivable (money owed to you)** — set up credit customers, raise invoices (including recurring ones), record receipts, and issue credit notes. Each invoice has a **Send** button that emails it to the customer, itemised, with the balance due and payment reference. Sending is deliberate rather than automatic, so an invoice can be checked against the delivery note first. Once sent, the button becomes **Remind** — use it to chase an overdue invoice, which rewords the email as a reminder and records how many times it has gone out.
 - **Bank Reconciliation** — import your bank statement (CSV) and auto-match it against your records.
 - **Tax Engine** — define VAT / WHT / Sales-Tax codes, preview tax, and produce a filing/liability report.
 - **Inventory Valuation** — fuel stock is valued automatically at weighted-average cost, so every sale's cost of goods is accurate.
@@ -920,6 +926,35 @@ Beyond the simple reports above, FuelDesk includes a full **double-entry account
 Each month-end task runs **once per month** and is recorded in the audit trail. Posted entries are never edited — to correct one, the accountant **reverses** it, which keeps a clean, auditable trail.
 
 > **For Managers:** open **Accounting** to see the **Executive Overview** — revenue, expenses, profit, and cash at a glance. The detailed working screens belong to the accountant.
+
+### 12.7 Approvals — Who Signs Off (Owner / Group Accountant)
+
+Two things always need a **second pair of eyes** before they take effect:
+
+- **Journal entries above the approval threshold** (₦500,000 by default)
+- **Every supplier payment batch**, before it can be approved and executed
+
+**Nobody can approve their own work.** The person who raised an entry is barred from authorising it, whoever they are. That is the whole point of the control.
+
+**Who can be that second person:**
+
+| Approver | Typical station |
+|---|---|
+| **Another accountant** at the same station | A finance team of two or more |
+| **The station owner** | A station with one accountant — the usual case |
+| **A group accountant** (chain CFO) | A multi-branch chain |
+
+**For the owner:** an **Approvals** entry appears in your Accounting menu. Open it to see everything waiting, review the full entry, then **Approve & Post** or **Reject**. You cannot create journal entries — only authorise them.
+
+**Appointing a group accountant (chains only):**
+
+> **Who can do this:** Owner only
+
+1. Go to **Staff Management** and edit the accountant at your head-office station
+2. Tick **Group Accountant (Chain CFO)**
+3. Save
+
+They can now approve journals and supplier payments for **any branch in the chain**, without being able to create entries inside those branches. This is how a chain gets one finance lead overseeing every location while keeping maker and checker separate.
 
 ---
 
@@ -1201,7 +1236,48 @@ If you are already on the highest available plan (e.g., Enterprise Max), there i
 
 > Renewing before your current period ends does **not** waste the remaining days. The new period starts from the moment of payment and your expiry date is pushed forward accordingly.
 
-### 17.4 Downgrading Your Plan
+### 17.4 What You Are Charged — VAT
+
+Every price shown on the pricing page is the **plan price before tax**. VAT (7.5% in Nigeria) is added at checkout, and the amount you actually pay is shown clearly before you confirm:
+
+| Line | Example |
+|---|---|
+| Pro Plan (monthly) | ₦15,000 |
+| VAT (7.5%) | ₦1,125 |
+| **Total paid (VAT included)** | **₦16,125** |
+
+The **Pay Now** button always shows the VAT-inclusive total — the figure that will leave your account. The plan cards default to **monthly** pricing; use the **Bill Annually** toggle to see yearly prices, which are discounted.
+
+### 17.5 Your Payment Receipt
+
+A receipt is emailed automatically as soon as a payment succeeds. It shows the plan, billing cycle, station, date, transaction reference, and the money broken down as subtotal, VAT and total.
+
+- It goes to the email address that made the payment (guest checkout) or to the **station owner** (upgrades and renewals).
+- Keep it — the **transaction reference** on it is what support needs if you ever query a charge.
+- Only one receipt is ever sent per payment, however many times a page is refreshed.
+
+> **Not arrived?** Check your spam folder first. If it is genuinely missing, the payment is still recorded — a missing receipt never means a missing payment. Contact support with the date and amount.
+
+### 17.6 If You Paid but Did Not Finish Registering
+
+This is the most common thing that goes wrong when signing up: you pay, and then the browser closes, the connection drops, or you simply come back another day before finishing the station setup form.
+
+**Your money is safe and your plan is waiting.** Do **not** pay again.
+
+Simply return to FuelDesk and start the sign-up again **using the same email address you paid with**:
+
+1. Go to the **Pricing** page
+2. Choose a plan and enter your name and **the same email address**
+3. Instead of sending you to pay, FuelDesk recognises the payment and shows:
+   *"You have already paid for [Plan]. Continue your registration — you will not be charged again."*
+4. The registration form opens
+5. Complete it — your plan is activated from the payment you already made
+
+> **You cannot be charged twice for the same unfinished registration.** FuelDesk refuses to start a second payment while an unclaimed one exists for your email address.
+
+> **Use the same email.** The payment belongs to the address that made it. If you register with a different address, FuelDesk cannot match the two — contact support with your transaction reference and they will apply it for you.
+
+### 17.7 Downgrading Your Plan
 
 > **Who can do this:** Owner only
 
@@ -1251,18 +1327,18 @@ If you change your mind before the effective date:
 3. Click **Cancel Downgrade**
 4. The downgrade is removed immediately — your plan stays as is
 
-### 17.5 Billing History
+### 17.8 Billing History
 
 In **System Settings** > **Subscription & Billing**, scroll past the plan card to see your **Billing History** — a table of every payment you have made, with date, amount, plan name, and billing cycle (Monthly/Annual).
 
-### 17.6 Cancelling a Subscription
+### 17.9 Cancelling a Subscription
 
 Cancellations are handled through FuelDesk support:
 1. Click **Cancel Subscription** in the Subscription section
 2. A window will appear with a **Contact Support** option
 3. Send an email requesting cancellation — your plan stays active until the end of the current period
 
-### 17.7 What Happens When a Plan Expires?
+### 17.10 What Happens When a Plan Expires?
 
 When your plan expires, your access is restricted:
 - You can still log in and view existing data
@@ -1476,6 +1552,23 @@ The admin home screen shows:
 3. View a full list of all payments across every station
 4. Filter by date range, status, or search by station name
 
+**Unclaimed Payments** — shown at the top of the page, above the payment list.
+
+These are customers who **paid but never completed registration**, so their money is captured and their plan is not active. It is the support queue for "I paid and nothing happened".
+
+Most of these resolve themselves: the customer returns, registers with the same email, and the plan activates automatically (Section 17.6). The ones that remain are usually somebody who **paid with one email address and registered with another**, which cannot be matched automatically and should not be.
+
+To resolve one manually:
+
+1. Find the station the customer actually registered (Manage Stations → copy its **Station ID**)
+2. Back in **Unclaimed Payments**, paste the Station ID into the row's box
+3. Click **Apply**
+4. The plan activates on that station and the payment is marked as used
+
+> **Verify who you are helping before applying a payment.** This action grants a paid plan without money changing hands at that moment. It is recorded in the admin activity log with your name.
+
+> A row flagged *"no email on record"* is an old payment made before FuelDesk began storing the payer's address. It can only be matched by hand, using the transaction reference against your Paystack dashboard.
+
 ### 20.5 Activity Logs (Admin)
 
 1. Click **Activity Logs** in the admin sidebar
@@ -1546,6 +1639,15 @@ The VAT/tax that is added on top of subscription prices at checkout is set **per
 1. Go to **Help** > **Contact Support**
 2. Click **WhatsApp** to chat directly with the support team (fastest response)
 3. Or click **Email Support** to send a detailed message
+
+You can also write to us directly:
+
+| Address | Use it for |
+|---|---|
+| **info@fueldesks.com** | General enquiries, sales questions, anything from the contact form |
+| **support@fueldesks.com** | Help with your account — this is also the address FuelDesk emails you from |
+
+> **When emailing about a payment**, always include the **transaction reference** (it looks like `FS_GUEST_1785835371234_pro`). It is on your payment receipt, and it lets support find the exact transaction in seconds rather than searching by name and date.
 
 ### Submit a Support Ticket
 
@@ -1658,10 +1760,30 @@ No. A FuelDesk platform administrator can change the VAT/tax rate per country di
 **Q: Who pays the VAT shown on my subscription payment to the government?**
 The VAT is added at checkout, collected from you (the customer), and settled into the platform's account together with the subscription fee. The **platform business** then remits that VAT to the tax authority. Paystack only processes the payment — it does not forward the tax on anyone's behalf.
 
+**Q: I paid but my browser closed before I finished creating my station. Have I lost my money?**
+No. Go back to the Pricing page and start again with **the same email address you paid with**. FuelDesk recognises the payment, skips checkout, and takes you straight to the registration form. You will not be charged twice — the system refuses to start a second payment while an unclaimed one exists for your email. See Section 17.6.
+
+**Q: Why does the total at checkout differ from the price on the plan card?**
+The card shows the plan price; the total adds **VAT (7.5% in Nigeria)**. The Pay Now button always shows the VAT-inclusive amount, and the breakdown is displayed before you confirm. Cards show monthly pricing by default — switch to **Bill Annually** for the discounted yearly rate.
+
+**Q: I did not get a payment receipt. Did the payment fail?**
+Almost certainly not — check your spam folder first. A missing receipt never means a missing payment; the two are recorded separately. If it is genuinely absent, contact support with the date and amount and they can confirm the payment and resend.
+
+**Q: I paid with one email address but registered with a different one. What now?**
+Automatic matching cannot help here, and deliberately so — a payment belongs to the address that made it. Email **support@fueldesks.com** with your **transaction reference** and a platform administrator will apply the payment to your station manually.
+
 ---
 
-*FuelDesk User Guide — Version 2.2 (July 2026)*
-*For support, contact the FuelDesk team through the Help section inside the application.*
+*FuelDesk User Guide — Version 2.3 (August 2026)*
+*For support, contact the FuelDesk team through the Help section inside the application, or email info@fueldesks.com.*
+
+**What changed in 2.3:**
+- **Payment receipts are emailed automatically** on every successful payment, itemised as subtotal, VAT and total, with the transaction reference to quote if you ever query a charge (Section 17.5)
+- **Paid but did not finish signing up? Just register again with the same email** — FuelDesk recognises the payment, skips checkout and takes you straight to registration. You cannot be charged twice for the same unfinished registration (Sections 3, 17.6)
+- **VAT is shown clearly at checkout** and plan cards default to monthly pricing, with a toggle for discounted yearly (Section 17.4)
+- **Accountants can email an invoice to a customer** from Receivables, and send reminders on overdue ones (Accounting Suite Guide)
+- **Approvals no longer deadlock a one-accountant station** — the station owner can authorise journals and supplier payments, and chains can appoint a group accountant who approves across every branch. Nobody may approve their own work (Accounting Suite Guide)
+- **Admins can see and resolve unclaimed payments** — customers who paid but never got a station (Section 20.4)
 
 **What changed in 2.2:**
 - **Owner and Manager are now separate** — a station can have several managers, but only one owner. Billing, payroll, pay structures, fuel pricing, manager administration, station settings, emergency lockdown and activity logs are the owner's (Sections 2, 7, 9.5, 14, 17)
