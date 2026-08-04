@@ -44,6 +44,45 @@ const getFrontendUrl = () => {
   return "http://localhost:3000";
 };
 
+/**
+ * Paystack returns EVERY metadata value as a string, whatever type you sent.
+ * `isGuest: true` comes back as the string "true"; `totalAmount: 16125` as
+ * "16125". It may also hand the whole object back as a JSON string.
+ *
+ * This broke guest checkout outright: verifyPayment tested `isGuest === true`,
+ * and "true" === true is false, so the guest branch never ran. Payment succeeded,
+ * the customer was charged, and then verification fell through to the
+ * authenticated-upgrade path — which has no station — and failed. The customer
+ * saw "something went wrong" and was bounced back to pricing.
+ *
+ * Normalising once, here, is the only reliable fix: every caller then works with
+ * real booleans and numbers instead of re-deriving the coercion and getting it
+ * subtly different, which is exactly how the webhook and verify diverged.
+ */
+const asBool = (v: unknown): boolean => v === true || v === "true";
+const asNum = (v: unknown): number | undefined => {
+  if (v === null || v === undefined || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+
+export function readPaystackMetadata(raw: any): Record<string, any> {
+  let m: any = raw;
+  if (typeof m === "string") {
+    try { m = JSON.parse(m); } catch { m = {}; }
+  }
+  if (!m || typeof m !== "object") m = {};
+  return {
+    ...m,
+    isGuest: asBool(m.isGuest),
+    baseAmount: asNum(m.baseAmount),
+    taxAmount: asNum(m.taxAmount),
+    totalAmount: asNum(m.totalAmount),
+    taxPercentage: asNum(m.taxPercentage),
+    credits: asNum(m.credits),
+  };
+}
+
 const getPaystackHeaders = () => ({
   Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
   "Content-Type": "application/json",
@@ -329,10 +368,26 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
-    const verification = await axios.get(
-      `${PAYSTACK_API}/transaction/verify/${reference}`,
-      { headers: getPaystackHeaders() }
-    );
+    let verification;
+    try {
+      verification = await axios.get(
+        `${PAYSTACK_API}/transaction/verify/${reference}`,
+        { headers: getPaystackHeaders() }
+      );
+    } catch (paystackErr: any) {
+      // Paystack 404s on a reference it has never seen, and axios throws on that.
+      // Left unhandled it surfaced as a 500 — an unknown reference is a bad
+      // request, not a server fault, and the difference matters when reading
+      // logs after a customer reports a failed payment.
+      const status = paystackErr?.response?.status;
+      if (status === 404) {
+        return res.status(404).json({ error: "Unknown payment reference" });
+      }
+      console.error(`verifyPayment: Paystack lookup failed for ${reference}:`, paystackErr?.message);
+      return res.status(502).json({
+        error: "Could not reach Paystack to confirm this payment. If you were charged, contact support.",
+      });
+    }
 
     if (!verification.data.status || verification.data.data.status !== "success") {
       await Payment.findOneAndUpdate({ transactionRef: reference }, { status: "failed" });
@@ -364,7 +419,9 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
-    const metadata = verification.data.data.metadata;
+    // Normalised: Paystack hands these back as strings, so `isGuest` arrives as
+    // "true" and would fail a strict boolean test.
+    const metadata = readPaystackMetadata(verification.data.data.metadata);
     const {
       stationId, planSlug, planId, planName,
       billingCycle, isGuest, guestName, guestEmail,
@@ -656,7 +713,7 @@ export const paystackWebhook = async (req: any, res: Response) => {
         return;
       }
 
-      const meta = typeof metadata === "string" ? JSON.parse(metadata) : metadata;
+      const meta = readPaystackMetadata(metadata);
       const { isGuest, stationId, planId, planSlug, billingCycle } = meta;
 
       const plan = await SubscriptionPlan.findById(planId);
@@ -850,8 +907,7 @@ export const verifySmsCreditsPayment = async (req: AuthenticatedRequest, res: Re
       }
     }
 
-    const rawMeta = verification.data.data.metadata;
-    const meta    = typeof rawMeta === "string" ? JSON.parse(rawMeta) : rawMeta;
+    const meta = readPaystackMetadata(verification.data.data.metadata);
 
     if (meta.type !== "sms_credits" || meta.stationId !== stationId?.toString()) {
       return res.status(400).json({ error: "Invalid payment reference" });

@@ -150,12 +150,30 @@ export const createFillingStation = async (req: Request, res: Response) => {
       // Check if there's a verified payment reference â€” activate plan immediately
       let planActivated = false;
       if (paymentReference) {
+        // Two things this query MUST enforce, both of which it previously did not:
+        //
+        // 1. The payment must be UNCONSUMED. Guest payments are created against a
+        //    placeholder station id and repointed at the real station once used.
+        //    Without this filter the same successful reference could be replayed
+        //    to activate a paid plan on any number of new stations.
+        const GUEST_PLACEHOLDER = "000000000000000000000000";
         const payment = await Payment.findOne({
           transactionRef: paymentReference,
           status: "success",
+          fillingStation: new Types.ObjectId(GUEST_PLACEHOLDER),
         });
         if (payment) {
-          const paidPlan = await SubscriptionPlan.findOne({ slug: chosenPlan });
+          // 2. The plan comes from the PAYMENT, never from the request body.
+          //    `chosenPlan` is client-supplied: paying ₦15,000 for Pro and then
+          //    registering with selectedPlan "enterprise-max" would otherwise
+          //    have activated a ₦500,000 plan on a Pro payment.
+          const paidPlan = await SubscriptionPlan.findById(payment.plan);
+          if (paidPlan && paidPlan.slug !== chosenPlan) {
+            console.warn(
+              `[register] plan mismatch for ${paymentReference}: request asked for "${chosenPlan}", ` +
+                `payment was for "${paidPlan.slug}" — honouring the payment.`
+            );
+          }
           const now = new Date();
           const expiryDate = new Date(now);
           const billingCycle = payment.billingCycle || "monthly";
@@ -166,7 +184,8 @@ export const createFillingStation = async (req: Request, res: Response) => {
           }
           const mapLimit = (val: number | undefined) => (val === 999 ? 999999 : val ?? 1);
           await FillingStation.findByIdAndUpdate(newStation._id, {
-            plan: chosenPlan,
+            // The plan actually paid for, not the one the request asked for.
+            plan: paidPlan?.slug || chosenPlan,
             planId: paidPlan?._id,
             planStatus: "active",
             planStartDate: now,
