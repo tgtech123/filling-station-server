@@ -58,8 +58,13 @@ export async function initSocket(httpServer: HttpServer): Promise<SocketIOServer
     cors: {
       origin: (origin, cb) => {
         if (!origin) return cb(null, true);
+        // Apex and www are the same site. Serving one while the allowlist holds
+        // the other breaks live updates silently — the page loads, the socket
+        // just never connects — so match the HTTP layer's tolerance in app.ts.
+        const stripWww = (u: string) => u.replace(/^(https?:\/\/)www\./i, "$1");
         if (
           ALLOWED_ORIGINS.includes(origin) ||
+          ALLOWED_ORIGINS.some((o) => stripWww(o) === stripWww(origin)) ||
           (process.env.NODE_ENV !== "production" && origin.endsWith(".vercel.app"))
         )
           return cb(null, true);

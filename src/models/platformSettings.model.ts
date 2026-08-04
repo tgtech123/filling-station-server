@@ -104,12 +104,18 @@ const PlatformSettingsSchema = new Schema<IPlatformSettings>(
   {
     platformName: {
       type: String,
-      default: "Flourish Station",
+      // Matches the seed in admin.controller. These had drifted apart, so a
+      // settings document created by the schema default rather than the seed
+      // would have branded the whole platform with the old name.
+      default: "FuelDesk",
       trim: true,
     },
     contactEmail: {
       type: String,
-      default: "support@flourishstation.com",
+      // Support tickets are routed here. NOTE: this default only applies to a
+      // settings document being created for the first time — an existing one
+      // keeps its stored value and must be changed in the admin panel.
+      default: "info@fueldesks.com",
       trim: true,
     },
     contactPhone: {

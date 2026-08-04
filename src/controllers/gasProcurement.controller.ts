@@ -109,7 +109,9 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
           date:         procurement.date.toLocaleDateString("en-NG", { day:"numeric", month:"long", year:"numeric" }),
           notes:        notes || "",
         }),
-      })
+      }).catch((err: any) =>
+      console.error("[mail] gas purchase order email failed:", err?.message)
+    )
         .then(() =>
           GasProcurement.findByIdAndUpdate(procurement._id, {
             emailSentAt: new Date(),
@@ -288,7 +290,9 @@ export const resendOrderEmail = async (req: AuthenticatedRequest, res: Response)
         date:         order.date.toLocaleDateString("en-NG", { day:"numeric", month:"long", year:"numeric" }),
         notes:        order.notes || "",
       }),
-    })
+    }).catch((err: any) =>
+      console.error("[mail] gas purchase order email failed:", err?.message)
+    )
       .then(() =>
         GasProcurement.findByIdAndUpdate(order._id, {
           emailSentAt: new Date(),

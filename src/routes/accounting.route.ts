@@ -21,7 +21,7 @@ import {
 
 import {
   listCustomers, createCustomer, updateCustomer,
-  createARInvoice, runRecurringBilling, listARInvoices, voidARInvoice,
+  createARInvoice, runRecurringBilling, listARInvoices, voidARInvoice, sendARInvoice,
   createCreditNote, listCreditNotes,
   createReceipt, listReceipts, getOpenInvoices,
 } from "../controllers/accountsReceivable.controller";
@@ -121,6 +121,8 @@ router.get("/ar/customers/:customerId/open-invoices", acct, getOpenInvoices);
 router.get("/ar/invoices",              acct,       listARInvoices);
 router.post("/ar/invoices",             acct,       createARInvoice);
 router.post("/ar/invoices/:id/void",    acctSenior, voidARInvoice);
+// Emailing the invoice is ordinary credit-control work, not a senior action.
+router.post("/ar/invoices/:id/send",    acct,       sendARInvoice);
 router.post("/ar/recurring/run",        acct,       runRecurringBilling);
 
 router.get("/ar/credit-notes",          acct, listCreditNotes);

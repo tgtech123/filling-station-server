@@ -727,7 +727,7 @@ export const updateStationStatus = async (req: AuthenticatedRequest, res: Respon
         type: "alert",
         category: "system_update",
         title: "Account Suspended",
-        body: "Your FuelDesk account has been suspended by the platform administrator. Please contact support at support@flourishstation.com to resolve this.",
+        body: "Your FuelDesk account has been suspended by the platform administrator. Please contact support at info@fueldesks.com to resolve this.",
         severity: "critical",
         // The owner is the one who can resolve it — and the one it embarrasses.
         targetRole: "owner",
@@ -1137,7 +1137,7 @@ export const seedPlatformSettings = async () => {
 
   await PlatformSettings.create({
     platformName: "FuelDesk",
-    contactEmail: "support@flourishstation.com",
+    contactEmail: "info@fueldesks.com",
     contactPhone: "+234 9030203547",
     contactAddress: "Km 2 Airport Road, Rukpokwu, Port Harcourt, Rivers State",
     currency: "Nigerian Naira (NGN)",

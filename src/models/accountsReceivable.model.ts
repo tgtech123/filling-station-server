@@ -88,6 +88,9 @@ export interface IARInvoice extends Document {
   };
   journalEntry?: Types.ObjectId | null;     // Dr AR, Cr Revenue (+ Cr VAT payable)
   notes?: string;
+  emailSentAt?: Date | null;
+  emailSentTo?: string | null;
+  emailSentCount?: number;
   createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -133,6 +136,15 @@ const ARInvoiceSchema = new Schema<IARInvoice>(
     },
     journalEntry: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
     notes:        { type: String, trim: true },
+    // Delivery record for the invoice email. Accountants draft invoices before
+    // they are ready to go out, so sending is a deliberate action rather than a
+    // side effect of creating one. These fields are what let the UI show whether
+    // the customer has actually been told, so "did we send it?" stops being a
+    // phone call. Count is kept because resending is legitimate and chasing an
+    // unpaid invoice is easier when you can see it went out three times.
+    emailSentAt:    { type: Date, default: null },
+    emailSentTo:    { type: String, default: null, trim: true },
+    emailSentCount: { type: Number, default: 0 },
     createdBy:    { type: Schema.Types.ObjectId, ref: "Staff", required: true },
   },
   { timestamps: true }
