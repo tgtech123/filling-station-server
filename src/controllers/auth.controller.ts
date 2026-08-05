@@ -300,6 +300,7 @@ export const loginStaff = async (
           from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
           to: staff.email,
           subject: "Your Login Verification Code",
+          category: "two_factor",
           html: `
             <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;">
               <h2 style="color:#0080ff;">Login Verification Code</h2>
