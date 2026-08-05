@@ -23,6 +23,7 @@ import {
   getPaymentStats,
   getPayments,
   getUnclaimedPayments,
+  getEmailLogs,
   applyPaymentToStation,
   getStationSubscriptions,
   getPlatformSettings,
@@ -82,6 +83,8 @@ router.get("/payments", requireAuth, checkAdmin, getPayments);
 // Customers who paid but never completed registration — the support queue for
 // "I paid and nothing happened", plus the manual lever to resolve one.
 router.get("/payments/unclaimed", requireAuth, checkAdmin, getUnclaimedPayments);
+// Delivery record for every email the platform attempts — "did it actually go?"
+router.get("/email-logs", requireAuth, checkAdmin, getEmailLogs);
 router.post("/payments/:paymentId/apply", requireAuth, checkAdmin, applyPaymentToStation);
 router.get("/subscriptions", requireAuth, checkAdmin, getStationSubscriptions);
 

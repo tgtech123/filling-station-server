@@ -1,5 +1,6 @@
 ﻿import { Request, Response } from "express";
 import mongoose, { Types } from "mongoose";
+import EmailLog from "../models/emailLog.model";
 import { activatePaidPlan, guestPlaceholderId } from "../services/planActivation.service";
 import { AuthenticatedRequest } from "../interfaces";
 import FillingStation from "../models/fillingStation.model";
@@ -1718,6 +1719,7 @@ export const adminResetOwnerPassword = async (req: Request, res: Response) => {
       from: '"FuelDesk" <' + process.env.EMAIL_USER + '>',
       to: owner.email,
       subject: 'Password Reset - Admin Initiated',
+      category: 'password_reset',
       html: '<div style="font-family:Arial,sans-serif;background:#f4f6f8;padding:20px"><div style="max-width:600px;margin:auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.1)"><div style="background:#007BFF;color:#fff;text-align:center;padding:20px"><h2 style="margin:0">Password Reset Request</h2></div><div style="padding:20px;color:#333"><p>Hello <strong style="color:#007BFF">' + owner.firstName + '</strong>,</p><p>A platform administrator has initiated a password reset for your FuelDesk account (<strong>' + owner.email + '</strong>).</p><p>Click the button below to set a new password:</p><div style="text-align:center;margin:30px 0"><a href="' + resetUrl + '" style="background:#007BFF;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block">Reset Password</a></div><p style="color:#e63946;font-size:14px">&#9888; This link is valid for only <strong>1 hour</strong>.</p><p style="font-size:14px;color:#666">If you did not expect this, please contact FuelDesk support immediately.</p></div><div style="background:#f8f9fa;padding:15px;text-align:center;font-size:12px;color:#888"><p>&copy; ' + new Date().getFullYear() + ' FuelDesk. All rights reserved.</p></div></div></div>',
     });
 
@@ -1891,6 +1893,50 @@ export const applyPaymentToStation = async (req: AuthenticatedRequest, res: Resp
     return res.status(200).json({
       message: `${payment.planName} activated on ${(station as any).name}`,
       data: { planSlug, expiryDate, transactionRef: payment.transactionRef },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+// ─── Email delivery log ──────────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/email-logs?email=&status=&category=&limit=
+ *
+ * Answers the question support could not previously answer at all: "did that
+ * email actually go, and if not, why?" Every message the platform attempts is
+ * recorded here by the transporter, so this covers password resets, 2FA codes,
+ * receipts, invoices, invites, purchase orders and support replies alike.
+ *
+ * Records expire after 90 days — the database is on a size-capped tier and an
+ * unbounded log would eventually take the application down.
+ */
+export const getEmailLogs = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, status, category } = req.query as Record<string, string>;
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+
+    const filter: Record<string, unknown> = {};
+    if (email) filter.to = String(email).toLowerCase().trim();
+    if (status && ["sent", "failed"].includes(status)) filter.status = status;
+    if (category) filter.category = category;
+
+    const [docs, failedLast24h] = await Promise.all([
+      EmailLog.find(filter).sort({ createdAt: -1 }).limit(limit).lean(),
+      EmailLog.countDocuments({
+        status: "failed",
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      }),
+    ]);
+
+    return res.status(200).json({
+      message: `${docs.length} email record(s)`,
+      // Surfaced separately because a rising failure count is the early warning
+      // that something is wrong with sending — a wrong sender, a revoked key, or
+      // the daily quota being reached — long before customers start complaining.
+      failedLast24h,
+      data: docs,
     });
   } catch (err: any) {
     return res.status(500).json({ message: "Server error", error: err.message });

@@ -152,6 +152,7 @@ export async function sendARInvoiceEmail(input: InvoiceEmailInput): Promise<void
     from: `"${input.stationName}" <${process.env.EMAIL_USER}>`,
     to: input.to,
     subject,
+    category: input.isReminder ? "invoice_reminder" : "invoice",
     html: buildInvoiceHtml(input),
   });
 }

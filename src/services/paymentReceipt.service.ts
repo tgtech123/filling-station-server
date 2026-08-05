@@ -120,6 +120,7 @@ export async function sendPaymentReceipt(input: ReceiptInput): Promise<void> {
         from: `"FuelDesk" <${process.env.EMAIL_USER}>`,
         to: input.to,
         subject: `Payment received — ${input.planName} (${input.transactionRef})`,
+        category: "receipt",
         html: receiptHtml(input, claimed.paidAt || new Date()),
       });
       console.log(`[receipt] sent to ${input.to} for ${input.transactionRef}`);

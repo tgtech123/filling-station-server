@@ -1,4 +1,5 @@
 import axios from "axios";
+import EmailLog from "../models/emailLog.model";
 
 interface MailOptions {
   from: string;
@@ -11,6 +12,36 @@ interface MailOptions {
    * the public, and hitting reply must reach them, not us.
    */
   replyTo?: string;
+  /**
+   * What kind of message this is — "receipt", "password_reset", "invoice",
+   * "purchase_order". Recorded in the email log so support can filter to the
+   * thing a customer is asking about. Optional: an untagged send is still
+   * logged, just as "other".
+   */
+  category?: string;
+  /** Station this message belongs to, when there is one. */
+  fillingStation?: unknown;
+}
+
+/**
+ * Record the attempt. Never awaited and never allowed to throw: a logging
+ * failure must not turn a delivered email into an error, nor a failed one into
+ * a crash. Best-effort by design.
+ */
+function record(
+  options: MailOptions,
+  status: "sent" | "failed",
+  extra: { error?: string; messageId?: string } = {}
+): void {
+  EmailLog.create({
+    to: String(options.to || "").slice(0, 320),
+    subject: String(options.subject || "").slice(0, 300),
+    category: options.category || "other",
+    status,
+    error: extra.error ? String(extra.error).slice(0, 500) : null,
+    messageId: extra.messageId || null,
+    fillingStation: (options.fillingStation as any) || null,
+  }).catch((e) => console.error("[mail] could not write email log:", e?.message));
 }
 
 function parseSender(from: string): { name: string; email: string } {
@@ -57,9 +88,9 @@ export const transporter = {
   sendMail: async (options: MailOptions): Promise<void> => {
     const apiKey = process.env.BREVO_API_KEY;
     if (!apiKey) {
-      throw new MailError(
-        "BREVO_API_KEY is not set — no email can be sent. Add it to the server environment."
-      );
+      const msg = "BREVO_API_KEY is not set — no email can be sent. Add it to the server environment.";
+      record(options, "failed", { error: msg });
+      throw new MailError(msg);
     }
 
     const sender = parseSender(options.from);
@@ -67,13 +98,13 @@ export const transporter = {
     // unset, which is not necessarily an address at all — require it to look
     // like one rather than handing Brevo something it will reject obscurely.
     if (!sender.email || sender.email === "undefined" || !sender.email.includes("@")) {
-      throw new MailError(
-        `No usable sender address (got "${sender.email}") — set EMAIL_USER to an address verified in Brevo.`
-      );
+      const msg = `No usable sender address (got "${sender.email}") — set EMAIL_USER to an address verified in Brevo.`;
+      record(options, "failed", { error: msg });
+      throw new MailError(msg);
     }
 
     try {
-      await axios.post(
+      const resp = await axios.post(
         BREVO_ENDPOINT,
         {
           sender,
@@ -87,6 +118,7 @@ export const transporter = {
           timeout: TIMEOUT_MS,
         }
       );
+      record(options, "sent", { messageId: resp?.data?.messageId });
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.message || err?.message || "unknown error";
@@ -109,6 +141,7 @@ export const transporter = {
         `[mail] send failed to ${options.to} (subject: "${options.subject}") — ` +
           `status ${status ?? "n/a"}: ${detail}${hint}`
       );
+      record(options, "failed", { error: `${detail}${hint}` });
       throw new MailError(`Email delivery failed: ${detail}${hint}`, err);
     }
   },
