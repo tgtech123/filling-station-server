@@ -3,6 +3,7 @@
 
 import mongoose from "mongoose";
 import { seedDefaultPlans, seedPlatformSettings } from "../controllers/admin.controller";
+import { dropObsoleteIndexes } from "../services/indexMigration.service";
 
 export const connectDB = async () => {
   try {
@@ -22,6 +23,9 @@ export const connectDB = async () => {
     try {
       await seedDefaultPlans();
       await seedPlatformSettings();
+      // Remove indexes a schema change has invalidated. Mongoose adds new
+      // indexes but never drops old ones, so this has to be explicit.
+      await dropObsoleteIndexes();
     } catch (seedErr: any) {
       console.error("❌ Seeder error:", seedErr.message);
     }

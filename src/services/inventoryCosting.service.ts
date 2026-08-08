@@ -12,6 +12,8 @@ export const PRODUCT_UNIT: Record<ProductKey, string> = {
   AGO: "litres",
   KEROSENE: "litres",
   LUBRICANT: "units",
+  // Drinks, snacks and sundries are counted in whole items, same as lubricants.
+  STORE: "units",
   GAS: "kg",
   OTHER: "units",
 };

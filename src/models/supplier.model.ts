@@ -22,7 +22,10 @@ const SupplierSchema = new Schema<ISupplier>(
     phone:   { type: String, required: true, trim: true },
     email:   { type: String, trim: true, lowercase: true },
     address: { type: String, trim: true },
-    type:    { type: String, enum: ["gas", "lubricant", "both"], default: "both" },
+    // "store" covers drinks, snacks and sundries — a shop wholesaler is a
+    // different business from an oil distributor, so they must not appear in
+    // each other's vendor lists when an order is being raised.
+    type:    { type: String, enum: ["gas", "lubricant", "store", "both"], default: "both" },
     notes:   { type: String, trim: true },
     isActive:{ type: Boolean, default: true },
   },

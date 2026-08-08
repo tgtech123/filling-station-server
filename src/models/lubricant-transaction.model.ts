@@ -5,6 +5,13 @@ interface ITransactionItem {
   lubricant: mongoose.Types.ObjectId;
   productName: string;
   barcode: string;
+  /**
+   * Copied from the product AT THE MOMENT OF SALE, like productName and barcode
+   * beside it. A sale is a historical record: if a product is later recategorised
+   * from "drinks" to "other", last month's posted revenue must not silently move
+   * to a different account and change a closed period's income statement.
+   */
+  category: string;
   priceSold: number;
   qtySold: number;
   amount: number; // priceSold * qtySold
@@ -38,6 +45,12 @@ const transactionItemSchema = new Schema<ITransactionItem>(
     barcode: {
       type: String,
       required: true,
+    },
+    // Defaults to "lubricant" so transactions written before categories existed
+    // continue to report exactly as they always did.
+    category: {
+      type: String,
+      default: "lubricant",
     },
     priceSold: {
       type: Number,
