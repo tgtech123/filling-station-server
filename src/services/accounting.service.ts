@@ -310,6 +310,7 @@ export const SYS = {
   AGO_SALES: "4020",
   KEROSENE_SALES: "4030",
   LUBRICANT_SALES: "4100",
+  STORE_SALES: "4110",
   GAS_SALES: "4200",
   OTHER_INCOME: "4900",
   COGS: "5000",
@@ -317,6 +318,7 @@ export const SYS = {
   COGS_AGO: "5020",
   COGS_KEROSENE: "5030",
   COGS_LUBRICANT: "5100",
+  COGS_STORE: "5110",
   COGS_GAS: "5200",
   SALARIES: "6000",
   RENT: "6100",
@@ -353,6 +355,7 @@ export const SYS_ACCOUNT_INFO: Record<string, { name: string; type: AccountType 
   "4020": { name: "AGO (Diesel) Sales", type: "Revenue" },
   "4030": { name: "Kerosene (DPK) Sales", type: "Revenue" },
   "4100": { name: "Lubricant Sales", type: "Revenue" },
+  "4110": { name: "Store Sales", type: "Revenue" },
   "4200": { name: "Gas (LPG) Sales", type: "Revenue" },
   "4900": { name: "Other Income", type: "Revenue" },
   "5000": { name: "Cost of Goods Sold", type: "Expense" },
@@ -360,6 +363,7 @@ export const SYS_ACCOUNT_INFO: Record<string, { name: string; type: AccountType 
   "5020": { name: "AGO (Diesel) Cost of Sales", type: "Expense" },
   "5030": { name: "Kerosene Cost of Sales", type: "Expense" },
   "5100": { name: "Lubricant Cost of Sales", type: "Expense" },
+  "5110": { name: "COGS - Store", type: "Expense" },
   "5200": { name: "Gas Cost of Sales", type: "Expense" },
   "6000": { name: "Salaries & Wages", type: "Expense" },
   "6100": { name: "Rent", type: "Expense" },
@@ -382,13 +386,19 @@ export const SYS_ACCOUNT_INFO: Record<string, { name: string; type: AccountType 
 // 5000 COGS) so postings keep working while the accountant builds out the
 // detailed chart — but never invents an account.
 
-export type ProductKey = "PMS" | "AGO" | "KEROSENE" | "LUBRICANT" | "GAS" | "OTHER";
+export type ProductKey = "PMS" | "AGO" | "KEROSENE" | "LUBRICANT" | "STORE" | "GAS" | "OTHER";
 
 export function productKey(product: string | undefined | null): ProductKey {
   const p = String(product || "").toLowerCase();
   if (p.includes("pms") || p.includes("petrol")) return "PMS";
   if (p.includes("ago") || p.includes("diesel")) return "AGO";
   if (p.includes("kero") || p.includes("dpk")) return "KEROSENE";
+  // Shop stock — drinks, snacks and sundries sold over the same counter. Checked
+  // BEFORE lubricant: "store" must not fall through to the oil accounts, or a
+  // crate of Coca-Cola is reported as lubricant revenue and the owner cannot
+  // tell whether the shop or the oil rack is making the money.
+  if (p.includes("store") || p.includes("drink") || p.includes("snack") || p.includes("retail"))
+    return "STORE";
   if (p.includes("lub") || p.includes("oil")) return "LUBRICANT";
   if (p.includes("gas") || p.includes("lpg")) return "GAS";
   return "OTHER";
@@ -400,6 +410,10 @@ const PRODUCT_ACCOUNTS: Record<ProductKey, { revenue: string[]; cogs: string[] }
   AGO:       { revenue: [SYS.AGO_SALES, SYS.FUEL_SALES],      cogs: [SYS.COGS_AGO, SYS.COGS] },
   KEROSENE:  { revenue: [SYS.KEROSENE_SALES, SYS.FUEL_SALES], cogs: [SYS.COGS_KEROSENE, SYS.COGS] },
   LUBRICANT: { revenue: [SYS.LUBRICANT_SALES, SYS.OTHER_INCOME], cogs: [SYS.COGS_LUBRICANT, SYS.COGS] },
+  // Falls back to the lubricant accounts when a station has not created the
+  // store ones — an existing station that starts selling drinks keeps posting
+  // successfully instead of erroring at month-end close.
+  STORE:     { revenue: [SYS.STORE_SALES, SYS.LUBRICANT_SALES, SYS.OTHER_INCOME], cogs: [SYS.COGS_STORE, SYS.COGS_LUBRICANT, SYS.COGS] },
   GAS:       { revenue: [SYS.GAS_SALES, SYS.OTHER_INCOME],    cogs: [SYS.COGS_GAS, SYS.COGS] },
   OTHER:     { revenue: [SYS.OTHER_INCOME],                   cogs: [SYS.COGS] },
 };

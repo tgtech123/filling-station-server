@@ -21,12 +21,22 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       barcode,
       productName,
       productType,
+      category,
       brand,
       qtyInStock,
       reOrderLevel,
       unitCost,
       sellingPercentage, // Changed from sellingPrice to sellingPercentage
     } = req.body;
+
+    // Category decides which revenue and cost accounts a sale posts to, so an
+    // unrecognised value must never be stored — it would silently misclassify
+    // every future sale of that product. Anything unknown falls back to the
+    // historical behaviour rather than inventing a new bucket.
+    const ALLOWED_CATEGORIES = ["lubricant", "drinks", "snacks", "other"];
+    const cat = ALLOWED_CATEGORIES.includes(String(category || "").toLowerCase())
+      ? String(category).toLowerCase()
+      : "lubricant";
 
     // Required fields now
     if (!productName || !brand) {
@@ -73,6 +83,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
         $set: {
           productName: productName.trim(),
           productType: productType?.trim() ?? "",
+          category: cat,
           brand: brand.trim(),
           reOrderLevel: reorder,
           unitCost: unitCostNum,
@@ -107,6 +118,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       fillingStation,
       productName,
       productType,
+      category: cat,
       brand,
       qtyInStock: qty,
       reOrderLevel: reorder,
@@ -188,15 +200,28 @@ export const getLubricantByBarcode = async (req: AuthenticatedRequest, res: Resp
       barcode: barcode.trim(),
     }).lean();
 
-    // ðŸš« Not found
+    // Not stocked here. `code` lets the till distinguish this from an
+    // out-of-stock product and offer to register it, instead of showing one
+    // vague "not found" for two completely different situations.
     if (!lubricant) {
-      return res.status(404).json({ error: "Lubricant not found" });
+      return res.status(404).json({
+        code: "NOT_FOUND",
+        error: `No product with barcode "${barcode.trim()}" at this station.`,
+        barcode: barcode.trim(),
+      });
     }
 
-    // ðŸ§® Check stock level
-    const currentQty = lubricant.qtyInStock;
-    if (isNaN(currentQty) || currentQty <= 0) {
-      return res.status(400).json({ error: "Out of stock" });
+    // Known product, nothing on the shelf. The name and count go back with the
+    // error — "Out of stock" alone leaves the cashier looking it up by hand.
+    const currentQty = Number(lubricant.qtyInStock);
+    if (!Number.isFinite(currentQty) || currentQty <= 0) {
+      return res.status(409).json({
+        code: "OUT_OF_STOCK",
+        error: `${lubricant.productName} (${barcode.trim()}) has 0 in stock — restock before selling.`,
+        barcode: barcode.trim(),
+        productName: lubricant.productName,
+        qtyInStock: 0,
+      });
     }
 
     // âœ… Success
@@ -928,40 +953,70 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       }
 
       // ðŸ” Find the lubricant
-      const lubricant = await lubricantModel.findOne({
-        _id: new mongoose.Types.ObjectId(lubricantId),
-        fillingStation: stationObjectId,
-      }).session(session);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          error: "Quantity must be greater than zero",
+        });
+      }
+
+      /**
+       * Claim the stock ATOMICALLY.
+       *
+       * This used to read the product, compare quantities in JavaScript, then
+       * write back `currentQty - quantity`. Two cashiers selling the last bottle
+       * at the same moment both read 1, both passed the check, and both wrote 0
+       * - two sales, one bottle, and a stock count that silently disagreed with
+       * the shelf. On a busy forecourt with two tills that is not a rare race.
+       *
+       * `qtyInStock: { $gte: quantity }` moves the check INTO the update, so the
+       * database evaluates and decrements in one indivisible operation. The
+       * second cashier's filter simply does not match, and they get a clean
+       * "only N available" instead of an oversell.
+       */
+      const lubricant = await lubricantModel.findOneAndUpdate(
+        {
+          _id: new mongoose.Types.ObjectId(lubricantId),
+          fillingStation: stationObjectId,
+          qtyInStock: { $gte: quantity },
+        },
+        { $inc: { qtyInStock: -quantity } },
+        { new: true, session }
+      );
 
       if (!lubricant) {
+        // The claim failed. Read the product back only to explain WHY - a
+        // missing product and an insufficient one need different messages.
+        const existing = await lubricantModel
+          .findOne({
+            _id: new mongoose.Types.ObjectId(lubricantId),
+            fillingStation: stationObjectId,
+          })
+          .session(session)
+          .lean();
+
         await session.abortTransaction();
-        return res.status(404).json({ 
+
+        if (!existing) {
+          return res.status(404).json({
+            success: false,
+            error: `Lubricant not found: ${lubricantId}`,
+          });
+        }
+        if ((existing.qtyInStock ?? 0) <= 0) {
+          return res.status(400).json({
+            success: false,
+            error: `Out of stock: ${existing.productName}`,
+          });
+        }
+        return res.status(409).json({
           success: false,
-          error: `Lubricant not found: ${lubricantId}` 
+          error: `Cannot sell ${quantity} units of ${existing.productName}. Only ${existing.qtyInStock} available.`,
+          available: existing.qtyInStock,
         });
       }
 
-      // ðŸ§® Check stock
-      const currentQty = lubricant.qtyInStock;
-      if (isNaN(currentQty) || currentQty <= 0) {
-        await session.abortTransaction();
-        return res.status(400).json({ 
-          success: false,
-          error: `Out of stock: ${lubricant.productName}` 
-        });
-      }
-
-      if (quantity > currentQty) {
-        await session.abortTransaction();
-        return res.status(400).json({ 
-          success: false,
-          error: `Cannot sell ${quantity} units of ${lubricant.productName}. Only ${currentQty} available.` 
-        });
-      }
-
-      // ðŸ’° Deduct stock
-      lubricant.qtyInStock = currentQty - quantity;
-      await lubricant.save({ session });
 
       // Low-stock alert when quantity drops to or below reorder level
       const newQty = lubricant.qtyInStock;
@@ -972,7 +1027,9 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
         notifyStation(stationObjectId, {
           type: "alert",
           category: "low_stock",
-          title: "Lubricant Low Stock",
+          title: (lubricant as any).category && (lubricant as any).category !== "lubricant"
+            ? "Store Low Stock"
+            : "Lubricant Low Stock",
           body: lubricant.productName + " is running low — " + newQty + " unit(s) remaining (reorder level: " + reOrder + ").",
           severity: newQty === 0 ? "critical" : "warning",
           targetRole: "manager",
@@ -986,6 +1043,9 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
         lubricant: lubricant._id,
         productName: lubricant.productName,
         barcode: lubricant.barcode,
+        // Snapshot, not a reference: recategorising a product next month must
+        // not move revenue that has already been posted to the ledger.
+        category: (lubricant as any).category || "lubricant",
         priceSold: unitPrice,
         qtySold: quantity,
         amount,

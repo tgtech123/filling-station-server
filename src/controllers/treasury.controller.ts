@@ -911,7 +911,17 @@ export const runSalesPosting = async (req: AuthenticatedRequest, res: Response) 
       // Unwind first: amount, qty and count are all per line item, and the old
       // model stored one document per item, so this preserves the meaning.
       { $unwind: "$items" },
-      { $group: { _id: null, amount: { $sum: { $multiply: ["$items.qtySold", "$items.priceSold"] } }, qty: { $sum: "$items.qtySold" }, count: { $sum: 1 } } },
+      // Grouped BY CATEGORY so shop stock reports separately from lubricants.
+      // Lumping them together booked a crate of Coca-Cola as lubricant revenue,
+      // which made per-product margin meaningless for any station with a shop.
+      {
+        $group: {
+          _id: { $ifNull: ["$items.category", "lubricant"] },
+          amount: { $sum: { $multiply: ["$items.qtySold", "$items.priceSold"] } },
+          qty: { $sum: "$items.qtySold" },
+          count: { $sum: 1 },
+        },
+      },
     ]);
 
     // Gas POS — confirmed/dispensed sales only (voided and pending excluded)
@@ -926,8 +936,23 @@ export const runSalesPosting = async (req: AuthenticatedRequest, res: Response) 
       const amount = round2(f.amount || 0);
       if (amount > 0) buckets.push({ product: f._id || "Fuel", source: "fuel", amount, qty: round2(f.qty || 0), count: f.count });
     }
-    if (round2(lubAgg[0]?.amount || 0) > 0) {
-      buckets.push({ product: "Lubricant", source: "lubricant", amount: round2(lubAgg[0].amount), qty: round2(lubAgg[0].qty || 0), count: lubAgg[0].count });
+    // Collapse the categories into two ledger buckets: lubricants keep their own
+    // accounts, and drinks/snacks/sundries MERGE into a single "Store" line.
+    // Merging matters — emitting one bucket per category would post two separate
+    // Store lines for a station selling both drinks and snacks, and they would
+    // land on the same account as duplicate entries.
+    const lubTotals = { Lubricant: { amount: 0, qty: 0, count: 0 }, Store: { amount: 0, qty: 0, count: 0 } };
+    for (const l of lubAgg) {
+      const key = (l._id || "lubricant") === "lubricant" ? "Lubricant" : "Store";
+      lubTotals[key].amount += Number(l.amount) || 0;
+      lubTotals[key].qty += Number(l.qty) || 0;
+      lubTotals[key].count += Number(l.count) || 0;
+    }
+    for (const [product, t] of Object.entries(lubTotals)) {
+      const amount = round2(t.amount);
+      if (amount > 0) {
+        buckets.push({ product, source: "lubricant", amount, qty: round2(t.qty), count: t.count });
+      }
     }
     if (round2(gasAgg[0]?.amount || 0) > 0) {
       buckets.push({ product: "Gas", source: "gas", amount: round2(gasAgg[0].amount), qty: round2(gasAgg[0].qty || 0), count: gasAgg[0].count });
@@ -1086,7 +1111,16 @@ export const previewSalesPosting = async (req: AuthenticatedRequest, res: Respon
       LubricantTransaction.aggregate([
         { $match: { fillingStation: stationId, createdAt: { $gte: from, $lte: to } } },
         { $unwind: "$items" },
-        { $group: { _id: null, amount: { $sum: { $multiply: ["$items.qtySold", "$items.priceSold"] } }, qty: { $sum: "$items.qtySold" }, count: { $sum: 1 } } },
+        // Same category grouping as the real posting run — a preview that
+        // summarises differently from what actually posts is worse than none.
+        {
+          $group: {
+            _id: { $ifNull: ["$items.category", "lubricant"] },
+            amount: { $sum: { $multiply: ["$items.qtySold", "$items.priceSold"] } },
+            qty: { $sum: "$items.qtySold" },
+            count: { $sum: 1 },
+          },
+        },
       ]),
       GasSale.aggregate([
         { $match: { fillingStation: stationId, status: { $in: ["confirmed", "dispensed"] }, createdAt: { $gte: from, $lte: to } } },
@@ -1110,8 +1144,18 @@ export const previewSalesPosting = async (req: AuthenticatedRequest, res: Respon
     const lines: any[] = fuelAgg
       .filter((f) => round2(f.amount || 0) > 0)
       .map((f) => estLine(f._id || "Fuel", "fuel", round2(f.amount), f.qty || 0, f.count));
-    if (round2(lubAgg[0]?.amount || 0) > 0) {
-      lines.push(estLine("Lubricant", "lubricant", round2(lubAgg[0].amount), lubAgg[0].qty || 0, lubAgg[0].count));
+    // Merge the shop categories into one "Store" line, mirroring the posting run.
+    const prevTotals = { Lubricant: { amount: 0, qty: 0, count: 0 }, Store: { amount: 0, qty: 0, count: 0 } };
+    for (const l of lubAgg as any[]) {
+      const key = (l._id || "lubricant") === "lubricant" ? "Lubricant" : "Store";
+      prevTotals[key].amount += Number(l.amount) || 0;
+      prevTotals[key].qty += Number(l.qty) || 0;
+      prevTotals[key].count += Number(l.count) || 0;
+    }
+    for (const [product, t] of Object.entries(prevTotals)) {
+      if (round2(t.amount) > 0) {
+        lines.push(estLine(product, "lubricant", round2(t.amount), t.qty, t.count));
+      }
     }
     if (round2(gasAgg[0]?.amount || 0) > 0) {
       lines.push(estLine("Gas", "gas", round2(gasAgg[0].amount), gasAgg[0].qty || 0, gasAgg[0].count));

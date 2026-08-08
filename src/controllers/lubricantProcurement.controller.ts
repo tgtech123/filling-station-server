@@ -23,7 +23,20 @@ export const getReorderItems = async (req: AuthenticatedRequest, res: Response) 
     const stationId = req.user?.station;
     if (!stationId) return res.status(400).json({ message: "Station not found" });
 
-    const items = await Lubricant.find({ fillingStation: stationId }).lean();
+    /**
+     * `?orderType=lubricant|store` splits the reorder list by supplier type.
+     *
+     * Lubricants and shop stock are bought from different vendors, so a single
+     * mixed list of everything below threshold cannot be turned into an order —
+     * whoever is raising it has to mentally filter first, which is exactly the
+     * step that gets it wrong.
+     */
+    const { orderType } = req.query as { orderType?: string };
+    const query: Record<string, unknown> = { fillingStation: stationId };
+    if (orderType === "lubricant") query.category = "lubricant";
+    else if (orderType === "store") query.category = { $ne: "lubricant" };
+
+    const items = await Lubricant.find(query).lean();
 
     const URGENCY_ORDER: Record<string, number> = { out_of_stock: 0, critical: 1, low: 2, healthy: 3 };
 
@@ -42,7 +55,16 @@ export const getReorderItems = async (req: AuthenticatedRequest, res: Response) 
         urgency = "healthy";
       }
 
-      return { ...item, urgency, stockRatio };
+      // Surface the category on every row so the UI can group or badge without
+      // a second lookup, and default it for products created before categories.
+      const category = (item as any).category || "lubricant";
+      return {
+        ...item,
+        category,
+        orderType: category === "lubricant" ? "lubricant" : "store",
+        urgency,
+        stockRatio,
+      };
     });
 
     enriched.sort((a, b) => (URGENCY_ORDER[a.urgency] ?? 3) - (URGENCY_ORDER[b.urgency] ?? 3));
@@ -64,6 +86,52 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ message: "At least one item is required" });
     }
 
+    /**
+     * Resolve every line against THIS station's own products.
+     *
+     * `items` arrives from the client carrying a lubricantId. Trusting it would
+     * allow an order referencing another station's product — the stock update on
+     * receipt is station-filtered so no stock would move, but the order document
+     * and the supplier email would list goods the station does not stock.
+     *
+     * Reading the products back also gives us the authoritative category, rather
+     * than letting the browser decide which supplier list an item belongs to.
+     */
+    const requestedIds = items.map((i: any) => i.lubricantId).filter(Boolean);
+    const products = await Lubricant.find({
+      _id: { $in: requestedIds },
+      fillingStation: stationId,
+    }).select("_id productName category").lean();
+
+    if (products.length !== requestedIds.length) {
+      return res.status(400).json({
+        message: "One or more products are not in this station's inventory.",
+      });
+    }
+
+    const categoryById = new Map(products.map((p: any) => [String(p._id), p.category || "lubricant"]));
+    const resolvedItems = items.map((i: any) => ({
+      ...i,
+      category: categoryById.get(String(i.lubricantId)) || "lubricant",
+    }));
+
+    /**
+     * An order is either lubricants or shop stock, never both. The suppliers are
+     * different businesses — a mixed order emails one vendor a list they cannot
+     * fulfil, and there is no sensible way to split it afterwards.
+     */
+    const orderTypes = new Set(
+      resolvedItems.map((i: any) => (i.category === "lubricant" ? "lubricant" : "store"))
+    );
+    if (orderTypes.size > 1) {
+      return res.status(400).json({
+        message:
+          "An order cannot mix lubricants and store items — they come from different suppliers. Raise one order for each.",
+        mixedOrder: true,
+      });
+    }
+    const orderType = [...orderTypes][0] as "lubricant" | "store";
+
     const staff = await Staff.findById(userId).lean();
     const station = await FillingStation.findById(stationId).lean() as any;
 
@@ -77,7 +145,8 @@ export const createProcurement = async (req: AuthenticatedRequest, res: Response
       vendorName: vendorName || "",
       vendorPhone: vendorPhone || "",
       vendorEmail: vendorEmail?.trim() || "",
-      items,
+      orderType,
+      items: resolvedItems,
       notes: notes || "",
       stationName: station?.name || "",
       stationAddress: station?.address || "",
@@ -96,9 +165,14 @@ export const getProcurements = async (req: AuthenticatedRequest, res: Response) 
   try {
     const stationId = req.user?.station;
     const role = req.user?.role;
-    const { status } = req.query;
+    const { status, orderType } = req.query;
 
     const filter: any = { fillingStation: stationId };
+    // Lets the UI show lubricant orders and store orders as separate lists.
+    // Orders raised before the split have no orderType, so "lubricant" must
+    // also match documents where the field is absent.
+    if (orderType === "lubricant") filter.$or = [{ orderType: "lubricant" }, { orderType: { $exists: false } }];
+    else if (orderType === "store") filter.orderType = "store";
 
     // Cashiers can only see non-draft orders; managers and supervisors see everything
     if (role === "cashier") {
@@ -217,8 +291,12 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
       transporter.sendMail({
         from:    `"FuelDesk Station" <${process.env.EMAIL_USER}>`,
         to:      recipient,
-        subject: `Lubricant Purchase Order — ${procurement.procurementNumber}`,
+        // A drinks distributor receiving a "Lubricant Purchase Order" has every
+        // reason to think it was sent to them by mistake.
+        subject: `${(procurement as any).orderType === "store" ? "Store" : "Lubricant"} Purchase Order — ${procurement.procurementNumber}`,
+        category: "purchase_order",
         html: buildLubricantOrderEmail({
+          orderType:    (procurement as any).orderType || "lubricant",
           orderNumber:  procurement.procurementNumber,
           stationName:  (stationDoc as any)?.name    || "FuelDesk Station",
           stationAddr:  (stationDoc as any)?.address || "",
@@ -253,6 +331,139 @@ export const submitProcurement = async (req: AuthenticatedRequest, res: Response
 };
 
 // â”€â”€â”€ PATCH /api/procurement/:id/ordered â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/**
+ * PATCH /api/procurement/:id/confirm
+ *
+ * Records the supplier's reply to a purchase order: what they can actually
+ * supply and at what price today, entered by station staff from the supplier's
+ * response, then accepted.
+ *
+ * Why this stage exists: a supplier rarely confirms an order verbatim. Stock
+ * runs short and prices move between the order going out and the quote coming
+ * back. Without recording that reply, goods arrive and are checked against the
+ * ORIGINAL request, so every short or repriced line looks like a delivery
+ * discrepancy — and the real discrepancies get lost in the noise.
+ *
+ * The original `quantityToProcure` and `unitCost` are never overwritten. The gap
+ * between what was asked for and what was agreed is exactly what a manager needs
+ * to see when deciding whether to accept.
+ *
+ * Body: { items: [{ lubricantId, confirmedQuantity, confirmedUnitCost }], supplierNotes? }
+ */
+export const confirmProcurement = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationId = req.user?.station;
+    const { items, supplierNotes } = req.body as {
+      items?: {
+        lubricantId: string;
+        confirmedQuantity?: number;
+        confirmedUnitCost?: number;
+        confirmedSellingPrice?: number;
+      }[];
+      supplierNotes?: string;
+    };
+
+    const procurement = await LubricantProcurement.findOne({
+      _id: req.params.id,
+      fillingStation: stationId,
+    });
+
+    if (!procurement) return res.status(404).json({ message: "Procurement not found" });
+    if (!["submitted", "ordered", "confirmed"].includes(procurement.status)) {
+      return res.status(400).json({
+        message: `A ${procurement.status} order cannot be confirmed. Send it to the supplier first.`,
+      });
+    }
+
+    const byId = new Map(
+      (items || []).map((i) => [String(i.lubricantId), i])
+    );
+
+    for (const line of procurement.items as any[]) {
+      const reply = byId.get(String(line.lubricantId));
+      if (!reply) continue;
+
+      if (reply.confirmedQuantity !== undefined) {
+        const q = Number(reply.confirmedQuantity);
+        if (!Number.isFinite(q) || q < 0) {
+          return res.status(400).json({
+            message: `Confirmed quantity for ${line.productName} must be zero or more.`,
+          });
+        }
+        // A supplier may legitimately confirm MORE than requested, so this is
+        // not capped — but zero means "cannot supply", which is a real answer
+        // and must be recordable rather than treated as "no reply".
+        line.confirmedQuantity = q;
+      }
+
+      if (reply.confirmedUnitCost !== undefined) {
+        const c = Number(reply.confirmedUnitCost);
+        if (!Number.isFinite(c) || c < 0) {
+          return res.status(400).json({
+            message: `Confirmed price for ${line.productName} must be zero or more.`,
+          });
+        }
+        line.confirmedUnitCost = c;
+      }
+
+      if (reply.confirmedSellingPrice !== undefined) {
+        const sp = Number(reply.confirmedSellingPrice);
+        if (!Number.isFinite(sp) || sp < 0) {
+          return res.status(400).json({
+            message: `Selling price for ${line.productName} must be zero or more.`,
+          });
+        }
+        // Selling below cost is legitimate (clearing slow stock) but is almost
+        // always a typo, so it is surfaced rather than silently accepted.
+        line.confirmedSellingPrice = sp;
+      }
+    }
+
+    procurement.status = "confirmed";
+    procurement.confirmedAt = new Date();
+    procurement.confirmedBy = (req.user?._id || req.user?.id) as any;
+    if (supplierNotes !== undefined) procurement.supplierNotes = String(supplierNotes);
+    await procurement.save();
+
+    // What changed between request and confirmation — the manager's decision points.
+    const changes = (procurement.items as any[])
+      .filter(
+        (i) =>
+          (i.confirmedQuantity !== undefined && i.confirmedQuantity !== i.quantityToProcure) ||
+          (i.confirmedUnitCost !== undefined && i.confirmedUnitCost !== i.unitCost)
+      )
+      .map((i) => ({
+        productName: i.productName,
+        requestedQty: i.quantityToProcure,
+        confirmedQty: i.confirmedQuantity,
+        originalUnitCost: i.unitCost,
+        confirmedUnitCost: i.confirmedUnitCost,
+      }));
+
+    Activity.create({
+      ...actorFrom(req.user),
+      fillingStation: stationId,
+      type: "procurement",
+      status: "Success",
+      title: "Supplier Confirmed Order",
+      description:
+        `${procurement.procurementNumber} confirmed by ${procurement.vendorName || "supplier"}` +
+        (changes.length ? ` with ${changes.length} change(s) to quantity or price` : " as requested"),
+      timestamp: new Date(),
+    }).catch(console.error);
+
+    return res.status(200).json({
+      message: changes.length
+        ? `Supplier confirmed with ${changes.length} change(s). Review before delivery.`
+        : "Supplier confirmed the order as requested.",
+      data: procurement,
+      changes,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
 export const markOrdered = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const stationId = req.user?.station;
@@ -287,33 +498,71 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
     });
 
     if (!procurement) return res.status(404).json({ message: "Procurement not found" });
-    if (!["submitted", "ordered"].includes(procurement.status)) {
-      return res.status(400).json({ message: "Only submitted or ordered procurements can be marked as received" });
+    if (!["submitted", "ordered", "confirmed"].includes(procurement.status)) {
+      return res.status(400).json({ message: "Only submitted, ordered or confirmed procurements can be marked as received" });
     }
 
-    // receivedItems: [{ lubricantId, receivedQuantity, unitCost? }] — sent from client
+    // receivedItems: [{ lubricantId, receivedQuantity, unitCost?, rejectedQuantity?, qualityNotes? }]
     // Falls back to stored values if not provided (backwards compatible)
-    const receivedItems: { lubricantId: string; receivedQuantity: number; unitCost?: number }[] = req.body.receivedItems || [];
+    const receivedItems: {
+      lubricantId: string;
+      receivedQuantity: number;
+      unitCost?: number;
+      rejectedQuantity?: number;
+      qualityNotes?: string;
+    }[] = req.body.receivedItems || [];
 
     const findMatch = (item: any) =>
       receivedItems.find((r) => r.lubricantId.toString() === item.lubricantId.toString());
 
+    /**
+     * The baseline is what the SUPPLIER CONFIRMED, falling back to what was
+     * requested. Defaulting to the original request would treat every agreed
+     * short supply as a delivery discrepancy, burying the real ones.
+     */
+    const expectedQty = (item: any): number =>
+      item.confirmedQuantity ?? item.quantityToProcure;
+
     const getReceivedQty = (item: any): number => {
       const match = findMatch(item);
-      return match != null ? Number(match.receivedQuantity) : item.quantityToProcure;
+      return match != null ? Number(match.receivedQuantity) : expectedQty(item);
     };
 
     const getUnitCost = (item: any): number => {
       const match = findMatch(item);
-      return (match?.unitCost != null && !isNaN(Number(match.unitCost)))
-        ? Number(match.unitCost)
-        : item.unitCost;
+      if (match?.unitCost != null && !isNaN(Number(match.unitCost))) return Number(match.unitCost);
+      // Then the price the supplier confirmed, then the original quote.
+      return item.confirmedUnitCost ?? item.unitCost;
     };
 
-    // Save receivedQuantity and unitCost (from supplier's invoice) onto each item
+    // Units failing inspection at the door. They are recorded against the order
+    // but must NEVER enter stock — that is the whole point of checking.
+    const getRejectedQty = (item: any): number => {
+      const match = findMatch(item);
+      const n = Number(match?.rejectedQuantity ?? 0);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+
+    for (const item of procurement.items as any[]) {
+      const received = getReceivedQty(item);
+      const rejected = getRejectedQty(item);
+      if (!Number.isFinite(received) || received < 0) {
+        return res.status(400).json({ message: `Received quantity for ${item.productName} is invalid.` });
+      }
+      if (rejected > received) {
+        return res.status(400).json({
+          message: `Cannot reject ${rejected} units of ${item.productName} — only ${received} were delivered.`,
+        });
+      }
+    }
+
+    // Save receivedQuantity, unitCost (from the supplier's invoice) and the
+    // quality-check outcome onto each item
     procurement.items = procurement.items.map((item) => ({
       ...(item as any).toObject(),
       receivedQuantity: getReceivedQty(item),
+      rejectedQuantity: getRejectedQty(item),
+      qualityNotes: findMatch(item)?.qualityNotes ?? "",
       unitCost: getUnitCost(item),
     })) as any;
 
@@ -322,12 +571,55 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
     // without moving stock has been retired.)
     const updatesStock = ["manager", "supervisor", "admin"].includes(role || "");
     if (updatesStock) {
-      const bulkOps = procurement.items.map((item) => ({
-        updateOne: {
-          filter: { _id: item.lubricantId, fillingStation: stationId },
-          update: { $inc: { qtyInStock: item.receivedQuantity ?? item.quantityToProcure } },
-        },
-      }));
+      // Stock rises by what was ACCEPTED — delivered minus anything rejected on
+      // inspection. Adding the full delivery would put failed goods on the shelf
+      // and make the count disagree with what is actually sellable.
+      /**
+       * Receiving updates THREE things, not just quantity:
+       *
+       *  - stock, by what was ACCEPTED (delivered minus rejected), so failed
+       *    goods never reach the shelf;
+       *  - unitCost, to what the supplier actually charged — otherwise margin
+       *    is computed against a stale price and every report is wrong;
+       *  - unitPrice, recalculated from the station's own markup, unless the
+       *    inventory person set an explicit selling price at confirmation.
+       *
+       * The old code only incremented quantity, so a supplier price rise never
+       * reached the shelf price and the station quietly sold at the old margin.
+       */
+      const products = await Lubricant.find({
+        _id: { $in: procurement.items.map((i: any) => i.lubricantId) },
+        fillingStation: stationId,
+      }).select("_id sellingPercentage").lean();
+      const markupById = new Map(
+        products.map((p: any) => [String(p._id), Number(p.sellingPercentage) || 0])
+      );
+
+      const bulkOps = procurement.items
+        .map((item: any) => {
+          const accepted =
+            (item.receivedQuantity ?? item.quantityToProcure) - (item.rejectedQuantity || 0);
+          return { item, accepted };
+        })
+        .filter(({ accepted }) => accepted > 0)
+        .map(({ item, accepted }) => {
+          const cost = Number(item.unitCost) || 0;
+          const markup = markupById.get(String(item.lubricantId)) ?? 0;
+          const sellingPrice =
+            item.confirmedSellingPrice != null && Number.isFinite(Number(item.confirmedSellingPrice))
+              ? Number(item.confirmedSellingPrice)
+              : cost * (1 + markup / 100);
+
+          return {
+            updateOne: {
+              filter: { _id: item.lubricantId, fillingStation: stationId },
+              update: {
+                $inc: { qtyInStock: accepted },
+                $set: { unitCost: cost, unitPrice: sellingPrice },
+              },
+            },
+          };
+        });
       if (bulkOps.length > 0) await Lubricant.bulkWrite(bulkOps);
     }
 
@@ -360,7 +652,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       fillingStation: stationId,
       type: "message",
       category: "delivery_arrived",
-      title: "Lubricant PO Received — Register Invoice",
+      title: `${(procurement as any).orderType === "store" ? "Store" : "Lubricant"} PO Received — Register Invoice`,
       body: `${procurement.procurementNumber} from ${procurement.vendorName || "vendor"} received (≈₦${receivedTotal.toLocaleString()}). Register the supplier invoice in Payables to 3-way match.`,
       severity: "info",
       timestamp: new Date(),
@@ -469,6 +761,7 @@ export const deleteProcurement = async (req: AuthenticatedRequest, res: Response
 
 // â”€â”€â”€ Email template (no prices — supplier fills them in) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildLubricantOrderEmail(p: {
+  orderType?: string;
   orderNumber: string; stationName: string; stationAddr: string; stationPhone: string;
   managerName: string; supplierName: string;
   items: { productName: string; brand: string; productType: string; quantityToProcure: number }[];
@@ -486,7 +779,7 @@ function buildLubricantOrderEmail(p: {
   return `
 <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#333;">
   <div style="background:linear-gradient(135deg,#2563eb,#1e40af);padding:32px 24px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="color:#fff;margin:0;font-size:22px;">&#128722; Lubricant Purchase Order</h1>
+    <h1 style="color:#fff;margin:0;font-size:22px;">&#128722; ${p.orderType === "store" ? "Store" : "Lubricant"} Purchase Order</h1>
     <p style="color:rgba(255,255,255,0.85);margin:6px 0 0;font-size:15px;">${p.orderNumber}</p>
   </div>
 
