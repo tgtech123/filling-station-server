@@ -917,7 +917,13 @@ export const runSalesPosting = async (req: AuthenticatedRequest, res: Response) 
       {
         $group: {
           _id: { $ifNull: ["$items.category", "lubricant"] },
-          amount: { $sum: { $multiply: ["$items.qtySold", "$items.priceSold"] } },
+          // What was actually charged, not a price × quantity recomputed here.
+          // A pack of 12 is normally sold below twelve singles, and `amount` is
+          // the only field that carries that discount exactly; multiplying the
+          // per-base price back out reintroduces rounding on every line.
+          amount: { $sum: "$items.amount" },
+          // Quantity stays in BASE units — it drives the stock issue and COGS,
+          // and the shelf loses pieces whatever the customer called them.
           qty: { $sum: "$items.qtySold" },
           count: { $sum: 1 },
         },

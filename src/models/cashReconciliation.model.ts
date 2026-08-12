@@ -12,7 +12,16 @@ export interface ICashReconciliation extends Document {
   product: string; // Fuel type: "PMS", "AGO", "Diesel", etc.
   litresSold: number;
   pricePerLtr: number;
-  expectedAmount: number; // Amount based on litres sold
+  expectedAmount: number; // Amount based on litres sold, LESS any loyalty rewards given
+  /**
+   * Retail value of fuel handed over as a loyalty reward on this shift.
+   *
+   * Those litres went through the meter and are inside `litresSold`, but no
+   * money came back for them. Held separately (rather than just quietly reducing
+   * expectedAmount) so the shift can show why the target is lower than
+   * litres × price — otherwise it looks like an arithmetic error.
+   */
+  loyaltyRewardAmount?: number;
   cashReceived: number;
   discrepancy: number; // cashReceived - expectedAmount (can be positive or negative)
   reconciledBy: mongoose.Types.ObjectId; // Cashier who reconciled
@@ -77,6 +86,11 @@ const cashReconciliationSchema = new Schema<ICashReconciliation>(
     expectedAmount: {
       type: Number,
       required: true,
+      min: 0,
+    },
+    loyaltyRewardAmount: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     cashReceived: {

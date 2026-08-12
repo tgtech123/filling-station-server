@@ -9,6 +9,8 @@ import {
   addLubricantSale,
   addLubricantTransaction,
   getAllLubricants,
+  getPricingSettings,
+  updatePricingSettings,
   getAllLubricantSales,
   getAllLubricantTransactions,
   getDailyLubricantSummary,
@@ -38,6 +40,11 @@ router.use(requireAuth, requireFuelDepartment);
 
 
 // --- Lubricant management ---
+// Standing margins by category and by unit. Read by the add-product form, so
+// the cashier registering a drink sees the same numbers the manager set.
+router.get("/pricing-settings", requireAuth, checkRole("manager", "cashier"), getPricingSettings);
+router.patch("/pricing-settings", requireAuth, checkRole("manager"), updatePricingSettings);
+
 router.post("/add-lubricant", requireAuth, checkRole("manager"), addLubricant);
 router.get("/", requireAuth, checkRole("manager", "cashier"), getAllLubricants);
 router.post("/get-lubricant", requireAuth, checkRole("manager", "cashier"), getLubricantByBarcode);

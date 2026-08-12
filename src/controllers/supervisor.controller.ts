@@ -11,6 +11,7 @@ import ActivityLog from "../models/activityLog.model";
 import DipReading from "../models/dipReading.model";
 import ShiftTypeDef from "../models/shiftTypeDef.model";
 import { emitToStation } from "../services/socket.service";
+import { loyaltyRewardForShift, expectedCashAfterRewards } from "../utils/loyaltyRewardCost";
 
 // Helper function to check if a field is populated
 const isPopulated = (field: any): field is { firstName: string; lastName: string; [key: string]: any } => {
@@ -481,6 +482,11 @@ export const approveShift = async (req: AuthenticatedRequest, res: Response) => 
       // Cashier never submitted cash reconciliation — supervisor force-approves.
       // Create a reconciliation with cashReceived = expectedAmount so the shift is
       // excluded from pending (getPendingShifts filters by Matched/Flagged reconciliations).
+      // Same netting as the cashier's own submission: loyalty fuel passed through
+      // the meter but brought no cash with it.
+      const rewardValue = await loyaltyRewardForShift(shift._id as Types.ObjectId);
+      const expectedCash = expectedCashAfterRewards(shift.totalAmount || 0, rewardValue);
+
       reconciliation = await CashReconciliation.create({
         fillingStation: stationId,
         shift: shiftId,
@@ -491,8 +497,9 @@ export const approveShift = async (req: AuthenticatedRequest, res: Response) => 
         product: shift.product,
         litresSold: shift.litresSold || 0,
         pricePerLtr: shift.pricePerLtr || 0,
-        expectedAmount: shift.totalAmount || 0,
-        cashReceived: shift.totalAmount || 0,
+        loyaltyRewardAmount: rewardValue,
+        expectedAmount: expectedCash,
+        cashReceived: expectedCash,
         reconciledBy: userId,
         notes: comment || "Approved by supervisor",
       });
