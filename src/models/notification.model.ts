@@ -23,10 +23,31 @@ export interface INotification extends Document {
     | "stock_reconciliation"
     | "emergency"
     | "support_ticket"
-    | "support_response";
+    | "support_response"
+    | "loyalty_redemption";
   title: string;
   body: string;
+  /**
+   * Read state for a notification addressed to ONE person (`staff` set).
+   *
+   * Do not use it for a station-wide notification — see `readBy`. Left in place
+   * for personal notifications, where a single flag is the honest model, and as
+   * the fallback for broadcasts written before `readBy` existed.
+   */
   isRead: boolean;
+  /**
+   * Who has read a station-wide notification.
+   *
+   * A notification addressed to a role is ONE document shared by everyone in
+   * that role, so a single `isRead` flag meant the first manager to open it
+   * cleared it for every other manager — they never saw it at all. Read state
+   * belongs to the reader, not to the message.
+   *
+   * An array rather than a separate collection: the audience is the staff of one
+   * station, so this is bounded at a few dozen ids, and `$addToSet` makes marking
+   * read atomic with no join on the way out.
+   */
+  readBy: mongoose.Types.ObjectId[];
   severity: "info" | "warning" | "critical" | null;
   timestamp: Date;
   /**
@@ -92,6 +113,7 @@ const NotificationSchema = new Schema<INotification>(
         "emergency",
         "support_ticket",
         "support_response",
+        "loyalty_redemption",
       ],
       required: true,
     },
@@ -105,6 +127,12 @@ const NotificationSchema = new Schema<INotification>(
       required: true,
       trim: true,
     },
+    readBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Staff",
+      },
+    ],
     isRead: {
       type: Boolean,
       default: false,

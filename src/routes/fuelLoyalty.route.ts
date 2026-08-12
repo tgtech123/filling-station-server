@@ -7,9 +7,10 @@ import {
   getSmsCreditsStatus,
   registerCustomer, listCustomers, searchCustomer, getCustomer, updateCustomer, deleteCustomer,
   recordEarn, listTransactions, getCustomerTransactions,
-  requestRedemption, listRedemptions, approveRedemption, rejectRedemption,
+  requestRedemption, listRedemptions, approveRedemption, rejectRedemption, confirmDispensed, getShopRewardOptions,
   getAuditReport,
   portalLookup, portalSetPin, portalLogin, portalGetMe, portalGetTransactions,
+  portalRequestRedemption, portalGetRedemptions,
 } from "../controllers/fuelLoyalty.controller";
 
 const router = express.Router();
@@ -17,6 +18,13 @@ const router = express.Router();
 const mgr     = checkRole("manager", "admin");
 const staff   = checkRole("manager", "admin", "cashier", "attendant", "supervisor");
 const mgrAcct = checkRole("manager", "admin", "accountant");
+// Redeeming is the money-out side of loyalty: free litres leave the tank. The
+// supervisor is on the forecourt while the manager may not be, so they share the
+// authority to clear the queue — but never over a request they raised
+// themselves (approveRedemption enforces that). The accountant may read the
+// queue for the books; they cannot approve.
+const mgrSup     = checkRole("manager", "admin", "supervisor");
+const mgrAcctSup = checkRole("manager", "admin", "accountant", "supervisor");
 // Anyone who may log a loyalty sale, plus the accountant. Reading the settings
 // is what gives them the points rate and the price per litre — without it the
 // sale form cannot prefill a price or preview the points being earned.
@@ -51,10 +59,15 @@ router.get("/staff/customers/:id/transactions", staff, getCustomerTransactions);
 router.post("/staff/transactions",    staff,        recordEarn);
 router.get("/staff/transactions",     mgrAcct,      listTransactions);
 
-router.post("/staff/redemptions",        staff,     requestRedemption);
-router.get("/staff/redemptions",         mgrAcct,   listRedemptions);
-router.patch("/staff/redemptions/:id/approve", mgr, approveRedemption);
-router.patch("/staff/redemptions/:id/reject",  mgr, rejectRedemption);
+router.post("/staff/redemptions",        staff,       requestRedemption);
+router.get("/staff/redemptions",         mgrAcctSup,  listRedemptions);
+router.patch("/staff/redemptions/:id/approve", mgrSup, approveRedemption);
+router.patch("/staff/redemptions/:id/reject",  mgrSup, rejectRedemption);
+// What a shop reward can be taken as — in stock, and within its value.
+router.get("/staff/redemptions/:id/shop-options", staff, getShopRewardOptions);
+// Released at the pump (or off the shelf) — confirmed by whoever handed it over,
+// which is how the reward gets tied to their shift instead of their shortage.
+router.patch("/staff/redemptions/:id/dispensed", staff, confirmDispensed);
 
 router.get("/staff/audit", mgr, getAuditReport);
 
@@ -64,5 +77,8 @@ router.post("/portal/:stationId/set-pin",  portalLimiter, portalSetPin);
 router.post("/portal/:stationId/login",    portalLimiter, portalLogin);
 router.get("/portal/me",                     portalGetMe);
 router.get("/portal/transactions",           portalGetTransactions);
+// The customer claims their own reward, then presents the code at the station.
+router.post("/portal/redemptions", portalLimiter, portalRequestRedemption);
+router.get("/portal/redemptions",                 portalGetRedemptions);
 
 export default router;

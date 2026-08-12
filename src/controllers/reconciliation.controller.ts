@@ -5,6 +5,7 @@ import CashReconciliation from "../models/cashReconciliation.model";
 import Shift from "../models/shift.model";
 import Notification from "../models/notification.model";
 import { emitToStation } from "../services/socket.service";
+import { loyaltyRewardForShift, expectedCashAfterRewards } from "../utils/loyaltyRewardCost";
 
 // Helper function to check if populated field is an object
 const isPopulated = (field: any): field is { _id: any; firstName?: string; lastName?: string; email?: string } => {
@@ -57,10 +58,16 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
       shift: new Types.ObjectId(shiftId),
     });
 
+    // Fuel given away as a loyalty reward went through this pump's meter and is
+    // inside shift.totalAmount, but no cash came back for it. Take it off the
+    // target or the attendant is short by the value of the station's own promo.
+    const rewardValue = await loyaltyRewardForShift(shift._id as Types.ObjectId);
+
     if (reconciliation) {
       // Update existing reconciliation
       reconciliation.cashReceived = cashAmount;
-      reconciliation.expectedAmount = shift.totalAmount || 0;
+      reconciliation.loyaltyRewardAmount = rewardValue;
+      reconciliation.expectedAmount = expectedCashAfterRewards(shift.totalAmount || 0, rewardValue);
       reconciliation.priceSplitUnresolved = (shift as any).priceSplitUnresolved ?? false;
       reconciliation.reconciledBy = new Types.ObjectId(cashierId);
       if (notes !== undefined) {
@@ -152,7 +159,8 @@ export const reconcileCash = async (req: AuthenticatedRequest, res: Response) =>
         product: shift.product,
         litresSold: shift.litresSold || 0,
         pricePerLtr: shift.pricePerLtr,
-        expectedAmount: shift.totalAmount || 0,
+        loyaltyRewardAmount: rewardValue,
+        expectedAmount: expectedCashAfterRewards(shift.totalAmount || 0, rewardValue),
         cashReceived: cashAmount,
         reconciledBy: new Types.ObjectId(cashierId),
         notes: notes || undefined,

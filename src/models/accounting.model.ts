@@ -116,6 +116,7 @@ export type JournalSource =
   | "bank_reconciliation"
   | "tax"
   | "sales_posting"
+  | "loyalty_redemption"
   | "opening_balance";
 
 export type JournalStatus = "draft" | "pending_approval" | "approved" | "posted" | "rejected" | "reversed";
@@ -194,7 +195,7 @@ const JournalEntrySchema = new Schema<IJournalEntry>(
         "manual", "ap_invoice", "ap_payment", "ap_credit_note", "ar_invoice", "ar_receipt",
         "ar_credit_note", "grn", "depreciation", "disposal", "fx_revaluation",
         "period_close", "year_end_close", "bank_reconciliation", "tax",
-        "sales_posting", "opening_balance",
+        "sales_posting", "loyalty_redemption", "opening_balance",
       ],
       default: "manual",
     },

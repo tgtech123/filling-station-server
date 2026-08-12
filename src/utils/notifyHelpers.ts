@@ -56,6 +56,47 @@ export const notifyStation = (
 };
 
 /**
+ * Fire-and-forget: notify ONE member of staff rather than a whole role.
+ *
+ * For answers that belong to a single person — "the redemption you raised was
+ * approved" — where pushing to the role room would tell every other attendant
+ * something that is none of their business. There is no per-staff socket room
+ * (see socket.service: rooms are station / role / owner only), so this writes
+ * the notification and the recipient picks it up on their next fetch instead of
+ * being pushed it live. Good enough for an outcome they are waiting on and will
+ * go looking for.
+ */
+export const notifyStaff = (
+  fillingStation: Types.ObjectId | string,
+  staffId: Types.ObjectId | string,
+  opts: {
+    type: "message" | "alert";
+    category: INotification["category"];
+    title: string;
+    body: string;
+    severity?: "info" | "warning" | "critical" | null;
+    expiresInDays?: number;
+  }
+): void => {
+  const expiresAt = new Date(
+    Date.now() + (opts.expiresInDays ?? 7) * 24 * 60 * 60 * 1000
+  );
+  Notification.create({
+    fillingStation: new Types.ObjectId(fillingStation.toString()),
+    staff: new Types.ObjectId(staffId.toString()),
+    type: opts.type,
+    category: opts.category,
+    title: opts.title,
+    body: opts.body,
+    severity: opts.severity ?? null,
+    // Addressed to a person, so the role audience is irrelevant — the feed
+    // query matches on `staff` for these.
+    targetRole: "all",
+    expiresAt,
+  }).catch((err: any) => console.error("[notifyStaff] error:", err?.message));
+};
+
+/**
  * Fire-and-forget: create a platform-level admin notification.
  * Safe to call without await — errors are swallowed and logged.
  */

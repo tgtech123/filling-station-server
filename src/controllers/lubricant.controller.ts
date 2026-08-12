@@ -1,7 +1,8 @@
 ﻿import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
-import lubricantModel from "../models/lubricant.model";
+import lubricantModel, { PRODUCT_CATEGORIES } from "../models/lubricant.model";
+import StorePricingSettings from "../models/storePricingSettings.model";
 import lubricantSaleModels from "../models/lubricant-sale.models";
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import mongoose from "mongoose";
@@ -9,6 +10,92 @@ import Activity from "../models/activity.model";
 import { actorFrom } from "../utils/actor";
 import { notifyStation } from "../utils/notifyHelpers";
 import { emitToStation } from "../services/socket.service";
+
+/**
+ * The station's pricing defaults, created on first read.
+ *
+ * Same pattern as the loyalty settings: a station that has never opened the
+ * screen still gets sensible numbers rather than zeros, and a 0% default would
+ * quietly sell everything at cost.
+ */
+const getOrCreatePricingSettings = async (stationId: string) => {
+  const existing = await StorePricingSettings.findOne({ fillingStation: stationId }).lean();
+  if (existing) return existing;
+  await StorePricingSettings.create({ fillingStation: stationId });
+  return await StorePricingSettings.findOne({ fillingStation: stationId }).lean();
+};
+
+/** GET /api/lubricant/pricing-settings — read by the add-product form. */
+export const getPricingSettings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+    const settings = await getOrCreatePricingSettings(String(fillingStation));
+    return res.status(200).json({ data: settings });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+/** PATCH /api/lubricant/pricing-settings — manager only. */
+export const updatePricingSettings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const { categoryMarkups, unitMarkups } = req.body;
+    const update: any = {};
+
+    if (categoryMarkups && typeof categoryMarkups === "object") {
+      const clean: Record<string, number> = {};
+      for (const [category, value] of Object.entries(categoryMarkups)) {
+        if (!PRODUCT_CATEGORIES.includes(category as any)) continue;
+        const pct = Number(value);
+        if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+          return res.status(400).json({ error: `${category} markup must be between 0 and 100` });
+        }
+        clean[category] = pct;
+      }
+      update.categoryMarkups = clean;
+    }
+
+    if (Array.isArray(unitMarkups)) {
+      const clean: any[] = [];
+      for (const u of unitMarkups) {
+        const name = String(u?.name || "").trim();
+        const pct = Number(u?.sellingPercentage);
+        if (!name) continue;
+        if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+          return res.status(400).json({ error: `"${name}" markup must be between 0 and 100` });
+        }
+        if (clean.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+          return res.status(400).json({ error: `"${name}" is listed twice` });
+        }
+        clean.push({ name, sellingPercentage: pct });
+      }
+      update.unitMarkups = clean;
+    }
+
+    const settings = await StorePricingSettings.findOneAndUpdate(
+      { fillingStation },
+      { $set: update, $setOnInsert: { fillingStation } },
+      { new: true, upsert: true, runValidators: true }
+    ).lean();
+
+    return res.status(200).json({
+      // Said plainly, because the alternative — silently re-pricing the whole
+      // shelf — is what a user might fear this button does.
+      message: "Pricing defaults saved. Products already registered keep their own percentage.",
+      data: settings,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
 
 export const addLubricant = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -27,6 +114,8 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       reOrderLevel,
       unitCost,
       sellingPercentage, // Changed from sellingPrice to sellingPercentage
+      baseUnit,
+      saleUnits,
     } = req.body;
 
     // Category decides which revenue and cost accounts a sale posts to, so an
@@ -71,6 +160,70 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
     // Compute unitPrice from formula: unitPrice = unitCost * (1 + percentage / 100)
     const unitPriceNum = unitCostNum * (1 + percentage / 100);
 
+    /**
+     * Bigger selling units — a pack of 12, a carton of 24.
+     *
+     * Priced the same way the single is, one level up: the unit's cost is the
+     * piece cost times the factor, and its own markup is applied to that. A
+     * lower markup on a bigger unit is what makes a pack cheaper per piece, and
+     * because the price is derived it can never be set below cost by accident,
+     * and every unit re-prices itself when the cost price changes.
+     *
+     *   ₦300 piece, 20%          → ₦360
+     *   pack of 12, 15% markup   → 300 × 12 × 1.15 = ₦4,140  (₦345 a piece)
+     *
+     * `factor` is validated hard because it is the number that decides how much
+     * stock a sale removes: a typo of 120 for 12 empties a shelf that still has
+     * bottles on it, and nothing downstream would question it.
+     *
+     * Names are compared case-insensitively and must not collide with the base
+     * unit — two ways to say "piece" would make the till ambiguous about what it
+     * just sold.
+     */
+    const base = String(baseUnit || "piece").trim() || "piece";
+    const cleanUnits: any[] = [];
+    for (const u of Array.isArray(saleUnits) ? saleUnits : []) {
+      const name = String(u?.name || "").trim();
+      const factor = Number(u?.factor);
+
+      if (!name) return res.status(400).json({ error: "Every sale unit needs a name (e.g. Pack, Carton)" });
+      if (!Number.isInteger(factor) || factor < 2) {
+        return res.status(400).json({
+          error: `"${name}" must contain at least 2 ${base}s — a unit of one is just a ${base}.`,
+        });
+      }
+      if (name.toLowerCase() === base.toLowerCase()) {
+        return res.status(400).json({ error: `"${name}" is already the base unit of this product` });
+      }
+      if (cleanUnits.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+        return res.status(400).json({ error: `"${name}" is listed twice` });
+      }
+
+      // Defaults to the product's own markup: a station that has not thought
+      // about pack pricing yet gets the same margin it makes on singles, which
+      // is the honest starting point.
+      const unitPct = u?.sellingPercentage === undefined || u?.sellingPercentage === null || u?.sellingPercentage === ""
+        ? percentage
+        : Number(u.sellingPercentage);
+
+      if (!Number.isFinite(unitPct) || unitPct < 0 || unitPct > 100) {
+        return res.status(400).json({
+          error: `"${name}" markup must be a percentage between 0 and 100`,
+        });
+      }
+
+      const unitCostForPack = unitCostNum * factor;
+      const price = parseFloat((unitCostForPack * (1 + unitPct / 100)).toFixed(2));
+
+      cleanUnits.push({
+        name,
+        factor,
+        sellingPercentage: unitPct,
+        price,
+        barcode: String(u?.barcode || "").trim() || undefined,
+      });
+    }
+
     // ðŸ”¥ If barcode is provided â†’ upsert/update
     if (barcode) {
       const query = {
@@ -89,6 +242,8 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
           unitCost: unitCostNum,
           sellingPercentage: percentage,
           unitPrice: unitPriceNum,
+          baseUnit: base,
+          saleUnits: cleanUnits,
         },
         $setOnInsert: {
           fillingStation: new Types.ObjectId(fillingStation),
@@ -125,6 +280,8 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       unitCost: unitCostNum,
       sellingPercentage: percentage,
       unitPrice: unitPriceNum,
+      baseUnit: base,
+      saleUnits: cleanUnits,
     });
 
     return res.status(201).json({
@@ -942,7 +1099,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
 
     // ðŸ”„ Process each item
     for (const item of items) {
-      const { lubricantId, quantity, unitPrice } = item;
+      const { lubricantId, quantity, unitPrice, unitName } = item;
 
       if (!lubricantId || !quantity || !unitPrice) {
         await session.abortTransaction();
@@ -962,6 +1119,49 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       }
 
       /**
+       * Which unit is being sold, and therefore how much stock leaves.
+       *
+       * The FACTOR is read from the product, never taken from the request. It
+       * decides how many pieces come off the shelf, so a client able to name its
+       * own factor could empty the shop with one number. The PRICE is still
+       * whatever the till sends — cashiers discount, and that was always allowed.
+       *
+       * Selling by the base unit needs no lookup and no `unitName`: that is the
+       * old behaviour, unchanged.
+       */
+      const productDoc = await lubricantModel
+        .findOne({ _id: new mongoose.Types.ObjectId(lubricantId), fillingStation: stationObjectId })
+        .session(session)
+        .lean();
+
+      if (!productDoc) {
+        await session.abortTransaction();
+        return res.status(404).json({ success: false, error: `Lubricant not found: ${lubricantId}` });
+      }
+
+      const baseUnitName = (productDoc as any).baseUnit || "piece";
+      const asked = String(unitName || "").trim();
+      const sellingBase = !asked || asked.toLowerCase() === baseUnitName.toLowerCase();
+
+      const saleUnit = sellingBase
+        ? null
+        : ((productDoc as any).saleUnits || []).find(
+            (u: any) => String(u.name).toLowerCase() === asked.toLowerCase()
+          );
+
+      if (!sellingBase && !saleUnit) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          error: `${(productDoc as any).productName} is not sold by the ${asked}.`,
+        });
+      }
+
+      const unitFactor = saleUnit ? Number(saleUnit.factor) : 1;
+      // What actually leaves the shelf: 2 packs of 12 is 24 pieces.
+      const baseQty = quantity * unitFactor;
+
+      /**
        * Claim the stock ATOMICALLY.
        *
        * This used to read the product, compare quantities in JavaScript, then
@@ -970,18 +1170,21 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
        * - two sales, one bottle, and a stock count that silently disagreed with
        * the shelf. On a busy forecourt with two tills that is not a rare race.
        *
-       * `qtyInStock: { $gte: quantity }` moves the check INTO the update, so the
+       * `qtyInStock: { $gte: baseQty }` moves the check INTO the update, so the
        * database evaluates and decrements in one indivisible operation. The
        * second cashier's filter simply does not match, and they get a clean
        * "only N available" instead of an oversell.
+       *
+       * The guard is in BASE units, so a pack cannot be sold out of eleven
+       * loose bottles.
        */
       const lubricant = await lubricantModel.findOneAndUpdate(
         {
           _id: new mongoose.Types.ObjectId(lubricantId),
           fillingStation: stationObjectId,
-          qtyInStock: { $gte: quantity },
+          qtyInStock: { $gte: baseQty },
         },
-        { $inc: { qtyInStock: -quantity } },
+        { $inc: { qtyInStock: -baseQty } },
         { new: true, session }
       );
 
@@ -1010,9 +1213,15 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
             error: `Out of stock: ${existing.productName}`,
           });
         }
+        // Said in the unit they tried to sell, plus the shelf count in base
+        // units — "1 Pack needs 12 pieces, there are 7" is actionable; "cannot
+        // sell 1, only 7 available" reads like a bug.
+        const unitLabel = saleUnit ? `${quantity} × ${saleUnit.name}` : `${quantity} ${baseUnitName}(s)`;
         return res.status(409).json({
           success: false,
-          error: `Cannot sell ${quantity} units of ${existing.productName}. Only ${existing.qtyInStock} available.`,
+          error: saleUnit
+            ? `Cannot sell ${unitLabel} of ${existing.productName} — that needs ${baseQty} ${baseUnitName}(s) and only ${existing.qtyInStock} are in stock.`
+            : `Cannot sell ${unitLabel} of ${existing.productName}. Only ${existing.qtyInStock} available.`,
           available: existing.qtyInStock,
         });
       }
@@ -1046,9 +1255,18 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
         // Snapshot, not a reference: recategorising a product next month must
         // not move revenue that has already been posted to the ledger.
         category: (lubricant as any).category || "lubricant",
-        priceSold: unitPrice,
-        qtySold: quantity,
+        // Base-unit figures — what every report, valuation and margin
+        // calculation downstream reasons in. A pack discount lands here as a
+        // lower effective price per piece, which is exactly what it is.
+        priceSold: parseFloat((amount / baseQty).toFixed(4)),
+        qtySold: baseQty,
         amount,
+        // …and the same sale in the words used at the counter, so the receipt
+        // and the day's sales say "2 Packs", not "24 pieces".
+        unitName: saleUnit ? saleUnit.name : baseUnitName,
+        unitFactor,
+        qtyInUnits: quantity,
+        unitPrice,
       });
 
       totalAmount += amount;
@@ -1075,8 +1293,9 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
 
     // Log sale activity (fire-and-forget)
     console.log("ðŸ”” About to create activity for lubricant sale");
+    // Reads back the way it was sold: "Coke ×2 Pack", not "Coke ×24".
     const itemSummary = processedItems
-      .map((i) => `${i.productName} Ã—${i.qtySold}`)
+      .map((i) => `${i.productName} Ã—${i.qtyInUnits} ${i.unitName}${i.qtyInUnits > 1 ? "s" : ""}`)
       .join(", ");
     Activity.create({
       ...actorFrom(req.user),

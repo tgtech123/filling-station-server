@@ -325,6 +325,10 @@ export const SYS = {
   UTILITIES: "6200",
   DEPRECIATION_EXP: "6300",
   BANK_CHARGES: "6400",
+  // Fuel given away under the loyalty programme. An expense, not a discount:
+  // revenue stays gross and matches the pump meter, and what the programme
+  // costs the station is readable on its own line.
+  LOYALTY_REWARDS: "6500",
   OTHER_EXPENSES: "6900",
   FX_GAIN_REALIZED: "7000",
   FX_GAIN_UNREALIZED: "7010",
@@ -370,6 +374,7 @@ export const SYS_ACCOUNT_INFO: Record<string, { name: string; type: AccountType 
   "6200": { name: "Utilities", type: "Expense" },
   "6300": { name: "Depreciation Expense", type: "Expense" },
   "6400": { name: "Bank Charges", type: "Expense" },
+  "6500": { name: "Loyalty Rewards", type: "Expense" },
   "6900": { name: "Other Expenses", type: "Expense" },
   "7000": { name: "Realized FX Gain", type: "Gain" },
   "7010": { name: "Unrealized FX Gain", type: "Gain" },

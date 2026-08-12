@@ -590,9 +590,12 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       const products = await Lubricant.find({
         _id: { $in: procurement.items.map((i: any) => i.lubricantId) },
         fillingStation: stationId,
-      }).select("_id sellingPercentage").lean();
+      }).select("_id sellingPercentage saleUnits").lean();
       const markupById = new Map(
         products.map((p: any) => [String(p._id), Number(p.sellingPercentage) || 0])
+      );
+      const unitsById = new Map(
+        products.map((p: any) => [String(p._id), (p.saleUnits || []) as any[]])
       );
 
       const bulkOps = procurement.items
@@ -610,12 +613,34 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
               ? Number(item.confirmedSellingPrice)
               : cost * (1 + markup / 100);
 
+          /**
+           * Re-price the packs and cartons off the new cost as well.
+           *
+           * Each unit keeps its OWN margin — a pack is deliberately thinner than
+           * a single — so this is that unit's percentage applied to the new
+           * cost, never the single's price multiplied up. Without it a supplier
+           * price rise reached the shelf price of a bottle and stopped there,
+           * and the shop went on selling packs at the old cost's margin: the
+           * bigger the unit, the bigger the loss, and nothing on screen would
+           * have said so.
+           */
+          const repricedUnits = (unitsById.get(String(item.lubricantId)) || []).map((u: any) => ({
+            ...u,
+            price: parseFloat(
+              (cost * Number(u.factor) * (1 + (Number(u.sellingPercentage) || 0) / 100)).toFixed(2)
+            ),
+          }));
+
           return {
             updateOne: {
               filter: { _id: item.lubricantId, fillingStation: stationId },
               update: {
                 $inc: { qtyInStock: accepted },
-                $set: { unitCost: cost, unitPrice: sellingPrice },
+                $set: {
+                  unitCost: cost,
+                  unitPrice: sellingPrice,
+                  ...(repricedUnits.length > 0 ? { saleUnits: repricedUnits } : {}),
+                },
               },
             },
           };

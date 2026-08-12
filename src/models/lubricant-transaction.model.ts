@@ -12,9 +12,32 @@ interface ITransactionItem {
    * to a different account and change a closed period's income statement.
    */
   category: string;
+  /**
+   * Effective price per BASE unit — amount ÷ qtySold.
+   *
+   * Kept as a per-base figure because every report, valuation and margin
+   * calculation downstream reasons in base units. What the customer was
+   * actually charged is `unitPrice` × `qtyInUnits`; read those two for a receipt
+   * and this one for arithmetic.
+   */
   priceSold: number;
+  /** Quantity in BASE units — 2 packs of 12 is 24. What leaves the shelf. */
   qtySold: number;
-  amount: number; // priceSold * qtySold
+  amount: number; // what was charged for this line
+  /**
+   * How it was sold, in the words used at the counter.
+   *
+   * A sale of "2 Packs" and a sale of "24 pieces" move identical stock and take
+   * identical money, but they are not the same event to the person reading the
+   * day's sales — and only one of them is what actually happened.
+   */
+  unitName: string;
+  /** Base units per sale unit — 12 for a pack of 12, 1 when sold singly. */
+  unitFactor: number;
+  /** How many of THAT unit were sold — 2 packs. */
+  qtyInUnits: number;
+  /** Price of one such unit at the moment of sale. */
+  unitPrice: number;
 }
 
 // 🔹 Main transaction document
@@ -63,6 +86,26 @@ const transactionItemSchema = new Schema<ITransactionItem>(
     amount: {
       type: Number,
       required: true,
+    },
+    // Defaults describe a single-unit sale, so every transaction written before
+    // packs existed still reads correctly: one piece, factor 1, priced as sold.
+    unitName: {
+      type: String,
+      trim: true,
+      default: "piece",
+    },
+    unitFactor: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+    qtyInUnits: {
+      type: Number,
+      default: 0,
+    },
+    unitPrice: {
+      type: Number,
+      default: 0,
     },
   },
   { _id: false } // Don't create _id for sub-items
