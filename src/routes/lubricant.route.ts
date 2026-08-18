@@ -3,6 +3,7 @@
 import express from "express";
 import { checkRole } from "../middlewares/checkRole";
 import { requireAuth } from "../middlewares/auth.middleware";
+import { adjustStock, getProductHistory } from "../controllers/stockAdjustment.controller";
 import { requireFuelDepartment } from "../middlewares/requireDepartment";
 import {
   addLubricant,
@@ -10,6 +11,7 @@ import {
   addLubricantTransaction,
   getAllLubricants,
   getPricingSettings,
+  updateLubricantPricing,
   updatePricingSettings,
   getAllLubricantSales,
   getAllLubricantTransactions,
@@ -42,10 +44,21 @@ router.use(requireAuth, requireFuelDepartment);
 // --- Lubricant management ---
 // Standing margins by category and by unit. Read by the add-product form, so
 // the cashier registering a drink sees the same numbers the manager set.
-router.get("/pricing-settings", requireAuth, checkRole("manager", "cashier"), getPricingSettings);
-router.patch("/pricing-settings", requireAuth, checkRole("manager"), updatePricingSettings);
+router.get("/pricing-settings", requireAuth, checkRole("manager", "supervisor"), getPricingSettings);
+router.patch("/pricing-settings", requireAuth, checkRole("manager", "supervisor"), updatePricingSettings);
 
-router.post("/add-lubricant", requireAuth, checkRole("manager"), addLubricant);
+// Registering a product is a management action: it decides what the shop stocks
+// and, with pricing, what it earns. The cashier POS no longer offers it — an
+// unknown item at the till is a call to the supervisor, not a form to fill in.
+router.post("/add-lubricant", requireAuth, checkRole("manager", "supervisor"), addLubricant);
+// Setting or correcting a price is a manager decision, always.
+router.patch("/:id/pricing", requireAuth, checkRole("manager", "supervisor"), updateLubricantPricing);
+
+// Correcting a count to match the shelf, and the full paper trail behind it.
+// The correction is management-only; the history is readable by anyone who can
+// be asked to explain a discrepancy, which includes the cashier who sold it.
+router.post("/:id/adjust-stock", requireAuth, checkRole("manager", "supervisor"), adjustStock);
+router.get("/:id/history", requireAuth, checkRole("manager", "supervisor", "accountant", "cashier"), getProductHistory);
 router.get("/", requireAuth, checkRole("manager", "cashier"), getAllLubricants);
 router.post("/get-lubricant", requireAuth, checkRole("manager", "cashier"), getLubricantByBarcode);
 
@@ -65,10 +78,10 @@ router.get("/transactions", requireAuth, checkRole("manager", "cashier"), getAll
 router.get("/transactions/:id", requireAuth, checkRole("manager", "cashier"), getLubricantTransactionById);
 
 // --- Lubricant purchases ---
-router.post("/purchases", requireAuth, checkRole("manager", "cashier"), addLubricantPurchase);
-router.get("/purchases", requireAuth, checkRole("manager", "cashier"), getAllLubricantPurchases);
-router.get("/purchases/:id", requireAuth, checkRole("manager", "cashier"), getLubricantPurchaseById);
-router.put("/purchases/:id", requireAuth, checkRole("manager", "cashier"), updateLubricantPurchase);
+router.post("/purchases", requireAuth, checkRole("manager", "supervisor"), addLubricantPurchase);
+router.get("/purchases", requireAuth, checkRole("manager", "supervisor", "accountant"), getAllLubricantPurchases);
+router.get("/purchases/:id", requireAuth, checkRole("manager", "supervisor", "accountant"), getLubricantPurchaseById);
+router.put("/purchases/:id", requireAuth, checkRole("manager", "supervisor"), updateLubricantPurchase);
 router.delete("/purchases/:id", requireAuth, checkRole("manager"), deleteLubricantPurchase);
 
 export default router;

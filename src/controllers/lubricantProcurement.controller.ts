@@ -8,6 +8,7 @@ import Activity from "../models/activity.model";
 import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
+import { repriceSaleUnits, toNaira } from "../utils/storePricing";
 
 // â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -510,6 +511,10 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       unitCost?: number;
       rejectedQuantity?: number;
       qualityNotes?: string;
+      /** Selling price for the single, if the validator set one explicitly. */
+      sellingPrice?: number;
+      /** Per-unit pricing as adjusted on the validation screen. */
+      saleUnits?: any[];
     }[] = req.body.receivedItems || [];
 
     const findMatch = (item: any) =>
@@ -564,6 +569,13 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       rejectedQuantity: getRejectedQty(item),
       qualityNotes: findMatch(item)?.qualityNotes ?? "",
       unitCost: getUnitCost(item),
+      // What the validator settled on at the door, so the PO records the prices
+      // that actually reached the shelf and not just the quantities.
+      confirmedSellingPrice:
+        findMatch(item)?.sellingPrice != null && Number.isFinite(Number(findMatch(item)?.sellingPrice))
+          ? Number(findMatch(item)!.sellingPrice)
+          : (item as any).confirmedSellingPrice,
+      saleUnits: findMatch(item)?.saleUnits ?? undefined,
     })) as any;
 
     // Receiving is restricted to manager/supervisor/admin, all of whom update
@@ -616,20 +628,20 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
           /**
            * Re-price the packs and cartons off the new cost as well.
            *
-           * Each unit keeps its OWN margin — a pack is deliberately thinner than
-           * a single — so this is that unit's percentage applied to the new
-           * cost, never the single's price multiplied up. Without it a supplier
-           * price rise reached the shelf price of a bottle and stopped there,
-           * and the shop went on selling packs at the old cost's margin: the
-           * bigger the unit, the bigger the loss, and nothing on screen would
-           * have said so.
+           * A carton is priced from its own supplier cost and markup; a pack
+           * from the single's new price less its discount. Whoever validated the
+           * delivery may have overridden either — they had the invoice in front
+           * of them — and those overrides arrive in `saleUnits` and win.
+           *
+           * Without this a supplier price rise reached the shelf price of a
+           * bottle and stopped there, and the shop went on selling cartons at a
+           * margin computed against a cost it no longer paid: the bigger the
+           * unit, the bigger the loss, and nothing on screen would have said so.
            */
-          const repricedUnits = (unitsById.get(String(item.lubricantId)) || []).map((u: any) => ({
-            ...u,
-            price: parseFloat(
-              (cost * Number(u.factor) * (1 + (Number(u.sellingPercentage) || 0) / 100)).toFixed(2)
-            ),
-          }));
+          const submittedUnits = Array.isArray((item as any).saleUnits) && (item as any).saleUnits.length
+            ? (item as any).saleUnits
+            : unitsById.get(String(item.lubricantId)) || [];
+          const repricedUnits = repriceSaleUnits(submittedUnits as any, cost, sellingPrice);
 
           return {
             updateOne: {
@@ -650,6 +662,9 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
 
     procurement.status = "received";
     procurement.receivedAt = new Date();
+    // Who checked it in — without this the product tracker cannot answer the
+    // question a stock discrepancy always leads to: who validated this?
+    (procurement as any).receivedBy = req.user?.id;
     await procurement.save();
 
     const shortItems = procurement.items.filter(

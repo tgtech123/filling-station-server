@@ -1112,11 +1112,22 @@ Delete a delivery/supply.
 
 ## 10. Lubricant Management
 
-Most lubricant endpoints are accessible to both `manager` and `cashier` roles.
+Roles split along one line: **selling** is the cashier's, **stocking and pricing**
+are management's. A cashier records sales, reads the catalogue and reprints
+receipts. Registering a product, setting any price, and receiving goods (whether
+against a purchase order or a paper invoice) are `manager | supervisor`.
 
 ### POST `/api/lubricant/add-lubricant`
 
-Add a new lubricant product (Manager only).
+Add a new lubricant product (`manager | supervisor`).
+
+Also accepts `baseUnit` and `saleUnits[]` — the bigger units the same stock can
+be sold in. Stock is always counted in base units, so a pack of 12 takes 12 off
+the shelf. Sale-unit prices are DERIVED, never taken from the request:
+`pricingMode: "cost"` (carton/bag — bought from the supplier) prices from that
+unit's own cost × its markup; `pricingMode: "derived"` (pack/dozen — made by
+opening a carton) prices from the single price less a discount. See
+`utils/storePricing.ts`.
 
 **Request Body:**
 ```json
@@ -1388,7 +1399,10 @@ Get a specific transaction by ID.
 
 ### POST `/api/lubricant/purchases`
 
-Add a lubricant purchase.
+Add a lubricant purchase against a supplier invoice (`manager | supervisor`) —
+the route for goods bought over the counter without a purchase order. Adds
+stock, updates cost, and re-prices the product and every sale unit from the new
+cost, the same as a PO goods-receipt.
 
 **Request Body:**
 ```json

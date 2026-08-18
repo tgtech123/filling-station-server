@@ -748,12 +748,44 @@ Get profit margin calculations.
 
 Base path: `/api/lubricant`
 
-**Auth required:** Yes — `manager | cashier` (delete purchase: `manager` only)
+**Auth required:** Yes — varies by route, see each below.
+
+Roles split along one line: **selling** is the cashier's, **stocking and pricing**
+are management's. A cashier records sales, reads the catalogue and reprints
+receipts; registering a product, setting any price and receiving goods are
+`manager | supervisor`. A wrong price entered at the till sells at a loss for
+weeks before anyone notices, which is why it is not theirs to set.
 
 ### POST `/api/lubricant/add-lubricant`
 Add a new lubricant product.
 
-**Auth required:** Yes — `manager`
+**Auth required:** Yes — `manager | supervisor`
+
+### PATCH `/api/lubricant/:id/pricing`
+Set or correct a product's cost and price. Recomputes every sale unit
+(pack/carton) from the new figures.
+
+**Auth required:** Yes — `manager | supervisor`
+
+**Body:**
+```json
+{
+  "unitCost": 0,
+  "sellingPercentage": 0,
+  "reOrderLevel": 0,
+  "saleUnits": []
+}
+```
+
+### GET `/api/lubricant/pricing-settings`
+The station's standing margins by category and by unit name.
+
+**Auth required:** Yes — `manager | supervisor`
+
+### PATCH `/api/lubricant/pricing-settings`
+Update those defaults. Does not re-price existing products.
+
+**Auth required:** Yes — `manager | supervisor`
 
 **Body:**
 ```json
@@ -833,7 +865,12 @@ Get a lubricant transaction by ID.
 ---
 
 ### POST `/api/lubricant/purchases`
-Record a lubricant purchase (stock replenishment).
+Record a lubricant purchase (stock replenishment) against a supplier invoice —
+the over-the-counter route for goods bought without a purchase order. Adds
+stock, updates cost, and re-prices the product and all its sale units from the
+new cost, exactly as a PO goods-receipt does.
+
+**Auth required:** Yes — `manager | supervisor` (read: `+ accountant`, delete: `manager`)
 
 **Body:**
 ```json

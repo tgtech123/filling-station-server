@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import lubricantModel, { PRODUCT_CATEGORIES } from "../models/lubricant.model";
 import StorePricingSettings from "../models/storePricingSettings.model";
+import { toNaira, repriceSaleUnits, defaultModeFor } from "../utils/storePricing";
 import lubricantSaleModels from "../models/lubricant-sale.models";
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import mongoose from "mongoose";
@@ -97,6 +98,89 @@ export const updatePricingSettings = async (req: AuthenticatedRequest, res: Resp
   }
 };
 
+/**
+ * Tell the manager a cashier has added something that needs pricing.
+ *
+ * The product is in the system but cannot be sold yet, so this is not a courtesy
+ * note — it is the step that unblocks a sale someone is waiting on. Sent as an
+ * alert for that reason. Silent for a manager's own registration: they priced it
+ * as they created it.
+ */
+const notifyProductRegistered = (
+  req: AuthenticatedRequest,
+  stationId: any,
+  product: any
+): void => {
+  if (req.user?.role !== "cashier" || !product) return;
+
+  const who = [req.user?.firstName, req.user?.lastName].filter(Boolean).join(" ") || "A cashier";
+  notifyStation(String(stationId), {
+    type: "alert",
+    category: "product_registered",
+    title: "New product needs a price",
+    body: `${who} registered "${product.productName}" (${product.category || "lubricant"}) at the till. It cannot be sold until you set its cost and price.`,
+    severity: "warning",
+    targetRole: "manager",
+  });
+};
+
+/**
+ * PATCH /api/lubricant/:id/pricing — manager sets or corrects what a product costs.
+ *
+ * The other half of the cashier's till registration: they said what the item is,
+ * this says what it is worth. Also the ordinary "change a price" action, so a
+ * manager does not have to delete and re-create a product to fix one number.
+ *
+ * Re-prices every bigger unit off the new figures, because a carton priced
+ * against last month's cost is the quiet loss this whole ladder exists to avoid.
+ */
+export const updateLubricantPricing = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const { unitCost, sellingPercentage, saleUnits, reOrderLevel } = req.body;
+
+    const product = await lubricantModel.findOne({ _id: req.params.id, fillingStation });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    const cost = Number(unitCost ?? product.unitCost) || 0;
+    const pct = Number(sellingPercentage ?? product.sellingPercentage) || 0;
+
+    if (!Number.isFinite(cost) || cost < 0) {
+      return res.status(400).json({ error: "Cost price must be a positive number" });
+    }
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      return res.status(400).json({ error: "Profit must be a percentage between 0 and 100" });
+    }
+
+    const price = toNaira(cost * (1 + pct / 100));
+
+    product.unitCost = cost;
+    product.sellingPercentage = pct;
+    product.unitPrice = price;
+    if (reOrderLevel !== undefined) product.reOrderLevel = Number(reOrderLevel) || 0;
+
+    // Units come from the request when the manager edited them, otherwise the
+    // product's own are re-priced against the new cost.
+    const incoming = Array.isArray(saleUnits) ? saleUnits : (product.saleUnits || []);
+    product.saleUnits = repriceSaleUnits(incoming as any, cost, price) as any;
+
+    // It has a price now, so the till may sell it.
+    product.pendingPricing = false;
+    await product.save();
+
+    return res.status(200).json({
+      message: `${product.productName} priced at ₦${price.toLocaleString()}.`,
+      lubricant: product,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
 export const addLubricant = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -150,15 +234,27 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
     if (!Number.isFinite(unitCostNum) || unitCostNum < 0)
       return res.status(400).json({ error: "unitCost must be non-negative" });
 
-    // sellingPercentage is PERCENTAGE
-    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) {
+    // sellingPercentage is PERCENTAGE. Not asked of a cashier — they never see
+    // the field — so only checked when it could have been set.
+    if (req.user?.role !== "cashier" && (!Number.isFinite(percentage) || percentage < 0 || percentage > 100)) {
       return res.status(400).json({
         error: "sellingPercentage must be a percentage between 0 and 100",
       });
     }
 
-    // Compute unitPrice from formula: unitPrice = unitCost * (1 + percentage / 100)
-    const unitPriceNum = unitCostNum * (1 + percentage / 100);
+    /**
+     * A cashier registers WHAT the item is; a manager decides what it costs.
+     *
+     * The till button exists so a customer holding an unknown item is not turned
+     * away — but a price set by whoever is on the counter is how a shop sells at
+     * a loss for weeks. So the identifying details are kept, every money field is
+     * discarded, and the product is parked as `pendingPricing` until a manager
+     * prices it. The POS refuses to sell it in the meantime and says why.
+     */
+    const isCashier = req.user?.role === "cashier";
+
+    // Whole naira: kobo cannot be tendered at a counter.
+    const unitPriceNum = isCashier ? 0 : toNaira(unitCostNum * (1 + percentage / 100));
 
     /**
      * Bigger selling units — a pack of 12, a carton of 24.
@@ -212,17 +308,24 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
         });
       }
 
-      const unitCostForPack = unitCostNum * factor;
-      const price = parseFloat((unitCostForPack * (1 + unitPct / 100)).toFixed(2));
-
       cleanUnits.push({
         name,
         factor,
+        // How this unit reaches the shelf decides how it is priced — bought from
+        // the supplier (carton) or made by opening one (pack). See storePricing.
+        pricingMode: u?.pricingMode || defaultModeFor(name),
         sellingPercentage: unitPct,
-        price,
+        unitCost: Number(u?.unitCost) || 0,
+        discountPercentage: Number(u?.discountPercentage) || 0,
+        price: Number(u?.price) || 0,
         barcode: String(u?.barcode || "").trim() || undefined,
       });
     }
+
+    // One place computes every price, so registration and goods receipt can
+    // never disagree about what a carton costs. A cashier's product has no
+    // prices at all, so there is nothing to compute.
+    const pricedUnits = isCashier ? [] : repriceSaleUnits(cleanUnits, unitCostNum, unitPriceNum);
 
     // ðŸ”¥ If barcode is provided â†’ upsert/update
     if (barcode) {
@@ -230,6 +333,25 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
         fillingStation: new Types.ObjectId(fillingStation),
         barcode: barcode.trim(),
       };
+
+      /**
+       * A cashier may register something new; they may not restock.
+       *
+       * This endpoint upserts — an existing barcode gets `$inc: qtyInStock` and
+       * fresh cost/price. That is a manager's decision (it moves stock value and
+       * the shelf price), and it is the one thing a till operator must not be
+       * able to do by re-registering a product that already exists. Registering
+       * a genuinely unknown item, which is what the POS button is for, stays
+       * open to them.
+       */
+      if (req.user?.role === "cashier") {
+        const existing = await lubricantModel.findOne(query).select("productName").lean();
+        if (existing) {
+          return res.status(409).json({
+            error: `${(existing as any).productName} is already in the system. Ask a manager to restock it or change its price.`,
+          });
+        }
+      }
 
       const update = {
         $inc: { qtyInStock: qty },
@@ -243,11 +365,16 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
           sellingPercentage: percentage,
           unitPrice: unitPriceNum,
           baseUnit: base,
-          saleUnits: cleanUnits,
+          saleUnits: pricedUnits,
         },
         $setOnInsert: {
           fillingStation: new Types.ObjectId(fillingStation),
           barcode: barcode.trim(),
+          // Only ever true on insert: a cashier cannot reach the update branch
+          // (the guard above stops them), so this can never un-price a product
+          // a manager has already priced.
+          pendingPricing: isCashier,
+          registeredBy: req.user?.id,
         },
       };
 
@@ -261,6 +388,8 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
         .findOneAndUpdate(query, update, options)
         .lean()
         .exec();
+
+      notifyProductRegistered(req, fillingStation, result);
 
       return res.status(200).json({
         message: "Lubricant added/updated successfully",
@@ -281,8 +410,12 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       sellingPercentage: percentage,
       unitPrice: unitPriceNum,
       baseUnit: base,
-      saleUnits: cleanUnits,
+      saleUnits: pricedUnits,
+      pendingPricing: isCashier,
+      registeredBy: req.user?.id,
     });
+
+    notifyProductRegistered(req, fillingStation, newLubricant);
 
     return res.status(201).json({
       message: "Lubricant created successfully",
@@ -351,10 +484,16 @@ export const getLubricantByBarcode = async (req: AuthenticatedRequest, res: Resp
       return res.status(400).json({ error: "Barcode is required" });
     }
 
-    // ðŸ§­ Find lubricant belonging to this station with the given barcode
+    // ðŸ§­ Find lubricant belonging to this station with the given barcode.
+    // A carton carries its own code printed on the case, so a scan can legitimately
+    // match either the product's barcode or one of its units'. Checking only the
+    // former answered "not found" for a barcode the station had registered.
     const lubricant = await lubricantModel.findOne({
       fillingStation,
-      barcode: barcode.trim(),
+      $or: [
+        { barcode: barcode.trim() },
+        { "saleUnits.barcode": barcode.trim() },
+      ],
     }).lean();
 
     // Not stocked here. `code` lets the till distinguish this from an
@@ -1137,6 +1276,17 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       if (!productDoc) {
         await session.abortTransaction();
         return res.status(404).json({ success: false, error: `Lubricant not found: ${lubricantId}` });
+      }
+
+      // Registered at the till but never priced. Selling it would either charge
+      // ₦0 or whatever the cashier typed, which is the hole the pending state
+      // exists to close.
+      if ((productDoc as any).pendingPricing) {
+        await session.abortTransaction();
+        return res.status(409).json({
+          success: false,
+          error: `${(productDoc as any).productName} has no price yet — a manager needs to set it before it can be sold.`,
+        });
       }
 
       const baseUnitName = (productDoc as any).baseUnit || "piece";

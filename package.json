@@ -10,7 +10,9 @@
     "create-admin": "ts-node-dev --transpile-only src/scripts/createAdmin.ts",
     "recalc-stock": "ts-node-dev --transpile-only src/scripts/recalcTankStock.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "who-is-admin": "ts-node --transpile-only src/scripts/whoIsAdmin.ts",
+    "reset-password": "ts-node --transpile-only src/scripts/resetPassword.ts"
   },
   "keywords": [],
   "author": "",
