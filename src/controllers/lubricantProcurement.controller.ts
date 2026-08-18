@@ -9,6 +9,7 @@ import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
 import { repriceSaleUnits, toNaira } from "../utils/storePricing";
+import { receiveBatch } from "../services/stockBatch.service";
 
 // â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -602,7 +603,7 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
       const products = await Lubricant.find({
         _id: { $in: procurement.items.map((i: any) => i.lubricantId) },
         fillingStation: stationId,
-      }).select("_id sellingPercentage saleUnits").lean();
+      }).select("_id sellingPercentage saleUnits productName barcode category").lean();
       const markupById = new Map(
         products.map((p: any) => [String(p._id), Number(p.sellingPercentage) || 0])
       );
@@ -658,6 +659,35 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
           };
         });
       if (bulkOps.length > 0) await Lubricant.bulkWrite(bulkOps);
+
+      /**
+       * Open a cost layer for every unit actually accepted.
+       *
+       * Rejected units never reach the shelf, so they never reach a layer —
+       * costing a delivery at what was ordered is how a station ends up valuing
+       * stock it sent back. `receivedAt` is stamped now because this IS the
+       * moment the goods landed.
+       */
+      const productById = new Map(products.map((p: any) => [String(p._id), p]));
+      for (const item of procurement.items as any[]) {
+        const accepted =
+          (item.receivedQuantity ?? item.quantityToProcure) - (item.rejectedQuantity || 0);
+        const product = productById.get(String(item.lubricantId));
+        if (!product || accepted <= 0) continue;
+        await receiveBatch({
+          fillingStation: stationId as any,
+          product,
+          qty: accepted,
+          unitCost: Number(item.unitCost) || 0,
+          source: "delivery",
+          sourceModel: "LubricantProcurement",
+          sourceId: procurement._id,
+          reference: procurement.procurementNumber,
+          supplier: (procurement as any).vendorName,
+          receivedAt: new Date(),
+          receivedBy: req.user?.id,
+        }).catch((e: any) => console.error("Cost layer error (procurement receive):", e?.message));
+      }
     }
 
     procurement.status = "received";

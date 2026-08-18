@@ -7,6 +7,7 @@ import LubricantPurchase, { ILubricantPurchaseItem } from "../models/lubricant-p
 import Activity from "../models/activity.model";
 import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
+import { receiveBatch } from "../services/stockBatch.service";
 
 // ðŸ†• Create a new lubricant purchase
 export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Response) => {
@@ -42,6 +43,13 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
 
     // ðŸ”„ Process each item
     const processedItems: ILubricantPurchaseItem[] = [];
+    /**
+     * What each line needs in order to open its own cost layer once the invoice
+     * itself exists. Collected in the loop rather than re-read afterwards
+     * because `unitCost` on the product is overwritten below — by the time the
+     * purchase is saved, the product no longer remembers what THIS invoice paid.
+     */
+    const batchSeeds: { product: any; qty: number; unitCost: number }[] = [];
 
     for (const item of items) {
       const { lubricantId, barcode, productName, unitCost, quantity, sellingPercentage, sellingPrice, amount } = item;
@@ -63,6 +71,18 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
 
       // Track old cost
       const oldUnitCost = lubricant.unitCost;
+
+      // Snapshot before the product is re-priced, for the layer this line opens.
+      batchSeeds.push({
+        product: {
+          _id: lubricant._id,
+          productName: lubricant.productName,
+          barcode: lubricant.barcode,
+          category: (lubricant as any).category || "lubricant",
+        },
+        qty: Number(quantity),
+        unitCost: Number(unitCost),
+      });
 
       // Update stock quantity
       lubricant.qtyInStock = (lubricant.qtyInStock || 0) + quantity;
@@ -127,6 +147,32 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
       { session }
     );
 
+    /**
+     * One cost layer per line, tied to this invoice.
+     *
+     * Written in the same transaction as the invoice: an invoice that exists
+     * without its layers would silently value its own goods at whatever the
+     * product cost last month, which is the error this whole ledger exists to
+     * stop. `receivedAt` is the invoice date, not now — FIFO must queue goods
+     * by when they landed, or a back-dated invoice jumps the queue.
+     */
+    for (const seed of batchSeeds) {
+      await receiveBatch({
+        fillingStation,
+        product: seed.product,
+        qty: seed.qty,
+        unitCost: seed.unitCost,
+        source: "purchase",
+        sourceModel: "LubricantPurchase",
+        sourceId: purchase[0]._id,
+        reference: invoiceNo,
+        supplier,
+        receivedAt: new Date(purchaseDate),
+        receivedBy: createdBy,
+        session,
+      });
+    }
+
     await session.commitTransaction();
 
     // Log stock activity (fire-and-forget)
@@ -174,13 +220,75 @@ export const getAllLubricantPurchases = async (req: AuthenticatedRequest, res: R
     const fillingStation = req.user?.station;
     if (!fillingStation) return res.status(403).json({ error: "Unauthorized" });
 
-    const purchases = await LubricantPurchase.find({ fillingStation })
+    /**
+     * Optional window. Absent = everything since the station registered, which
+     * is what an auditor asks for first and what the screen defaults to.
+     *
+     * `purchaseDate` is a string field on this model (it always was), so the
+     * window is applied on `createdAt` — when the invoice was actually booked.
+     * That is the defensible date for an audit anyway: it is the one nobody can
+     * back-date by typing.
+     */
+    const { from, to, supplier, paymentMethod } = req.query as Record<string, string>;
+    const query: any = { fillingStation };
+    if (from || to) {
+      query.createdAt = {};
+      if (from) query.createdAt.$gte = new Date(from);
+      if (to) {
+        // Inclusive of the closing day: "to 31 Aug" must contain 31 Aug's
+        // invoices, not stop at midnight as it opens.
+        const end = new Date(to);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
+    if (supplier) query.supplier = supplier;
+    if (paymentMethod) query.paymentMethod = paymentMethod;
+
+    const purchases = await LubricantPurchase.find(query)
       .sort({ createdAt: -1 })
       .lean();
+
+    /**
+     * The figure the list never had: what all of this cost.
+     *
+     * Totalled server-side over the same query rather than in the browser, so
+     * the number is right whether or not the page happens to be showing every
+     * row, and so an auditor can hit the endpoint directly and get the same
+     * answer as the screen.
+     */
+    const summary = purchases.reduce(
+      (acc: any, p: any) => {
+        acc.totalAmount += Number(p.totalAmount) || 0;
+        acc.itemCount += (p.items || []).length;
+        acc.unitsReceived += (p.items || []).reduce(
+          (n: number, it: any) => n + (Number(it.quantity) || 0), 0
+        );
+        const when = new Date(p.createdAt).getTime();
+        if (!acc.firstAt || when < acc.firstAt) acc.firstAt = when;
+        if (!acc.lastAt || when > acc.lastAt) acc.lastAt = when;
+        return acc;
+      },
+      { totalAmount: 0, itemCount: 0, unitsReceived: 0, firstAt: 0, lastAt: 0 }
+    );
+
+    const suppliers = [...new Set(purchases.map((p: any) => p.supplier).filter(Boolean))];
 
     return res.status(200).json({
       message: "Lubricant purchases retrieved successfully",
       total: purchases.length,
+      summary: {
+        invoiceCount: purchases.length,
+        totalAmount: Math.round(summary.totalAmount * 100) / 100,
+        itemCount: summary.itemCount,
+        unitsReceived: summary.unitsReceived,
+        supplierCount: suppliers.length,
+        averageInvoice: purchases.length
+          ? Math.round((summary.totalAmount / purchases.length) * 100) / 100
+          : 0,
+        firstInvoiceAt: summary.firstAt ? new Date(summary.firstAt) : null,
+        lastInvoiceAt: summary.lastAt ? new Date(summary.lastAt) : null,
+      },
       data: purchases,
     });
   } catch (error: any) {

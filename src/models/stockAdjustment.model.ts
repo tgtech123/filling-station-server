@@ -39,6 +39,16 @@ export interface IStockAdjustment extends Document {
   difference: number;
   reason: AdjustmentReason;
   note?: string;
+  /**
+   * What the correction was worth, at the cost of the goods involved.
+   *
+   * A write-off of six bottles is not "six" to an owner, it is money. Taken
+   * from the FIFO layers consumed (downward) or opened (upward), so a shrinkage
+   * report can total in naira instead of asking someone to price it by hand.
+   */
+  costOfGoods?: number;
+  /** Cost per base unit used for that valuation. */
+  unitCost?: number;
   adjustedBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -56,6 +66,8 @@ const StockAdjustmentSchema = new Schema<IStockAdjustment>(
     reason:         { type: String, enum: ADJUSTMENT_REASONS, required: true },
     note:           { type: String, trim: true },
     adjustedBy:     { type: mongoose.Schema.Types.ObjectId, ref: "Staff", required: true },
+    costOfGoods:    { type: Number, default: 0 },
+    unitCost:       { type: Number, default: 0 },
   },
   { timestamps: true }
 );

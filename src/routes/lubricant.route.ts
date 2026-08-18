@@ -4,6 +4,7 @@ import express from "express";
 import { checkRole } from "../middlewares/checkRole";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { adjustStock, getProductHistory } from "../controllers/stockAdjustment.controller";
+import { getStockAuditReport, getOpenBatches } from "../controllers/stockAudit.controller";
 import { requireFuelDepartment } from "../middlewares/requireDepartment";
 import {
   addLubricant,
@@ -76,6 +77,16 @@ router.get("/lubricant-monthly-summary", requireAuth, checkRole("manager", "cash
 // --- Transactions ---
 router.get("/transactions", requireAuth, checkRole("manager", "cashier"), getAllLubricantTransactions);
 router.get("/transactions/:id", requireAuth, checkRole("manager", "cashier"), getLubricantTransactionById);
+
+// --- Stock audit ---
+// Opening and closing stock, in units and in naira, with everything that moved
+// between them. Read-only and answerable to an auditor, so the accountant is in
+// even though they never touch stock — being able to check the figures is the
+// entire point of the screen. Declared BEFORE "/:id/..." style routes elsewhere
+// would matter; here the paths are distinct, but keeping reports together makes
+// the file readable.
+router.get("/reports/stock-audit", requireAuth, checkRole("manager", "supervisor", "accountant"), getStockAuditReport);
+router.get("/reports/open-batches", requireAuth, checkRole("manager", "supervisor", "accountant"), getOpenBatches);
 
 // --- Lubricant purchases ---
 router.post("/purchases", requireAuth, checkRole("manager", "supervisor"), addLubricantPurchase);
