@@ -7,6 +7,8 @@ import LubricantTransaction from "../models/lubricant-transaction.model";
 import LubricantPurchase from "../models/lubricant-purchase.model";
 import LubricantProcurement from "../models/lubricantProcurement.model";
 import { notifyStation } from "../utils/notifyHelpers";
+import StockBatch from "../models/stockBatch.model";
+import { ensureOpeningBatch, receiveBatch, consumeFIFO } from "../services/stockBatch.service";
 
 /**
  * POST /api/lubricant/:id/adjust-stock
@@ -42,6 +44,13 @@ export const adjustStock = async (req: AuthenticatedRequest, res: Response) => {
 
     const before = Number((product as any).qtyInStock) || 0;
 
+    // Layer up what is already on the shelf before touching it, so a write-off
+    // consumes real consignments at real costs instead of finding nothing to
+    // consume and falling back to a standing cost.
+    await ensureOpeningBatch(product, fillingStation).catch((e: any) =>
+      console.error("Opening batch error (adjust):", e?.message)
+    );
+
     // Someone sold one while the shelf was being counted. Their number is now
     // stale — say so rather than quietly reverse the sale.
     if (expectedBefore !== undefined && Number(expectedBefore) !== before) {
@@ -63,6 +72,43 @@ export const adjustStock = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const difference = newQty - before;
+
+    /**
+     * Put the correction through the cost ledger too, so a shrinkage report can
+     * be read in naira.
+     *
+     * Downward: the goods that vanished came off the oldest layers, exactly as a
+     * sale would take them — a bottle written off is a bottle that can no longer
+     * be sold, and it must not stay in the valuation.
+     * Upward: stock found is stock with no invoice behind it. It opens its own
+     * layer at the product's standing cost, flagged by source so an auditor can
+     * see at a glance which of the shelf's value arrived without paperwork.
+     */
+    let costOfGoods = 0;
+    let costUnit = Number((product as any).unitCost) || 0;
+    try {
+      if (difference < 0) {
+        const consumed = await consumeFIFO({ product: updated, qty: Math.abs(difference) });
+        costOfGoods = consumed.costOfGoods;
+        costUnit = Math.abs(difference) > 0 ? consumed.costOfGoods / Math.abs(difference) : costUnit;
+      } else if (difference > 0) {
+        await receiveBatch({
+          fillingStation,
+          product: updated,
+          qty: difference,
+          unitCost: costUnit,
+          source: "adjustment",
+          sourceModel: "StockAdjustment",
+          reference: String(reason).replace(/_/g, " "),
+          receivedAt: new Date(),
+          receivedBy: staffId,
+        });
+        costOfGoods = difference * costUnit;
+      }
+    } catch (e: any) {
+      console.error("Cost layer error (adjust):", e?.message);
+    }
+
     const adjustment = await StockAdjustment.create({
       fillingStation,
       lubricant: updated._id,
@@ -73,6 +119,8 @@ export const adjustStock = async (req: AuthenticatedRequest, res: Response) => {
       reason,
       note: note?.trim() || undefined,
       adjustedBy: staffId,
+      costOfGoods: Math.round(costOfGoods * 100) / 100,
+      unitCost: Math.round(costUnit * 100) / 100,
     });
 
     // The owner should hear about stock being written off without having to go
@@ -174,6 +222,16 @@ export const getProductHistory = async (req: AuthenticatedRequest, res: Response
         detail: `${line.qtyInUnits ?? line.qtySold} ${line.unitName || "piece"}${(line.qtyInUnits ?? line.qtySold) > 1 ? "s" : ""}`,
         reference: t.txnId,
         amount: line.amount,
+        // Which consignments these particular pieces came out of. Empty for
+        // sales made before layers were kept — the screen says so rather than
+        // inventing an origin.
+        lots: line.costLots || [],
+        cost: line.costOfGoods ?? null,
+        costEstimated: !!line.costEstimated,
+        margin:
+          line.costOfGoods != null
+            ? Math.round((Number(line.amount || 0) - Number(line.costOfGoods)) * 100) / 100
+            : null,
       });
     }
 
@@ -215,10 +273,42 @@ export const getProductHistory = async (req: AuthenticatedRequest, res: Response
         by: name(a.adjustedBy),
         detail: `${String(a.reason).replace(/_/g, " ")}${a.note ? ` — ${a.note}` : ""}`,
         reference: null,
+        cost: a.costOfGoods ?? null,
       });
     }
 
     events.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
+    /**
+     * The consignments themselves — every layer ever opened for this product,
+     * and how much of each is still on the shelf.
+     *
+     * This is what turns "30 in stock" into an answer: 20 from August's invoice
+     * at ₦2,400 and 10 from September's at ₦2,900, worth ₦77,000 rather than
+     * the ₦87,000 a single overwritten unit cost would have claimed.
+     */
+    await ensureOpeningBatch(product, fillingStation).catch(() => {});
+    const batches = await StockBatch.find({ lubricant: productId })
+      .populate("receivedBy", "firstName lastName")
+      .sort({ receivedAt: -1 })
+      .limit(100)
+      .lean();
+
+    const layers = (batches as any[]).map((b) => ({
+      _id: b._id,
+      source: b.source,
+      reference: b.reference,
+      supplier: b.supplier,
+      unitCost: b.unitCost,
+      qtyReceived: b.qtyReceived,
+      qtyRemaining: b.qtyRemaining,
+      value: Math.round(b.qtyRemaining * b.unitCost * 100) / 100,
+      receivedAt: b.receivedAt,
+      receivedBy: name(b.receivedBy),
+    }));
+
+    const layeredQty = layers.reduce((n, l) => n + Number(l.qtyRemaining || 0), 0);
+    const layeredValue = Math.round(layers.reduce((n, l) => n + l.value, 0) * 100) / 100;
 
     // Walk back from today's count: balanceAfter is what the shelf held once
     // that event had happened.
@@ -240,6 +330,16 @@ export const getProductHistory = async (req: AuthenticatedRequest, res: Response
           unitPrice: (product as any).unitPrice,
         },
         events,
+        layers,
+        valuation: {
+          // FIFO — layer by layer, at what each layer cost. Deliberately not
+          // qtyInStock × unitCost: that values old stock at today's price.
+          qtyLayered: layeredQty,
+          value: layeredValue,
+          // A gap here is stock on the shelf that no consignment explains.
+          unlayeredQty:
+            Math.round(((Number((product as any).qtyInStock) || 0) - layeredQty) * 100) / 100,
+        },
         // What the history accounts for versus what is on the shelf. A non-zero
         // gap means stock moved without any record — the single most useful
         // number on this screen.

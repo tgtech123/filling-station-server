@@ -38,12 +38,49 @@ interface ITransactionItem {
   qtyInUnits: number;
   /** Price of one such unit at the moment of sale. */
   unitPrice: number;
+  /**
+   * WHICH goods left, and what those specific goods cost.
+   *
+   * A sale of 12 that takes 8 from the March delivery and 4 from April's is two
+   * lots at two costs — the only honest way to answer "what did we make on
+   * that". Written at the moment of sale from the FIFO layers actually
+   * consumed, and never recomputed: next month's supplier price rise must not
+   * rewrite last month's margin.
+   */
+  costLots?: {
+    batch?: mongoose.Types.ObjectId;
+    source: string;
+    reference?: string;
+    supplier?: string;
+    unitCost: number;
+    qty: number;
+    receivedAt?: Date;
+  }[];
+  /** Sum of (lot.qty x lot.unitCost) — the cost of goods sold on this line. */
+  costOfGoods?: number;
+  /**
+   * Part of the quantity had no receipt behind it and was costed at the
+   * product's standing cost. The margin on this line is an estimate, and any
+   * report built on it should say so.
+   */
+  costEstimated?: boolean;
 }
 
 // 🔹 Main transaction document
 export interface ILubricantTransaction extends Document {
   _id: mongoose.Types.ObjectId;
   txnId: string;
+  /**
+   * The till's own id for this basket, unique per station.
+   *
+   * A sale must be recorded once even if the request that carried it arrives
+   * twice — a double-tap on the till, or a browser retrying a request whose
+   * response was lost on a bad forecourt connection. The client mints this once
+   * per basket and resends the same value on a retry, so the second write
+   * collides with the unique index instead of taking the customer's money
+   * again. Optional: older clients, and any sale created server-side, have none.
+   */
+  idempotencyKey?: string;
   fillingStation: mongoose.Types.ObjectId;
   staff: mongoose.Types.ObjectId;
   items: ITransactionItem[];
@@ -107,6 +144,26 @@ const transactionItemSchema = new Schema<ITransactionItem>(
       type: Number,
       default: 0,
     },
+    // Written once, at the moment of sale, from the layers actually consumed.
+    // `_id: false` because a lot is a fact about this line, not a document
+    // anyone will ever look up on its own.
+    costLots: {
+      type: [
+        {
+          _id: false,
+          batch: { type: mongoose.Schema.Types.ObjectId, ref: "StockBatch" },
+          source: { type: String },
+          reference: { type: String, trim: true },
+          supplier: { type: String, trim: true },
+          unitCost: { type: Number, default: 0 },
+          qty: { type: Number, default: 0 },
+          receivedAt: { type: Date },
+        },
+      ],
+      default: [],
+    },
+    costOfGoods: { type: Number, default: 0 },
+    costEstimated: { type: Boolean, default: false },
   },
   { _id: false } // Don't create _id for sub-items
 );
@@ -117,6 +174,11 @@ const lubricantTransactionSchema = new Schema<ILubricantTransaction>(
       type: String,
       unique: true,
       required: true,
+    },
+    idempotencyKey: {
+      type: String,
+      required: false,
+      default: undefined,
     },
     fillingStation: {
       type: mongoose.Schema.Types.ObjectId,
@@ -154,6 +216,15 @@ const lubricantTransactionSchema = new Schema<ILubricantTransaction>(
     },
   },
   { timestamps: true }
+);
+
+lubricantTransactionSchema.index(
+  { fillingStation: 1, idempotencyKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { idempotencyKey: { $type: "string" } },
+    name: "uniq_station_idempotency_key",
+  }
 );
 
 // 🔹 Generate unique txnId like "LUB29933"

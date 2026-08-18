@@ -11,6 +11,7 @@ import Activity from "../models/activity.model";
 import { actorFrom } from "../utils/actor";
 import { notifyStation } from "../utils/notifyHelpers";
 import { emitToStation } from "../services/socket.service";
+import { ensureOpeningBatch, consumeFIFO } from "../services/stockBatch.service";
 
 /**
  * The station's pricing defaults, created on first read.
@@ -1204,7 +1205,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
   try {
     const staffId = req.user?.id;
     const fillingStation = req.user?.station;
-    const { items, paymentMethod, paymentBreakdown } = req.body;
+    const { items, paymentMethod, paymentBreakdown, idempotencyKey } = req.body;
 
     // ðŸ”’ Check authorization
     if (!fillingStation) {
@@ -1233,6 +1234,41 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
     }
 
     const stationObjectId = new mongoose.Types.ObjectId(fillingStation);
+
+    /**
+     * Already recorded under this key? Hand back the sale that exists.
+     *
+     * The till sends the same key when it retries a basket, so a duplicate
+     * request must return the ORIGINAL transaction — same txnId, so the receipt
+     * that prints from the retry is the receipt for the sale that was made, not
+     * a second sale for the same goods.
+     */
+    const replayKey = typeof idempotencyKey === "string" && idempotencyKey.trim()
+      ? idempotencyKey.trim().slice(0, 100)
+      : null;
+
+    if (replayKey) {
+      const existing = await LubricantTransaction.findOne({
+        fillingStation: stationObjectId,
+        idempotencyKey: replayKey,
+      }).lean();
+
+      if (existing) {
+        await session.abortTransaction();
+        return res.status(200).json({
+          success: true,
+          message: "Transaction already recorded",
+          data: {
+            txnId: existing.txnId,
+            totalAmount: existing.totalAmount,
+            itemCount: existing.items?.length ?? 0,
+            transaction: existing,
+          },
+          duplicate: true,
+        });
+      }
+    }
+
     const processedItems = [];
     let totalAmount = 0;
 
@@ -1288,6 +1324,20 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
           error: `${(productDoc as any).productName} has no price yet — a manager needs to set it before it can be sold.`,
         });
       }
+
+      /**
+       * Give the product its opening cost layer if it has never had one.
+       *
+       * Stations were selling long before consignment costs were tracked, so a
+       * shelf can hold stock that no layer explains. Closing that gap here —
+       * lazily, on first sale — means the FIFO ledger becomes correct as the
+       * shop trades instead of waiting on a migration someone has to remember
+       * to run. Deliberately outside the session: it is idempotent, and a race
+       * between two tills must not abort a customer's sale.
+       */
+      await ensureOpeningBatch(productDoc, stationObjectId).catch((e) =>
+        console.error("Opening batch error:", e?.message)
+      );
 
       const baseUnitName = (productDoc as any).baseUnit || "piece";
       const asked = String(unitName || "").trim();
@@ -1377,6 +1427,17 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       }
 
 
+      /**
+       * Take the goods off the oldest layers and record WHICH ones went.
+       *
+       * Inside the session, so a basket that fails on its third line does not
+       * leave the first two lines' layers consumed. This is what makes a sale
+       * traceable back to the invoice that brought the goods in, and what makes
+       * the margin on the line the real margin rather than one computed against
+       * whatever the product happens to cost today.
+       */
+      const consumed = await consumeFIFO({ product: lubricant, qty: baseQty, session });
+
       // Low-stock alert when quantity drops to or below reorder level
       const newQty = lubricant.qtyInStock;
       const reOrder = lubricant.reOrderLevel || 0;
@@ -1417,6 +1478,18 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
         unitFactor,
         qtyInUnits: quantity,
         unitPrice,
+        // The specific consignments this sale drew on, and what they cost.
+        costLots: consumed.lots.map((l) => ({
+          batch: l.batch ?? undefined,
+          source: l.source,
+          reference: l.reference,
+          supplier: l.supplier,
+          unitCost: l.unitCost,
+          qty: l.qty,
+          receivedAt: l.receivedAt,
+        })),
+        costOfGoods: consumed.costOfGoods,
+        costEstimated: consumed.estimated,
       });
 
       totalAmount += amount;
@@ -1431,6 +1504,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
           items: processedItems,
           totalAmount,
           paymentMethod,
+          ...(replayKey ? { idempotencyKey: replayKey } : {}),
           ...(paymentMethod === "mixed" && paymentBreakdown
             ? { paymentBreakdown }
             : {}),
@@ -1478,6 +1552,32 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
     });
   } catch (error: any) {
     await session.abortTransaction();
+
+    // Read from the body, not the destructured const — that one is scoped to
+    // the try block and is not in scope here.
+    const retriedKey = req.body?.idempotencyKey;
+
+    if (error?.code === 11000 && typeof retriedKey === "string" && req.user?.station) {
+      const winner = await LubricantTransaction.findOne({
+        fillingStation: new mongoose.Types.ObjectId(req.user.station),
+        idempotencyKey: retriedKey.trim().slice(0, 100),
+      }).lean();
+
+      if (winner) {
+        return res.status(200).json({
+          success: true,
+          message: "Transaction already recorded",
+          data: {
+            txnId: winner.txnId,
+            totalAmount: winner.totalAmount,
+            itemCount: winner.items?.length ?? 0,
+            transaction: winner,
+          },
+          duplicate: true,
+        });
+      }
+    }
+
     console.error("Error adding lubricant transaction:", error);
     return res.status(500).json({
       success: false,
@@ -1571,7 +1671,7 @@ export const getLubricantTransactionById = async (req: AuthenticatedRequest, res
       fillingStation: new Types.ObjectId(fillingStation),
     })
       .populate("staff", "firstName lastName email")
-      .populate("fillingStation", "name address")
+      .populate("fillingStation", "name address phone email")
       .lean();
 
     if (!transaction) {
