@@ -28,16 +28,15 @@ export const STORE_CATEGORIES: ProductCategory[] = ["drinks", "snacks", "other"]
  * or create a second "Coke Pack" product whose stock double-counts the same
  * crate.
  *
- * Pricing works exactly as it does for a single, one level up: the unit's COST
- * is the piece cost times the factor, and its own markup is applied to that.
+ * Pricing follows how the goods actually reach the shelf — see storePricing.ts:
  *
- *   piece  ₦300 cost, 20% → ₦360
- *   pack   ₦300 × 12 = ₦3,600 cost, 15% → ₦4,140  (₦345 a piece)
- *   carton ₦300 × 24 = ₦7,200 cost, 10% → ₦7,920  (₦330 a piece)
+ *   carton  you BUY it, so it has a real supplier cost. Its own markup applies
+ *           to that cost.               ₦7,000 cost, 10% → ₦7,700
+ *   pack    you MAKE it by opening a carton, so no supplier cost exists. Priced
+ *           off the single price less a discount.   12 × ₦360 − 5% → ₦4,104
  *
- * The volume discount falls out of the smaller markup instead of being typed in
- * by hand, so it can never be set below cost by accident and it re-prices itself
- * the moment the cost price changes — which for drinks is every few weeks.
+ * Everything lands on a whole naira: kobo cannot be tendered at a counter, and a
+ * till asking for ₦4,137.50 produces a shortage at every reconciliation.
  *
  * `price` is stored, not computed on read: it is what the till charged, and a
  * cost change next month must not silently rewrite what last month sold for.
@@ -45,9 +44,20 @@ export const STORE_CATEGORIES: ProductCategory[] = ["drinks", "snacks", "other"]
 export interface ISaleUnit {
   name: string;
   factor: number;
-  /** Markup on this unit's cost, as a percentage. The input. */
+  /**
+   * "cost"    — bought from the supplier in this unit (carton, bag, crate), so
+   *             it has a real cost and its own markup applies to that.
+   * "derived" — made by opening a bigger unit (pack, dozen, roll). No supplier
+   *             cost exists, so it is priced off the single price less a discount.
+   */
+  pricingMode: "cost" | "derived";
+  /** "cost" mode: markup on this unit's own cost, as a percentage. */
   sellingPercentage: number;
-  /** unitCost × factor × (1 + sellingPercentage/100). The output. */
+  /** "cost" mode: what the supplier charges for one of these. */
+  unitCost?: number;
+  /** "derived" mode: how far below factor × single price it sells. */
+  discountPercentage?: number;
+  /** The computed (or manually adjusted) selling price, whole naira. */
   price: number;
   /** The carton's own barcode, if it carries one — scan it, sell the carton. */
   barcode?: string;
@@ -73,6 +83,15 @@ export interface ILubricant extends Document {
   baseUnit: string;
   /** Larger units the same stock can be sold in. Empty = singles only. */
   saleUnits: ISaleUnit[];
+  /**
+   * Registered but not yet priced — a cashier put it in the system at the till.
+   *
+   * It cannot be sold until a manager prices it. Pricing is a manager's
+   * decision: a product priced by whoever happened to be on the till is how a
+   * shop sells at a loss for weeks without anyone noticing.
+   */
+  pendingPricing: boolean;
+  registeredBy?: mongoose.Types.ObjectId;
 }
 
 const LubricantSchema: Schema = new Schema<ILubricant>(
@@ -139,6 +158,8 @@ const LubricantSchema: Schema = new Schema<ILubricant>(
       trim: true,
       default: "piece",
     },
+    pendingPricing: { type: Boolean, default: false },
+    registeredBy: { type: mongoose.Schema.Types.ObjectId, ref: "Staff" },
     saleUnits: {
       type: [
         {
@@ -148,7 +169,10 @@ const LubricantSchema: Schema = new Schema<ILubricant>(
           // another name, and it would make a receipt say two different things
           // about the same sale.
           factor:  { type: Number, required: true, min: 2 },
-          sellingPercentage: { type: Number, required: true, min: 0, default: 0 },
+          pricingMode: { type: String, enum: ["cost", "derived"], default: "derived" },
+          sellingPercentage: { type: Number, min: 0, default: 0 },
+          unitCost: { type: Number, min: 0, default: 0 },
+          discountPercentage: { type: Number, min: 0, max: 100, default: 0 },
           price:   { type: Number, required: true, min: 0 },
           barcode: { type: String, trim: true },
         },

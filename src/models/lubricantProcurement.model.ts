@@ -28,6 +28,7 @@ export interface IProcurementItem {
    * straight to the pump shop, and sometimes more than the markup does.
    */
   confirmedSellingPrice?: number;
+  saleUnits?: any[];
   receivedQuantity?: number;   // actual qty received — set when marked as received
   /** Units rejected at the door on quality inspection; never enter stock. */
   rejectedQuantity?: number;
@@ -79,6 +80,8 @@ export interface ILubricantProcurement extends Document {
   submittedAt: Date | null;
   orderedAt: Date | null;
   receivedAt: Date | null;
+  /** Who checked the delivery in — the answer to "who validated this stock?" */
+  receivedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -96,6 +99,9 @@ const ProcurementItemSchema = new Schema<IProcurementItem>(
     confirmedQuantity: { type: Number, min: 0 },
     confirmedUnitCost: { type: Number, min: 0 },
     confirmedSellingPrice: { type: Number, min: 0 },
+    // Per-unit prices as settled at the door, so the PO records what actually
+    // reached the shelf and not only the quantities.
+    saleUnits: { type: Array, default: undefined },
     receivedQuantity:  { type: Number, min: 0 },
     rejectedQuantity:  { type: Number, min: 0, default: 0 },
     qualityNotes:      { type: String, default: "" },
@@ -142,6 +148,7 @@ const LubricantProcurementSchema = new Schema<ILubricantProcurement>(
     submittedAt: { type: Date, default: null },
     orderedAt: { type: Date, default: null },
     receivedAt: { type: Date, default: null },
+    receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Staff", default: null },
   },
   { timestamps: true }
 );

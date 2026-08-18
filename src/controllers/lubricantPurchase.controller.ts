@@ -1,5 +1,6 @@
 ﻿import { Response } from "express";
 import mongoose, { Types } from "mongoose";
+import { repriceSaleUnits } from "../utils/storePricing";
 import { AuthenticatedRequest } from "../interfaces";
 import Lubricant from "../models/lubricant.model";
 import LubricantPurchase, { ILubricantPurchaseItem } from "../models/lubricant-purchase.model";
@@ -74,6 +75,22 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
       if (sellingPercentage !== undefined && sellingPercentage !== null) {
         lubricant.sellingPercentage = sellingPercentage;
       }
+
+      /**
+       * Re-price the packs and cartons off the new cost, exactly as a PO receipt
+       * does.
+       *
+       * Buying over the counter against a paper invoice is the same event as a
+       * delivery arriving — stock in, cost changed — so it must move the same
+       * prices. Leaving it out here would mean the route a station uses for
+       * quick top-ups silently kept selling cartons at last month's margin,
+       * which is precisely the leak the PO path was fixed to close.
+       */
+      lubricant.saleUnits = repriceSaleUnits(
+        (item.saleUnits && item.saleUnits.length ? item.saleUnits : lubricant.saleUnits) as any,
+        unitCost,
+        sellingPrice
+      ) as any;
 
       await lubricant.save({ session });
 

@@ -24,7 +24,8 @@ export interface INotification extends Document {
     | "emergency"
     | "support_ticket"
     | "support_response"
-    | "loyalty_redemption";
+    | "loyalty_redemption"
+    | "product_registered";
   title: string;
   body: string;
   /**
@@ -114,6 +115,7 @@ const NotificationSchema = new Schema<INotification>(
         "support_ticket",
         "support_response",
         "loyalty_redemption",
+        "product_registered",
       ],
       required: true,
     },
