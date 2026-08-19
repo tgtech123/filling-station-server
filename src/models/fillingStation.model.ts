@@ -41,7 +41,16 @@ export interface IFillingStation extends Document {
   parentStation: mongoose.Types.ObjectId | null;
   branches: mongoose.Types.ObjectId[];
   isSuperManager: boolean;
-  gasEnabled: boolean;           // master switch — disables/freezes entire gas department
+  /**
+   * Master switch for the whole gas department. OFF for a new station.
+   *
+   * Most stations sell fuel and nothing else, and a department that is on by
+   * default hands every one of them a set of screens they cannot use: staff
+   * open them, find nothing behind them, and learn that parts of the app are
+   * decoration. Off by default means gas appears the day the owner or manager
+   * says the station actually sells it.
+   */
+  gasEnabled: boolean;
   gasStationCode?: string;
   gasBankName?: string;
   gasBankAccount?: string;
@@ -124,7 +133,7 @@ const FillingStationSchema = new Schema<IFillingStation>(
     },
     branches: [{ type: Schema.Types.ObjectId, ref: "FillingStation" }],
     isSuperManager: { type: Boolean, default: false },
-    gasEnabled:               { type: Boolean, default: true },
+    gasEnabled:               { type: Boolean, default: false },
     gasStationCode:           { type: String, trim: true, uppercase: true },
     gasBankName:              { type: String, trim: true },
     gasBankAccount:           { type: String, trim: true },

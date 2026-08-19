@@ -10,6 +10,7 @@ import Expense from "../models/expense.model";
 // already corrected; these pages were missed. A transaction is a basket, so
 // revenue is its totalAmount and per-product detail lives in items[].
 import LubricantTransaction from "../models/lubricant-transaction.model";
+import { splitCounterRevenue } from "../utils/revenueSplit";
 import Delivery from "../models/delivery.model";
 import Tank from "../models/tanks.model";
 import Pump from "../models/pump.model";
@@ -124,7 +125,45 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
       },
     ]).exec();
 
-    const totalRevenue = Number(revenueResult[0]?.totalRevenue || 0);
+    const fuelRevenueTotal = Number(revenueResult[0]?.totalRevenue || 0);
+
+    /**
+     * Counter sales, split by what was actually sold.
+     *
+     * The headline figure used to be fuel shifts ALONE, which is why an
+     * accountant saw zero on a day the shop had taken money and the owner's
+     * dashboard showed it: the owner's endpoint adds lubricant sales and this
+     * one never did.
+     *
+     * Split by `items.category`, which the transaction copies at the moment of
+     * sale, so a crate of drinks is never reported as lubricant revenue. That
+     * is also the only way to see which of the two is actually earning: one
+     * combined "lubricant" number hides a shop outperforming the oil rack.
+     */
+    const counterSales = await LubricantTransaction.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(stationId),
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: { $ifNull: ["$items.category", "lubricant"] },
+          total: { $sum: "$items.amount" },
+          lines: { $sum: 1 },
+        },
+      },
+    ]).exec();
+
+    const counterSplit = splitCounterRevenue(counterSales as any[]);
+    const lubricantRevenueTotal = counterSplit.lubricant;
+    const storeRevenueTotal = counterSplit.store;
+    const lubricantLines = counterSplit.lubricantLines;
+    const storeLines = counterSplit.storeLines;
+
+    const totalRevenue = fuelRevenueTotal + counterSplit.total;
 
     // 2. Total Expenses
     const expensesResult = await Expense.aggregate([
@@ -306,6 +345,19 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
       data: {
         summary: {
           revenueGenerated: totalRevenue,
+          // The parts behind the headline, so the shop and the oil rack can be
+          // compared rather than guessed at.
+          revenueBreakdown: {
+            fuel: fuelRevenueTotal,
+            lubricant: lubricantRevenueTotal,
+            store: storeRevenueTotal,
+          },
+          // How often each sells, which is a different question from how much
+          // it earns: many small shop sales can beat a few large oil ones.
+          salesCount: {
+            lubricant: lubricantLines,
+            store: storeLines,
+          },
           expenses: totalExpenses,
           discrepancies: discrepancies,
           totalStockValue: totalStockValue,
@@ -1757,9 +1809,41 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
     ]).exec();
 
     const totalFuelRevenue = Number(revenue[0]?.total || 0);
-    const totalLubricantSales = Number(lubricantRevenue[0]?.total || 0);
-    const totalRevenue = totalFuelRevenue + totalLubricantSales; // combined for percentages
-    const otherSales = 0;
+    const totalCounterSales = Number(lubricantRevenue[0]?.total || 0);
+
+    /**
+     * Split the counter take into oil and shop.
+     *
+     * `totalLubricantSales` used to carry both, so a station could not tell
+     * whether the shop or the oil rack was earning, which is the first thing
+     * anyone wants to know about a mixed counter. Category is copied onto the
+     * line at the moment of sale, so this reads history rather than reclassing
+     * it from today's catalogue.
+     */
+    const counterSplit = await LubricantTransaction.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(stationId),
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: { $ifNull: ["$items.category", "lubricant"] },
+          total: { $sum: "$items.amount" },
+          transactions: { $sum: 1 },
+        },
+      },
+    ]).exec();
+
+    const split = splitCounterRevenue(counterSplit as any[]);
+    const totalLubricantSales = split.lubricant;
+    const totalStoreSales = split.store;
+    const storeByCategory = split.storeByCategory;
+
+    const totalRevenue = totalFuelRevenue + totalCounterSales;
+    const otherSales = totalStoreSales;
 
     // All fuel types registered at this station (source of truth for what we sell)
     const tankDoc = await Tank.findOne({ fillingStation: new Types.ObjectId(stationId) }).lean() as any;
@@ -1858,8 +1942,16 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
           totalRevenueGenerated: totalRevenue,   // fuel + lubricant combined
           totalFuelSales: totalFuelSales,
           totalLubricantSales: totalLubricantSales,
+          totalStoreSales: totalStoreSales,
           otherSales: otherSales,
         },
+        // Drinks, snacks and sundries on their own, so the shop can be judged
+        // on its own numbers rather than buried in the oil figure.
+        storeIncomeReport: Object.entries(storeByCategory).map(([category, revenue]) => ({
+          category,
+          revenue,
+          percentageOfRevenue: totalRevenue > 0 ? (revenue / totalRevenue) * 100 : 0,
+        })),
         fuelIncomeReport: fuelIncomeReport,
         lubricantIncomeReport: lubricantIncomeReport,
       },

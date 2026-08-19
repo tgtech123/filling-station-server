@@ -13,8 +13,17 @@ export const requireGasEnabled = async (
 
     const doc = await FillingStation.findById(station).select("gasEnabled").lean();
 
-    // Default to enabled if field doesn't exist (backward compat for existing stations)
-    if ((doc as any)?.gasEnabled === false) {
+    /**
+     * Absent counts as OFF, the same as the sidebar and the status endpoint.
+     *
+     * This used to default to ON so that stations predating the field kept
+     * working. That now contradicts the rest of the app: the menu hides gas
+     * when the flag is missing, so the API would have stayed open on screens
+     * nobody could reach, and the two would disagree about whether the station
+     * has a gas department at all. One rule everywhere is worth more than the
+     * fallback, and a manager turning it back on is one click.
+     */
+    if ((doc as any)?.gasEnabled !== true) {
       return res.status(503).json({
         message: "Gas department is currently disabled for this station.",
         gasDisabled: true,
