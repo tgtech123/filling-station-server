@@ -73,6 +73,17 @@ export interface ILubricant extends Document {
   brand: string;
   qtyInStock: number;
   reOrderLevel: number;
+  /** When this stock goes bad. Null for goods that do not, such as lubricants. */
+  expiryDate: Date | null;
+  /**
+   * The narrowest expiry window already alerted on: 60, 30, 7 or 0 days.
+   *
+   * Without it the sweep would re-send the same warning every ten minutes until
+   * the stock sold or spoiled, and a bell that cries every tick is one nobody
+   * reads. Each window fires once; the next, closer window fires again because
+   * it is genuinely more urgent.
+   */
+  expiryAlertStage: number | null;
   unitCost: number;
   unitPrice: number;
   sellingPercentage: number; // Markup percentage
@@ -138,6 +149,28 @@ const LubricantSchema: Schema = new Schema<ILubricant>(
       required: true,
       default: 0,
     },
+    /**
+     * When this stock goes bad. Null for goods that do not.
+     *
+     * Required at registration for shop stock and never asked of a lubricant,
+     * because the two behave differently on a shelf: a crate of drinks is a
+     * write-off on a date certain, and the only way to avoid taking that loss
+     * is to know far enough ahead to clear it at a discount. Engine oil has no
+     * such date, and demanding one would only teach people to invent it.
+     *
+     * Indexed with the station because the sweep that finds soon-to-expire
+     * stock reads exactly that pair.
+     */
+    expiryDate: {
+      type: Date,
+      required: false,
+      default: null,
+    },
+    expiryAlertStage: {
+      type: Number,
+      required: false,
+      default: null,
+    },
     unitCost: {
       type: Number,
       required: true,
@@ -201,5 +234,12 @@ LubricantSchema.index(
 
 // Inventory screens list a station's stock, usually filtered by category.
 LubricantSchema.index({ fillingStation: 1, category: 1 });
+
+// The expiry sweep: dated stock for one station, soonest first. Sparse, since
+// lubricants carry no date and would otherwise bloat the index.
+LubricantSchema.index(
+  { fillingStation: 1, expiryDate: 1 },
+  { partialFilterExpression: { expiryDate: { $type: "date" } } }
+);
 
 export default mongoose.model<ILubricant>("Lubricant", LubricantSchema);

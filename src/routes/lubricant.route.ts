@@ -56,10 +56,11 @@ router.post("/add-lubricant", requireAuth, checkRole("manager", "supervisor"), a
 router.patch("/:id/pricing", requireAuth, checkRole("manager", "supervisor"), updateLubricantPricing);
 
 // Correcting a count to match the shelf, and the full paper trail behind it.
-// The correction is management-only; the history is readable by anyone who can
-// be asked to explain a discrepancy, which includes the cashier who sold it.
+// Both are management and books only. A cashier sells; what a product cost, who
+// wrote stock off and why is not theirs to read, and a till that can open the
+// trail can also study it before deciding what will not be missed.
 router.post("/:id/adjust-stock", requireAuth, checkRole("manager", "supervisor"), adjustStock);
-router.get("/:id/history", requireAuth, checkRole("manager", "supervisor", "accountant", "cashier"), getProductHistory);
+router.get("/:id/history", requireAuth, checkRole("manager", "supervisor", "accountant"), getProductHistory);
 router.get("/", requireAuth, checkRole("manager", "cashier"), getAllLubricants);
 router.post("/get-lubricant", requireAuth, checkRole("manager", "cashier"), getLubricantByBarcode);
 

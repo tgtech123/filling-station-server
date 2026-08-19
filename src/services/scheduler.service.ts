@@ -2,6 +2,7 @@ import redis from "../config/redis";
 import FillingStation from "../models/fillingStation.model";
 import { applyDueDowngrade } from "./planLifecycle.service";
 import { generateDueRecurringInvoices } from "../controllers/accountsReceivable.controller";
+import { sweepExpiringStock } from "./stockExpiry.service";
 
 /**
  * In-process scheduler for time-based work that must NOT depend on user traffic.
@@ -74,11 +75,17 @@ async function sweepRecurringBilling(): Promise<void> {
   if (generated.length) console.log(`[scheduler] generated ${generated.length} recurring invoice(s)`);
 }
 
+async function sweepStockExpiry(): Promise<void> {
+  const alerted = await sweepExpiringStock();
+  if (alerted) console.log(`[scheduler] flagged ${alerted} product(s) nearing expiry`);
+}
+
 // ── Tick ──────────────────────────────────────────────────────────────────────
 
 async function tick(): Promise<void> {
   await runJob("downgrades", applyDueDowngrades);
   await runJob("recurring-billing", sweepRecurringBilling);
+  await runJob("stock-expiry", sweepStockExpiry);
 }
 
 export function startScheduler(): void {
