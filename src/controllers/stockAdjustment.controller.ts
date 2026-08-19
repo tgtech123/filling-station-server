@@ -5,6 +5,7 @@ import Lubricant from "../models/lubricant.model";
 import StockAdjustment, { ADJUSTMENT_REASONS } from "../models/stockAdjustment.model";
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import LubricantPurchase from "../models/lubricant-purchase.model";
+import { parseInvoiceDate } from "../utils/invoiceDate";
 import LubricantProcurement from "../models/lubricantProcurement.model";
 import { notifyStation } from "../utils/notifyHelpers";
 import StockBatch from "../models/stockBatch.model";
@@ -240,7 +241,7 @@ export const getProductHistory = async (req: AuthenticatedRequest, res: Response
       if (!line) continue;
       events.push({
         type: "purchase",
-        at: p.purchaseDate || p.createdAt,
+        at: parseInvoiceDate(p.purchaseDate) || p.createdAt,
         change: Number(line.quantity || 0),
         by: name(p.createdBy),
         detail: `Invoice ${p.invoiceNo} — ${p.supplier}`,

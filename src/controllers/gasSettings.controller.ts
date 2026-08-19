@@ -15,7 +15,7 @@ export const getGasStatus = async (req: AuthenticatedRequest, res: Response) => 
     const station = req.user?.station;
     if (!station) return res.status(403).json({ message: "Unauthorized" });
     const doc = await FillingStation.findById(station).select("gasEnabled").lean();
-    return res.status(200).json({ data: { gasEnabled: (doc as any)?.gasEnabled ?? true } });
+    return res.status(200).json({ data: { gasEnabled: (doc as any)?.gasEnabled ?? false } });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
@@ -27,7 +27,7 @@ export const toggleGasDepartment = async (req: AuthenticatedRequest, res: Respon
     if (!station) return res.status(403).json({ message: "Unauthorized" });
 
     const current = await FillingStation.findById(station).select("gasEnabled").lean();
-    const newValue = !((current as any)?.gasEnabled ?? true);
+    const newValue = !((current as any)?.gasEnabled ?? false);
 
     const updated = await FillingStation.findByIdAndUpdate(
       station,
