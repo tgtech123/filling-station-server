@@ -9,6 +9,46 @@ import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
 import { receiveBatch } from "../services/stockBatch.service";
 
+/**
+ * Read the till's invoice date without letting JS guess at it.
+ *
+ * The stock form sends DD/MM/YYYY, which `new Date()` reads as MM/DD/YYYY.
+ * Past the 12th that is an Invalid Date and the whole purchase was rejected on
+ * a cast error; on or before the 12th it is worse — it parses to a real but
+ * WRONG date (5 Aug read as 8 May), silently filing goods into the wrong month
+ * and shuffling the FIFO queue nothing downstream would ever flag.
+ *
+ * So the slash form is parsed by hand, day first. ISO strings and Date objects
+ * still go through the native parser, and anything unreadable falls back to now
+ * rather than throwing a cast error at the database.
+ */
+const parseInvoiceDate = (value: unknown): Date => {
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? new Date() : value;
+  }
+
+  if (typeof value === "string") {
+    const slash = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slash) {
+      const [, dd, mm, yyyy] = slash;
+      const parsed = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+      // Round-trip check: 31/02 would roll into March otherwise.
+      if (
+        !isNaN(parsed.getTime()) &&
+        parsed.getDate() === Number(dd) &&
+        parsed.getMonth() === Number(mm) - 1
+      ) {
+        return parsed;
+      }
+    }
+
+    const native = new Date(value);
+    if (!isNaN(native.getTime())) return native;
+  }
+
+  return new Date();
+};
+
 // ðŸ†• Create a new lubricant purchase
 export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Response) => {
   const session = await mongoose.startSession();
@@ -167,7 +207,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
         sourceId: purchase[0]._id,
         reference: invoiceNo,
         supplier,
-        receivedAt: new Date(purchaseDate),
+        receivedAt: parseInvoiceDate(purchaseDate),
         receivedBy: createdBy,
         session,
       });

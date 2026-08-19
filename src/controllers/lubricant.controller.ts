@@ -201,6 +201,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       sellingPercentage, // Changed from sellingPrice to sellingPercentage
       baseUnit,
       saleUnits,
+      expiryDate,
     } = req.body;
 
     // Category decides which revenue and cost accounts a sale posts to, so an
@@ -229,8 +230,44 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
     if (!Number.isFinite(qty) || qty < 0)
       return res.status(400).json({ error: "qtyInStock must be non-negative" });
 
-    if (!Number.isFinite(reorder) || reorder < 0)
-      return res.status(400).json({ error: "reOrderLevel must be non-negative" });
+    /**
+     * A re-order level of zero is not a threshold, it is the absence of one.
+     * The reorder report only lists what has fallen to its level, so a product
+     * registered with 0 never appears on it and quietly runs out with nobody
+     * warned. Registration is the one moment somebody knows what a sensible
+     * floor is, so it is asked for there.
+     */
+    if (!Number.isFinite(reorder) || reorder < 1)
+      return res.status(400).json({
+        error: "reOrderLevel is required and must be at least 1, so the product can trigger a re-order alert",
+      });
+
+    /**
+     * Shop stock goes off; lubricants do not.
+     *
+     * Required for the store categories because the whole point of holding the
+     * date is to catch stock BEFORE it is a write-off, and a product registered
+     * without one is invisible to that sweep forever after.
+     */
+    const STORE_CATS = ["drinks", "snacks", "other"];
+    let expiry: Date | null = null;
+
+    if (STORE_CATS.includes(cat)) {
+      if (!expiryDate) {
+        return res.status(400).json({
+          error: "expiryDate is required for store products, so near-expiry stock can be flagged for clearance",
+        });
+      }
+      const parsed = new Date(expiryDate);
+      if (isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: "expiryDate is not a valid date" });
+      }
+      expiry = parsed;
+    } else if (expiryDate) {
+      // Volunteered on a lubricant, so keep it rather than discard information.
+      const parsed = new Date(expiryDate);
+      if (!isNaN(parsed.getTime())) expiry = parsed;
+    }
 
     if (!Number.isFinite(unitCostNum) || unitCostNum < 0)
       return res.status(400).json({ error: "unitCost must be non-negative" });
@@ -367,6 +404,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
           unitPrice: unitPriceNum,
           baseUnit: base,
           saleUnits: pricedUnits,
+          ...(expiry ? { expiryDate: expiry } : {}),
         },
         $setOnInsert: {
           fillingStation: new Types.ObjectId(fillingStation),
@@ -412,6 +450,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       unitPrice: unitPriceNum,
       baseUnit: base,
       saleUnits: pricedUnits,
+      expiryDate: expiry,
       pendingPricing: isCashier,
       registeredBy: req.user?.id,
     });

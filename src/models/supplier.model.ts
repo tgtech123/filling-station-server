@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema, Model } from "mongoose";
 
-export type SupplierType = "gas" | "lubricant" | "both";
+export type SupplierType = "gas" | "lubricant" | "store" | "both";
 
 export interface ISupplier extends Document {
   fillingStation: mongoose.Types.ObjectId;
