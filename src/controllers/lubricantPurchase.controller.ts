@@ -124,6 +124,26 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
         unitCost: Number(unitCost),
       });
 
+      /**
+       * A fresh expiry date arrives with the delivery, not with the product.
+       *
+       * The date belongs to the goods on the shelf, and a new crate resets it.
+       * Only moved FORWARD: a back-dated invoice entered late must not pull the
+       * date earlier than stock already on the shelf, which would raise a
+       * clearance alarm for goods that are perfectly good.
+       */
+      if (item.expiryDate) {
+        const incoming = new Date(item.expiryDate);
+        if (!isNaN(incoming.getTime())) {
+          const current = lubricant.expiryDate ? new Date(lubricant.expiryDate) : null;
+          if (!current || incoming > current) {
+            lubricant.expiryDate = incoming;
+            // A later date is a different batch, so the warnings start over.
+            (lubricant as any).expiryAlertStage = null;
+          }
+        }
+      }
+
       // Update stock quantity
       lubricant.qtyInStock = (lubricant.qtyInStock || 0) + quantity;
 
