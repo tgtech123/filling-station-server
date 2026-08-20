@@ -1,5 +1,6 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
+import { getStaffSales } from "../controllers/staffSales.controller";
 import { checkRole } from "../middlewares/checkRole";
 import {
   getAccountantDashboard,
@@ -18,10 +19,19 @@ const router = express.Router();
 router.use(requireAuth);
 
 const accountantOnly  = checkRole("accountant");
+
+/**
+ * The consolidated staff view is the CFO's, but an owner and a manager answer
+ * for the same money and should not have to ask for it. Read-only for all
+ * three: the route exposes GET and nothing else, so no one can adjust a figure
+ * from here.
+ */
+const financeReaders = checkRole("accountant", "manager", "admin");
 const accountantOrMgr = checkRole("accountant", "manager");
 
 // Dashboard
 router.get("/dashboard",                          accountantOnly,  getAccountantDashboard);
+router.get("/staff-sales",                        financeReaders,  getStaffSales);
 
 // Audited Reconciled Sales
 router.get("/audited-reconciled-sales",           accountantOnly,  getAuditedReconciledSales);

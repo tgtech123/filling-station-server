@@ -22,6 +22,8 @@ import {
   getLubricantTransactionById,
   getMonthlyLubricantSummary,
   getWeeklyLubricantSummaryCalendarWeek,
+  retireLubricant,
+  restoreLubricant,
 } from "../controllers/lubricant.controller";
 
 // Import purchase controllers
@@ -59,6 +61,15 @@ router.patch("/:id/pricing", requireAuth, checkRole("manager", "supervisor"), up
 // Both are management and books only. A cashier sells; what a product cost, who
 // wrote stock off and why is not theirs to read, and a till that can open the
 // trail can also study it before deciding what will not be missed.
+/**
+ * Retire a product instead of deleting it. Management only.
+ *
+ * Deliberately not a DELETE: nothing here removes a row, so there is no
+ * destructive route to reach by mistake. The verb says what actually happens.
+ */
+router.patch("/:id/retire",  requireAuth, checkRole("manager", "supervisor"), retireLubricant);
+router.patch("/:id/restore", requireAuth, checkRole("manager", "supervisor"), restoreLubricant);
+
 router.post("/:id/adjust-stock", requireAuth, checkRole("manager", "supervisor"), adjustStock);
 router.get("/:id/history", requireAuth, checkRole("manager", "supervisor", "accountant"), getProductHistory);
 router.get("/", requireAuth, checkRole("manager", "cashier"), getAllLubricants);

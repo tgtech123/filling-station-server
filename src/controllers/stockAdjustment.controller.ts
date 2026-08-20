@@ -43,6 +43,13 @@ export const adjustStock = async (req: AuthenticatedRequest, res: Response) => {
     const product = await Lubricant.findOne({ _id: req.params.id, fillingStation }).lean();
     if (!product) return res.status(404).json({ error: "Product not found" });
 
+    if ((product as any).isActive === false) {
+      return res.status(409).json({
+        error: `${(product as any).productName} is retired. Restore it before correcting its count.`,
+        code: "RETIRED",
+      });
+    }
+
     const before = Number((product as any).qtyInStock) || 0;
 
     // Layer up what is already on the shelf before touching it, so a write-off
@@ -329,6 +336,11 @@ export const getProductHistory = async (req: AuthenticatedRequest, res: Response
           qtyInStock: (product as any).qtyInStock,
           unitCost: (product as any).unitCost,
           unitPrice: (product as any).unitPrice,
+          // So the tracker can say plainly that this product is no longer
+          // stocked, rather than presenting a settled history as if it were
+          // today's shelf.
+          isActive: (product as any).isActive !== false,
+          retiredAt: (product as any).retiredAt ?? null,
         },
         events,
         layers,

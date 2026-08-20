@@ -103,6 +103,21 @@ export interface ILubricant extends Document {
    */
   pendingPricing: boolean;
   registeredBy?: mongoose.Types.ObjectId;
+  /**
+   * Still stocked, or retired?
+   *
+   * A product is never deleted. Everything it ever did stays queryable: what it
+   * sold, at what cost, on whose shift, in which closed period. Removing the
+   * row would leave that history pointing at nothing, and an auditor asking
+   * "what did we make on Sprite 50cl in March" a year from now would have
+   * sale lines with no product behind them.
+   *
+   * Retired means: gone from the till, the reorder list and the picker, but
+   * fully readable in every report and in the tracker.
+   */
+  isActive: boolean;
+  retiredAt?: Date | null;
+  retiredBy?: mongoose.Types.ObjectId | null;
 }
 
 const LubricantSchema: Schema = new Schema<ILubricant>(
@@ -193,6 +208,9 @@ const LubricantSchema: Schema = new Schema<ILubricant>(
     },
     pendingPricing: { type: Boolean, default: false },
     registeredBy: { type: mongoose.Schema.Types.ObjectId, ref: "Staff" },
+    isActive:  { type: Boolean, default: true, index: true },
+    retiredAt: { type: Date, default: null },
+    retiredBy: { type: mongoose.Schema.Types.ObjectId, ref: "Staff", default: null },
     saleUnits: {
       type: [
         {
@@ -234,6 +252,9 @@ LubricantSchema.index(
 
 // Inventory screens list a station's stock, usually filtered by category.
 LubricantSchema.index({ fillingStation: 1, category: 1 });
+
+// Every day-to-day list wants live products only, so that is the indexed shape.
+LubricantSchema.index({ fillingStation: 1, isActive: 1 });
 
 // The expiry sweep: dated stock for one station, soonest first. Sparse, since
 // lubricants carry no date and would otherwise bloat the index.
