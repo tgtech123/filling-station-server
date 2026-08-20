@@ -1710,7 +1710,7 @@ export const getLubricantTransactionById = async (req: AuthenticatedRequest, res
       fillingStation: new Types.ObjectId(fillingStation),
     })
       .populate("staff", "firstName lastName email")
-      .populate("fillingStation", "name address phone email")
+      .populate("fillingStation", "name address phone email receiptNote image")
       .lean();
 
     if (!transaction) {

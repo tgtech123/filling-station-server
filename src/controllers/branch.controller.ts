@@ -327,12 +327,30 @@ export const switchStation = async (req: AuthenticatedRequest, res: Response) =>
     return res.status(200).json({
       message: "Switched to station successfully",
       token: newToken,
+      /**
+       * Everything a receipt prints, not just enough to label the switcher.
+       *
+       * The client stores this as the signed-in station, and the till reads the
+       * logo, phone and email straight off it. Returning a partial object meant
+       * a sale made after switching printed "N/A" for the station and fell back
+       * to the packaged placeholder logo.
+       *
+       * `logoUrl` and `logo` mirror the login payload so both paths agree on
+       * where the badge lives.
+       */
       station: {
         id: (targetStation as any)._id,
+        _id: (targetStation as any)._id,
         name: targetStation.name,
         address: targetStation.address,
         city: targetStation.city,
         plan: targetStation.plan,
+        phone: (targetStation as any).phone || "",
+        email: (targetStation as any).email || "",
+        receiptNote: (targetStation as any).receiptNote || "",
+        image: (targetStation as any).image || null,
+        logoUrl: (targetStation as any).image || null,
+        logo: (targetStation as any).image || null,
       },
     });
   } catch (err: any) {

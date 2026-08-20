@@ -278,26 +278,125 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
       status: "Completed",
     }).lean();
 
-    const todaySales = todayShifts.reduce((sum, shift: any) => sum + (shift.totalAmount || 0), 0);
-    const totalTransactions = todayShifts.length;
+    const fuelToday = todayShifts.reduce((sum, shift: any) => sum + (shift.totalAmount || 0), 0);
     const fuelSold = todayShifts.reduce((sum, shift: any) => sum + (shift.litresSold || 0), 0);
 
+    /**
+     * Counter sales belong in this report too.
+     *
+     * Every figure here came from Shift alone, so a station whose shop had been
+     * taking money all day showed an empty report until a fuel shift was closed.
+     * Worse, a station that sells no fuel at all could never see a number.
+     *
+     * Two windows are needed: TODAY for the live headline an owner watches, and
+     * the SELECTED RANGE for everything the date filter drives.
+     */
+    const counterToday = await LubricantTransaction.aggregate([
+      { $match: { fillingStation: new Types.ObjectId(sid), createdAt: { $gte: today, $lte: todayEnd } } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
+    ]);
+
+    const counterTodayTotal = Number(counterToday[0]?.total || 0);
+    const counterTodayCount = Number(counterToday[0]?.count || 0);
+
+    const todaySales = fuelToday + counterTodayTotal;
+    const totalTransactions = todayShifts.length + counterTodayCount;
+
+    // The same pair over whatever range the date filter selected, so changing
+    // the date actually changes what is shown rather than only the chart.
+    const rangeShifts = await Shift.find({
+      fillingStation: stationId,
+      shiftDate: { $gte: start, $lte: end },
+      status: "Completed",
+    }).lean();
+
+    const rangeFuel = rangeShifts.reduce((s, sh: any) => s + (sh.totalAmount || 0), 0);
+
+    const counterRange = await LubricantTransaction.aggregate([
+      { $match: { fillingStation: new Types.ObjectId(sid), createdAt: { $gte: start, $lte: end } } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
+    ]);
+
+    const rangeCounter = Number(counterRange[0]?.total || 0);
+    const rangeCounterCount = Number(counterRange[0]?.count || 0);
+
+    /**
+     * Twelve months of takings, fuel and counter together.
+     *
+     * Was twelve sequential queries inside a loop, one per month, and fuel
+     * only. Two grouped queries over the whole window return the same answer
+     * in two round trips instead of twelve, and a shop-only station now has a
+     * trend line at all.
+     */
+    const trendStart = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+    const trendEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const [fuelByMonth, counterByMonth] = await Promise.all([
+      Shift.aggregate([
+        {
+          $match: {
+            fillingStation: new Types.ObjectId(sid),
+            shiftDate: { $gte: trendStart, $lte: trendEnd },
+            status: "Completed",
+          },
+        },
+        {
+          $group: {
+            _id: { y: { $year: "$shiftDate" }, m: { $month: "$shiftDate" } },
+            total: { $sum: "$totalAmount" },
+          },
+        },
+      ]),
+      LubricantTransaction.aggregate([
+        {
+          $match: {
+            fillingStation: new Types.ObjectId(sid),
+            createdAt: { $gte: trendStart, $lte: trendEnd },
+          },
+        },
+        {
+          $group: {
+            _id: { y: { $year: "$createdAt" }, m: { $month: "$createdAt" } },
+            total: { $sum: "$totalAmount" },
+          },
+        },
+      ]),
+    ]);
+
+    const monthKey = (y: number, m: number) => `${y}-${m}`;
+
+    const toMap = (rows: any[]) => {
+      const m = new Map<string, number>();
+      for (const row of rows) {
+        m.set(monthKey(row._id.y, row._id.m), Number(row.total || 0));
+      }
+      return m;
+    };
+
+    const fuelMap = toMap(fuelByMonth as any[]);
+    const counterMap = toMap(counterByMonth as any[]);
+
+    /**
+     * Three series over the same twelve months: fuel, counter, and the sum.
+     *
+     * Kept separate rather than only merged because they answer different
+     * questions. A shop growing while the pumps flatten is the whole point of
+     * running one, and a single combined line hides exactly that.
+     */
     const monthlySales: { month: string; sales: number }[] = [];
-    for (let i = 0; i < 12; i++) {
+    const monthlyFuel: { month: string; sales: number }[] = [];
+    const monthlyCounter: { month: string; sales: number }[] = [];
+
+    for (let i = 11; i >= 0; i--) {
       const monthStart = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      const monthEnd = new Date(today.getFullYear(), today.getMonth() - i + 1, 0, 23, 59, 59);
+      const label = monthStart.toLocaleString("default", { month: "short" });
+      const k = monthKey(monthStart.getFullYear(), monthStart.getMonth() + 1);
+      const f = fuelMap.get(k) || 0;
+      const c = counterMap.get(k) || 0;
 
-      const monthShifts = await Shift.find({
-        fillingStation: stationId,
-        shiftDate: { $gte: monthStart, $lte: monthEnd },
-        status: "Completed",
-      }).lean();
-
-      const monthSales = monthShifts.reduce((sum, shift: any) => sum + (shift.totalAmount || 0), 0);
-      monthlySales.unshift({
-        month: monthStart.toLocaleString("default", { month: "short" }),
-        sales: monthSales,
-      });
+      monthlyFuel.push({ month: label, sales: f });
+      monthlyCounter.push({ month: label, sales: c });
+      monthlySales.push({ month: label, sales: f + c });
     }
 
     const productSales = await Shift.aggregate([
@@ -317,6 +416,33 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
       },
     ]);
 
+    /**
+     * What the counter sold over the same range, by product.
+     *
+     * Fuel is measured in litres and shop stock in pieces, so the two cannot
+     * share one "litres" column honestly. Both carry an amount, and money is
+     * the measure a distribution chart is actually comparing.
+     */
+    const counterProducts = await LubricantTransaction.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(sid),
+          createdAt: { $gte: start, $lte: end },
+        },
+      },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: "$items.productName",
+          totalAmount: { $sum: "$items.amount" },
+          totalUnits: { $sum: "$items.qtySold" },
+          category: { $first: "$items.category" },
+        },
+      },
+      { $sort: { totalAmount: -1 } },
+      { $limit: 15 },
+    ]);
+
     const recentTransactions = await Shift.find({
       fillingStation: stationId,
       status: "Completed",
@@ -326,7 +452,15 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
       .limit(20)
       .lean();
 
-    const transactions = recentTransactions.map((shift: any) => ({
+    // The counter's own recent sales, to be merged with the fuel ones so the
+    // feed reads as "what the station sold", not "what the pumps sold".
+    const recentCounter = await LubricantTransaction.find({ fillingStation: stationId })
+      .populate("staff", "firstName lastName role")
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    const fuelTxns = recentTransactions.map((shift: any) => ({
       timestamp: shift.updatedAt,
       txnId: `TXN ${shift._id.toString().slice(-3)}`,
       pumpNo: shift.pumpTitle,
@@ -334,7 +468,29 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
       quantity: `${shift.litresSold || 0}L`,
       amount: shift.totalAmount || 0,
       role: shift.attendant?.role || "attendant",
+      source: "fuel",
     }));
+
+    const counterTxns = recentCounter.map((t: any) => {
+      const names = (t.items || []).map((i: any) => i.productName).filter(Boolean);
+      const units = (t.items || []).reduce((s: number, i: any) => s + Number(i.qtyInUnits ?? i.qtySold ?? 0), 0);
+      return {
+        timestamp: t.createdAt,
+        txnId: t.txnId || `TXN ${String(t._id).slice(-3)}`,
+        // A counter sale has no pump. Saying which till it was is more use than
+        // an empty column.
+        pumpNo: "Counter",
+        productType: names.length > 1 ? `${names[0]} +${names.length - 1}` : (names[0] || "Sale"),
+        quantity: `${units} unit${units === 1 ? "" : "s"}`,
+        amount: t.totalAmount || 0,
+        role: t.staff?.role || "cashier",
+        source: "counter",
+      };
+    });
+
+    const transactions = [...fuelTxns, ...counterTxns]
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 20);
 
     res.json({
       success: true,
@@ -343,12 +499,49 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
         totalTransactions,
         fuelSold,
         salesTrend: monthlySales,
-        productSalesDistribution: productSales.map((p) => ({
-          product: p._id,
-          litres: p.totalLitres,
-          percentage: 0,
-        })),
+        /**
+         * Fuel and counter products in one list, each with what it EARNED.
+         * Percentage is computed here rather than left at 0 for the client to
+         * work out, which is why the chart read as empty even when rows existed.
+         */
+        productSalesDistribution: (() => {
+          const fuelRows = (productSales as any[]).map((p) => ({
+            product: p._id || "Fuel",
+            litres: p.totalLitres || 0,
+            amount: p.totalAmount || 0,
+            kind: "fuel" as const,
+          }));
+
+          const counterRows = (counterProducts as any[]).map((p) => ({
+            product: p._id || "Item",
+            units: p.totalUnits || 0,
+            amount: p.totalAmount || 0,
+            kind: p.category && p.category !== "lubricant" ? "store" : "lubricant",
+          }));
+
+          const all = [...fuelRows, ...counterRows];
+          const grand = all.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+          return all
+            .map((r) => ({
+              ...r,
+              percentage: grand > 0 ? Math.round((Number(r.amount || 0) / grand) * 1000) / 10 : 0,
+            }))
+            .sort((a, b) => b.amount - a.amount);
+        })(),
+        // Each side on its own, for the Fuel / Counter switch.
+        salesTrendByKind: { fuel: monthlyFuel, counter: monthlyCounter },
         recentTransactions: transactions,
+        // What the selected date range holds, so moving the date filter moves
+        // the numbers and not only the chart.
+        rangeSales: {
+          total: rangeFuel + rangeCounter,
+          fuel: rangeFuel,
+          counter: rangeCounter,
+          transactions: rangeShifts.length + rangeCounterCount,
+        },
+        // Today, split, for the live headline.
+        todayBreakdown: { fuel: fuelToday, counter: counterTodayTotal },
       },
     });
   } catch (error: any) {

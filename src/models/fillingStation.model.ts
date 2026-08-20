@@ -69,6 +69,16 @@ export interface IFillingStation extends Document {
   downgradeAt:        Date | null;
   // Wet-stock "yield factor" (station litre). Entered by the manager in Settings
   // (e.g. 0.95, 0.96). Null until configured — never seeded in code.
+  /**
+   * The station's own terms, printed on every receipt.
+   *
+   * Configurable rather than hardcoded because it is a statement the STATION
+   * makes to its customers and may have to stand behind. "No refund of money
+   * after payment" is the common case, but a station running a returns window
+   * must be able to say so instead, and one that should not print terms at all
+   * must be able to clear it. Empty means print nothing.
+   */
+  receiptNote: string;
   defaultYieldFactor:          number | null;
   defaultYieldFactorUpdatedBy: mongoose.Types.ObjectId | null;
   defaultYieldFactorUpdatedAt: Date | null;
@@ -149,6 +159,12 @@ const FillingStationSchema = new Schema<IFillingStation>(
     downgradeAt:              { type: Date,    default: null },
     // Station-level yield factor (station litre). NOT seeded — manager sets it in
     // Settings. Null until configured; per-tank yieldFactor overrides this.
+    receiptNote: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+      default: "No refund of money after payment.",
+    },
     defaultYieldFactor:          { type: Number, min: 0.5, max: 1.5, default: null },
     defaultYieldFactorUpdatedBy: { type: Schema.Types.ObjectId, ref: "Staff", default: null },
     defaultYieldFactorUpdatedAt: { type: Date, default: null },
