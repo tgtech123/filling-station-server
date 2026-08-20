@@ -1,4 +1,4 @@
-﻿import { Response } from "express";
+import { Response } from "express";
 import { Types } from "mongoose";
 import { AuthenticatedRequest } from "../interfaces";
 import lubricantModel, { PRODUCT_CATEGORIES } from "../models/lubricant.model";
@@ -182,6 +182,17 @@ export const updateLubricantPricing = async (req: AuthenticatedRequest, res: Res
   }
 };
 
+/**
+ * Escape a product name for use inside a regex.
+ *
+ * The duplicate-name check matches case-insensitively, which needs a regex,
+ * and a product legitimately named "5W-30 (1L)" carries characters a regex
+ * reads as syntax. Without escaping, that name would either fail to match its
+ * own duplicate or throw.
+ */
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, (m) => "\\" + m);
+
 export const addLubricant = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const fillingStation = req.user?.station;
@@ -217,6 +228,68 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
     if (!productName || !brand) {
       return res.status(400).json({
         error: "Required fields missing. Provide productName and brand.",
+      });
+    }
+
+    /**
+     * The NAME is what every product must have and must not share.
+     *
+     * A barcode is optional, because plenty of stock genuinely has none: oil
+     * decanted into the station's own bottles, a sack of sachets, anything
+     * bought loose. Demanding one would only teach people to invent codes, and
+     * an invented code is worse than none at all.
+     *
+     * When a barcode IS given it must be unique, since that is the whole point
+     * of scanning one.
+     */
+    const code = barcode ? String(barcode).trim() : "";
+    const name = String(productName).trim();
+
+    /**
+     * Two checks, two different messages.
+     *
+     * "Already exists" is useless on its own: the person needs to know WHICH
+     * rule they hit and what to change. A clashing barcode needs a different
+     * code; a clashing name needs a different name. Saying so is the difference
+     * between a fixable error and a dead end.
+     *
+     * Retired products are included deliberately. Their barcode and name are
+     * still spoken for: reusing either would attach new sales to a retired
+     * product's history and make an audit of it meaningless.
+     */
+    const [barcodeClash, nameClash] = await Promise.all([
+      // Only worth asking when a code was actually supplied. Searching for an
+      // empty barcode would match every product that has none.
+      code
+        ? lubricantModel
+            .findOne({ fillingStation: new Types.ObjectId(fillingStation), barcode: code })
+            .select("productName barcode isActive")
+            .lean()
+        : null,
+      lubricantModel
+        .findOne({
+          fillingStation: new Types.ObjectId(fillingStation),
+          productName: { $regex: `^${escapeRegex(name)}$`, $options: "i" },
+        })
+        .select("productName barcode isActive")
+        .lean(),
+    ]);
+
+    if (barcodeClash) {
+      const retired = (barcodeClash as any).isActive === false ? " (retired)" : "";
+      return res.status(409).json({
+        error: `Barcode ${code} already belongs to "${(barcodeClash as any).productName}"${retired}. Enter a different, unique barcode for this product.`,
+        code: "DUPLICATE_BARCODE",
+        conflictsWith: { productName: (barcodeClash as any).productName, barcode: code },
+      });
+    }
+
+    if (nameClash) {
+      const retired = (nameClash as any).isActive === false ? " (retired)" : "";
+      return res.status(409).json({
+        error: `A product named "${(nameClash as any).productName}"${retired} already exists, with barcode ${(nameClash as any).barcode || "none"}. Give this one a different name.`,
+        code: "DUPLICATE_NAME",
+        conflictsWith: { productName: (nameClash as any).productName, barcode: (nameClash as any).barcode },
       });
     }
 
@@ -458,7 +531,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
     notifyProductRegistered(req, fillingStation, newLubricant);
 
     return res.status(201).json({
-      message: "Lubricant created successfully",
+      message: "Product added successfully",
       lubricant: newLubricant,
     });
 
@@ -559,10 +632,21 @@ export const getLubricantByBarcode = async (req: AuthenticatedRequest, res: Resp
       });
     }
 
+    /**
+     * Empty shelf: a refusal at the till, but not when goods are arriving.
+     *
+     * The same lookup serves two opposite jobs. Selling needs stock to exist.
+     * RECEIVING is the moment stock does not exist yet, and a product that has
+     * run out is the most likely thing anyone is booking in. Refusing it there
+     * meant a scan in the invoice form returned nothing at all, so the row never
+     * filled and the product's own selling percentage never arrived with it.
+     */
+    const forRestock = req.body?.purpose === "restock";
+
     // Known product, nothing on the shelf. The name and count go back with the
     // error — "Out of stock" alone leaves the cashier looking it up by hand.
     const currentQty = Number(lubricant.qtyInStock);
-    if (!Number.isFinite(currentQty) || currentQty <= 0) {
+    if (!forRestock && (!Number.isFinite(currentQty) || currentQty <= 0)) {
       return res.status(409).json({
         code: "OUT_OF_STOCK",
         error: `${lubricant.productName} (${barcode.trim()}) has 0 in stock — restock before selling.`,
@@ -572,9 +656,30 @@ export const getLubricantByBarcode = async (req: AuthenticatedRequest, res: Resp
       });
     }
 
+    /**
+     * Registered at the till but never priced.
+     *
+     * The SALE endpoint has always refused these (409), but the LOOKUP handed
+     * them over happily — so an unpriced product sat in the basket looking
+     * perfectly normal and only bounced when the customer was already waiting
+     * to pay. Refuse it at the point it is asked for, the same way an empty
+     * shelf is refused, so the till hears "no" once and early.
+     *
+     * Booking stock in is exempt: pricing an unpriced product is precisely what
+     * that form is for.
+     */
+    if (!forRestock && (lubricant as any).pendingPricing) {
+      return res.status(409).json({
+        code: "NOT_PRICED",
+        error: `${lubricant.productName} (${barcode.trim()}) has no price yet — a manager must price it before it can be sold.`,
+        barcode: barcode.trim(),
+        productName: lubricant.productName,
+      });
+    }
+
     // âœ… Success
     return res.status(200).json({
-      message: "Lubricant retrieved successfully",
+      message: "Product retrieved successfully",
       data: lubricant,
     });
   } catch (error: any) {
@@ -1331,6 +1436,22 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
     for (const item of items) {
       const { lubricantId, quantity, unitPrice, unitName } = item;
 
+      /**
+       * A price must be a real, positive number.
+       *
+       * The falsy check below already rejects 0 and undefined. This adds the
+       * cases it cannot see: a negative price, which would hand money back, and
+       * a non-numeric one, which would post NaN into the day's takings and make
+       * every total downstream unusable.
+       */
+      if (unitPrice !== undefined && (!Number.isFinite(Number(unitPrice)) || Number(unitPrice) <= 0)) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          error: "Each item needs a positive selling price. A product with no price must be priced by a manager before it can be sold.",
+        });
+      }
+
       if (!lubricantId || !quantity || !unitPrice) {
         await session.abortTransaction();
         return res.status(400).json({ 
@@ -1351,10 +1472,20 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       /**
        * Which unit is being sold, and therefore how much stock leaves.
        *
-       * The FACTOR is read from the product, never taken from the request. It
-       * decides how many pieces come off the shelf, so a client able to name its
-       * own factor could empty the shop with one number. The PRICE is still
-       * whatever the till sends — cashiers discount, and that was always allowed.
+       * The FACTOR and the PRICE are both read from the product, never taken
+       * from the request.
+       *
+       * The factor decides how many pieces come off the shelf, so a client able
+       * to name its own factor could empty the shop with one number. The price
+       * decides how much money is recorded, and it used to be whatever the till
+       * sent: a tampered request could post a 5,000 naira item at 1 naira, and
+       * stock would leave at that figure with nothing to contradict it.
+       *
+       * The till still SENDS a price, and it is still checked — but as an
+       * agreement, not an instruction. If it disagrees with the shelf price the
+       * sale is refused rather than quietly posted at either number, because a
+       * receipt showing one figure while the books record another is worse than
+       * a refusal the cashier can act on.
        *
        * Selling by the base unit needs no lookup and no `unitName`: that is the
        * old behaviour, unchanged.
@@ -1415,6 +1546,47 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       const unitFactor = saleUnit ? Number(saleUnit.factor) : 1;
       // What actually leaves the shelf: 2 packs of 12 is 24 pieces.
       const baseQty = quantity * unitFactor;
+
+      /**
+       * The authoritative price for this line, off the product itself.
+       *
+       * A bigger unit carries its own price; the base unit uses the product's.
+       * Either way it comes from the database, so this is the figure the sale
+       * is posted at no matter what arrived in the request.
+       */
+      const shelfPrice = saleUnit
+        ? Number(saleUnit.price) || 0
+        : Number((productDoc as any).unitPrice) || 0;
+
+      if (!Number.isFinite(shelfPrice) || shelfPrice <= 0) {
+        await session.abortTransaction();
+        return res.status(409).json({
+          success: false,
+          code: "NOT_PRICED",
+          error: `${(productDoc as any).productName} has no price set for the ${saleUnit ? saleUnit.name : baseUnitName}. A manager needs to price it before it can be sold.`,
+        });
+      }
+
+      /**
+       * Does the till agree?
+       *
+       * A penny of tolerance, because the two sides round independently. A real
+       * disagreement almost always means the till is holding a stale catalogue
+       * after a price change, so the message says exactly that and hands back
+       * the correct figure for it to reload.
+       */
+      const submitted = Number(unitPrice);
+      if (Number.isFinite(submitted) && Math.abs(submitted - shelfPrice) > 0.01) {
+        await session.abortTransaction();
+        return res.status(409).json({
+          success: false,
+          code: "PRICE_CHANGED",
+          error: `${(productDoc as any).productName} now sells for ₦${shelfPrice.toLocaleString()}, not ₦${submitted.toLocaleString()}. Refresh the till and ring it up again.`,
+          productName: (productDoc as any).productName,
+          expectedPrice: shelfPrice,
+          submittedPrice: submitted,
+        });
+      }
 
       /**
        * Claim the stock ATOMICALLY.
@@ -1513,7 +1685,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       }
 
       // ðŸ“ Prepare item for transaction
-      const amount = quantity * unitPrice;
+      const amount = quantity * shelfPrice;
       processedItems.push({
         lubricant: lubricant._id,
         productName: lubricant.productName,
@@ -1532,7 +1704,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
         unitName: saleUnit ? saleUnit.name : baseUnitName,
         unitFactor,
         qtyInUnits: quantity,
-        unitPrice,
+        unitPrice: shelfPrice,
         // The specific consignments this sale drew on, and what they cost.
         costLots: consumed.lots.map((l) => ({
           batch: l.batch ?? undefined,
