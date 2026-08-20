@@ -22,7 +22,13 @@ export interface IGasCylinderSale extends Document {
   costPriceAtSale: number;
   quantity: number;
   totalAmount: number;
-  paymentMethod: "cash" | "transfer" | "pos";
+  /**
+   * How it was paid. "mixed" when one sale was settled two ways, which happens
+   * often on a large fill: part cash from a pocket, the rest by transfer.
+   */
+  paymentMethod: "cash" | "transfer" | "pos" | "mixed";
+  /** Only for "mixed": what was actually handed over, per tender. */
+  paymentBreakdown?: { cash: number; transfer: number; POS: number };
   transferReference?: string;
   customer?: mongoose.Types.ObjectId;
   walkInName?: string;
@@ -49,7 +55,17 @@ const GasCylinderSaleSchema = new Schema<IGasCylinderSale>(
     costPriceAtSale:   { type: Number, required: true, min: 0, default: 0 },
     quantity:          { type: Number, required: true, min: 1 },
     totalAmount:       { type: Number, required: true, min: 0 },
-    paymentMethod:     { type: String, enum: ["cash", "transfer", "pos"], required: true },
+    paymentMethod:     { type: String, enum: ["cash", "transfer", "pos", "mixed"], required: true },
+    /**
+     * Recorded only for a mixed sale. Stored rather than derived because it is
+     * what the cashier counted at the moment of sale, and a reconciliation
+     * needs the figure that was actually taken, not one recomputed later.
+     */
+    paymentBreakdown: {
+      cash:     { type: Number, default: 0, min: 0 },
+      transfer: { type: Number, default: 0, min: 0 },
+      POS:      { type: Number, default: 0, min: 0 },
+    },
     transferReference: { type: String, trim: true },
     customer:          { type: mongoose.Schema.Types.ObjectId, ref: "GasCustomer" },
     walkInName:        { type: String, trim: true },

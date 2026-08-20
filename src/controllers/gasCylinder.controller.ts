@@ -302,6 +302,8 @@ export const createCylinderSale = async (req: AuthenticatedRequest, res: Respons
     emitToStation(String(station), "gas:cylinder-sale", { receiptNumber: sale.receiptNumber });
     emitToStation(String(station), "gas:cylinder-products-updated", {});
 
+    emitToStation(String(station), "dashboard:refresh", { reason: "cylinder_sold" });
+
     return res.status(201).json({ message: "Cylinder sale completed", data: sale });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });

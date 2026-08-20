@@ -11,6 +11,53 @@ import Expense from "../models/expense.model";
 // revenue is its totalAmount and per-product detail lives in items[].
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import { splitCounterRevenue } from "../utils/revenueSplit";
+import GasSale from "../models/gasSale.model";
+import GasCylinderSale from "../models/gasCylinderSale.model";
+import { splitSaleTender, emptyTenderSplit, addTender } from "../utils/tender";
+
+/**
+ * LPG taken over a window, both ways it is sold, split by tender.
+ *
+ * The accountant's dashboard counted fuel and the counter but not gas, so the
+ * person answerable for the books saw less than the owner did. Whoever is
+ * responsible for the money must never be the last to know what came in.
+ *
+ * Voided sales are excluded: they took nothing, and counting them would
+ * overstate the period and hide the void from anyone reconciling.
+ */
+const gasTakings = async (stationId: string, from: Date, to: Date) => {
+  const match = {
+    fillingStation: new Types.ObjectId(stationId),
+    createdAt: { $gte: from, $lte: to },
+    status: { $ne: "voided" },
+  };
+
+  const [bulk, cyl] = await Promise.all([
+    GasSale.find(match).select("amountPaid quantityKg paymentMethod paymentBreakdown").lean(),
+    GasCylinderSale.find(match).select("totalAmount quantity paymentMethod paymentBreakdown").lean(),
+  ]);
+
+  const byTender = emptyTenderSplit();
+  let total = 0;
+  let kg = 0;
+  let cylinders = 0;
+
+  for (const s of bulk as any[]) {
+    const amount = Number(s.amountPaid || 0);
+    total += amount;
+    kg += Number(s.quantityKg || 0);
+    addTender(byTender, splitSaleTender({ ...s, total: amount }));
+  }
+
+  for (const s of cyl as any[]) {
+    const amount = Number(s.totalAmount || 0);
+    total += amount;
+    cylinders += Number(s.quantity || 0);
+    addTender(byTender, splitSaleTender({ ...s, total: amount }));
+  }
+
+  return { total, kg, cylinders, transactions: bulk.length + cyl.length, byTender };
+};
 import Delivery from "../models/delivery.model";
 import Tank from "../models/tanks.model";
 import Pump from "../models/pump.model";
@@ -163,7 +210,9 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
     const lubricantLines = counterSplit.lubricantLines;
     const storeLines = counterSplit.storeLines;
 
-    const totalRevenue = fuelRevenueTotal + counterSplit.total;
+    const gas = await gasTakings(String(stationId), startDate, endDate);
+
+    const totalRevenue = fuelRevenueTotal + counterSplit.total + gas.total;
 
     // 2. Total Expenses
     const expensesResult = await Expense.aggregate([
@@ -351,12 +400,26 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
             fuel: fuelRevenueTotal,
             lubricant: lubricantRevenueTotal,
             store: storeRevenueTotal,
+            gas: gas.total,
+          },
+          /**
+           * Every channel by tender, in one place, because reconciling is the
+           * accountant's job and it cannot be done from revenue alone: cash
+           * must match a drawer, POS and transfer must match a statement.
+           */
+          gasSales: {
+            total: gas.total,
+            kg: gas.kg,
+            cylinders: gas.cylinders,
+            transactions: gas.transactions,
+            byTender: gas.byTender,
           },
           // How often each sells, which is a different question from how much
           // it earns: many small shop sales can beat a few large oil ones.
           salesCount: {
             lubricant: lubricantLines,
             store: storeLines,
+            gas: gas.transactions,
           },
           expenses: totalExpenses,
           discrepancies: discrepancies,
@@ -1842,7 +1905,9 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
     const totalStoreSales = split.store;
     const storeByCategory = split.storeByCategory;
 
-    const totalRevenue = totalFuelRevenue + totalCounterSales;
+    const gasIncome = await gasTakings(String(stationId), startDate, endDate);
+
+    const totalRevenue = totalFuelRevenue + totalCounterSales + gasIncome.total;
     const otherSales = totalStoreSales;
 
     // All fuel types registered at this station (source of truth for what we sell)
@@ -1943,7 +2008,18 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
           totalFuelSales: totalFuelSales,
           totalLubricantSales: totalLubricantSales,
           totalStoreSales: totalStoreSales,
+          totalGasSales: gasIncome.total,
           otherSales: otherSales,
+        },
+        // LPG on its own line, in the units it sells in, so the accountant can
+        // tie revenue back to volume the way they can for fuel.
+        gasIncomeReport: {
+          revenue: gasIncome.total,
+          kg: gasIncome.kg,
+          cylinders: gasIncome.cylinders,
+          transactions: gasIncome.transactions,
+          byTender: gasIncome.byTender,
+          percentageOfRevenue: totalRevenue > 0 ? (gasIncome.total / totalRevenue) * 100 : 0,
         },
         // Drinks, snacks and sundries on their own, so the shop can be judged
         // on its own numbers rather than buried in the oil figure.
