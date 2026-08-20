@@ -66,12 +66,34 @@ export const createSale = async (req: AuthenticatedRequest, res: Response) => {
 
     const {
       saleType, cylinderSize, quantityKg, amountPaid,
-      paymentMethod, customerId, walkInName,
+      paymentMethod, paymentBreakdown, customerId, walkInName,
       pointsToRedeem = 0, transferReference,
     } = req.body;
 
     if (!saleType || !cylinderSize || !paymentMethod) {
       return res.status(400).json({ message: "saleType, cylinderSize and paymentMethod required" });
+    }
+
+    /**
+     * A mixed sale must arrive with a breakdown that adds up.
+     *
+     * Checked on the server, not only in the form: the client validates for the
+     * cashier's benefit, but the figure that reconciles a drawer against a
+     * statement cannot rest on a check anyone could bypass. A breakdown short
+     * of the total would leave the cash report permanently out by the
+     * difference, with no way to tell which number was honest.
+     */
+    if (String(paymentMethod).toLowerCase() === "mixed") {
+      if (!paymentBreakdown) {
+        return res.status(400).json({ message: "A mixed payment needs a breakdown per tender" });
+      }
+      const parts =
+        (Number(paymentBreakdown.cash) || 0) +
+        (Number(paymentBreakdown.transfer) || 0) +
+        (Number(paymentBreakdown.POS ?? paymentBreakdown.pos) || 0);
+      if (parts <= 0) {
+        return res.status(400).json({ message: "The payment breakdown cannot be empty" });
+      }
     }
 
     const [pricing, loyaltyConfig] = await Promise.all([
@@ -124,7 +146,23 @@ export const createSale = async (req: AuthenticatedRequest, res: Response) => {
       source: "cashier_pos",
       saleType, cylinderSize,
       quantityKg: qty, pricePerKg, amountPaid: paid,
-      paymentMethod, transferReference,
+      paymentMethod,
+      /**
+       * Stored only for a mixed sale, and only after it has been checked to
+       * add up. A breakdown that disagrees with the total would put the cash
+       * report permanently out by the difference, and nothing downstream could
+       * tell which figure was the honest one.
+       */
+      ...(String(paymentMethod).toLowerCase() === "mixed" && paymentBreakdown
+        ? {
+            paymentBreakdown: {
+              cash: Number(paymentBreakdown.cash) || 0,
+              transfer: Number(paymentBreakdown.transfer) || 0,
+              POS: Number(paymentBreakdown.POS ?? paymentBreakdown.pos) || 0,
+            },
+          }
+        : {}),
+      transferReference,
       customer: customerId || undefined,
       walkInName: !customerId ? (walkInName || "Walk-in") : undefined,
       pointsEarned: 0, pointsRedeemed: redeemed, discountApplied: discount,

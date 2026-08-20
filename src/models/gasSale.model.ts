@@ -19,7 +19,13 @@ export interface IGasSale extends Document {
   quantityKg: number;
   pricePerKg: number;
   amountPaid: number;
-  paymentMethod: "cash" | "transfer" | "pos";
+  /**
+   * How it was paid. "mixed" when one sale was settled two ways, which happens
+   * often on a large fill: part cash from a pocket, the rest by transfer.
+   */
+  paymentMethod: "cash" | "transfer" | "pos" | "mixed";
+  /** Only for "mixed": what was actually handed over, per tender. */
+  paymentBreakdown?: { cash: number; transfer: number; POS: number };
   transferReference?: string;
   pointsEarned: number;
   pointsRedeemed: number;
@@ -51,7 +57,17 @@ const GasSaleSchema = new Schema<IGasSale>(
     quantityKg:       { type: Number, required: true, min: 0 },
     pricePerKg:       { type: Number, required: true, min: 0 },
     amountPaid:       { type: Number, required: true, min: 0 },
-    paymentMethod:    { type: String, enum: ["cash", "transfer", "pos"], required: true },
+    paymentMethod:    { type: String, enum: ["cash", "transfer", "pos", "mixed"], required: true },
+    /**
+     * Recorded only for a mixed sale. Stored rather than derived because it is
+     * what the cashier counted at the moment of sale, and a reconciliation
+     * needs the figure that was actually taken, not one recomputed later.
+     */
+    paymentBreakdown: {
+      cash:     { type: Number, default: 0, min: 0 },
+      transfer: { type: Number, default: 0, min: 0 },
+      POS:      { type: Number, default: 0, min: 0 },
+    },
     transferReference:{ type: String, trim: true },
     pointsEarned:     { type: Number, default: 0 },
     pointsRedeemed:   { type: Number, default: 0 },

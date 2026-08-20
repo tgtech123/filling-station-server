@@ -9,6 +9,28 @@ import Tank from "../models/tanks.model";
 // LubricantSale has no writer anywhere in the codebase; the POS writes
 // LubricantTransaction. Reading the old model returned zero every time.
 import LubricantTransaction from "../models/lubricant-transaction.model";
+import { canonicalFuel, canonicalFuelExpr } from "../utils/fuelLabel";
+import { splitSaleTender, emptyTenderSplit, addTender } from "../utils/tender";
+import GasSale from "../models/gasSale.model";
+import GasCylinderSale from "../models/gasCylinderSale.model";
+import FillingStation from "../models/fillingStation.model";
+
+/**
+ * Money actually taken on a gas sale.
+ *
+ * A GasSale can be rung up by weight or by amount, and it moves through
+ * pending, confirmed and dispensed before it is final. `voided` is excluded
+ * because a voided sale took nothing, and counting it would overstate the day
+ * and hide the void from anyone checking the drawer against the report.
+ */
+const GAS_SOLD = { status: { $ne: "voided" } };
+
+/** LPG is sold both by the kilo at the pump and as filled cylinders. */
+const gasWindow = (sid: string, from: Date, to: Date) => ({
+  fillingStation: new Types.ObjectId(sid),
+  createdAt: { $gte: from, $lte: to },
+  ...GAS_SOLD,
+});
 import ActivityLog from "../models/activityLog.model";
 import Expense from "../models/expense.model";
 
@@ -299,8 +321,42 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
     const counterTodayTotal = Number(counterToday[0]?.total || 0);
     const counterTodayCount = Number(counterToday[0]?.count || 0);
 
-    const todaySales = fuelToday + counterTodayTotal;
-    const totalTransactions = todayShifts.length + counterTodayCount;
+    /**
+     * LPG, both ways it is sold.
+     *
+     * Gas is a department that can be switched off entirely, so it is read but
+     * only surfaced when the station actually has it. A fuel-only station's
+     * report must look exactly as it did before.
+     */
+    const stationDoc = await FillingStation.findById(stationId).select("gasEnabled").lean();
+    const gasEnabled = (stationDoc as any)?.gasEnabled === true;
+
+    const sumGas = async (from: Date, to: Date) => {
+      if (!gasEnabled) return { total: 0, count: 0, kg: 0, cylinders: 0 };
+
+      const [bulk, cyl] = await Promise.all([
+        GasSale.aggregate([
+          { $match: gasWindow(sid, from, to) },
+          { $group: { _id: null, total: { $sum: "$amountPaid" }, count: { $sum: 1 }, kg: { $sum: "$quantityKg" } } },
+        ]),
+        GasCylinderSale.aggregate([
+          { $match: gasWindow(sid, from, to) },
+          { $group: { _id: null, total: { $sum: "$totalAmount" }, count: { $sum: 1 }, units: { $sum: "$quantity" } } },
+        ]),
+      ]);
+
+      return {
+        total: Number(bulk[0]?.total || 0) + Number(cyl[0]?.total || 0),
+        count: Number(bulk[0]?.count || 0) + Number(cyl[0]?.count || 0),
+        kg: Number(bulk[0]?.kg || 0),
+        cylinders: Number(cyl[0]?.units || 0),
+      };
+    };
+
+    const gasToday = await sumGas(today, todayEnd);
+
+    const todaySales = fuelToday + counterTodayTotal + gasToday.total;
+    const totalTransactions = todayShifts.length + counterTodayCount + gasToday.count;
 
     // The same pair over whatever range the date filter selected, so changing
     // the date actually changes what is shown rather than only the chart.
@@ -319,6 +375,8 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
 
     const rangeCounter = Number(counterRange[0]?.total || 0);
     const rangeCounterCount = Number(counterRange[0]?.count || 0);
+
+    const gasRange = await sumGas(start, end);
 
     /**
      * Twelve months of takings, fuel and counter together.
@@ -376,6 +434,30 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
     const fuelMap = toMap(fuelByMonth as any[]);
     const counterMap = toMap(counterByMonth as any[]);
 
+    // Gas over the same twelve months, both sale types folded into one series.
+    const gasMap = new Map<string, number>();
+    if (gasEnabled) {
+      const monthGroup = (amountField: string) => [
+        { $match: gasWindow(sid, trendStart, trendEnd) },
+        {
+          $group: {
+            _id: { y: { $year: "$createdAt" }, m: { $month: "$createdAt" } },
+            total: { $sum: amountField },
+          },
+        },
+      ];
+
+      const [bulkMonths, cylMonths] = await Promise.all([
+        GasSale.aggregate(monthGroup("$amountPaid")),
+        GasCylinderSale.aggregate(monthGroup("$totalAmount")),
+      ]);
+
+      for (const row of [...bulkMonths, ...cylMonths] as any[]) {
+        const k = monthKey(row._id.y, row._id.m);
+        gasMap.set(k, (gasMap.get(k) || 0) + Number(row.total || 0));
+      }
+    }
+
     /**
      * Three series over the same twelve months: fuel, counter, and the sum.
      *
@@ -386,6 +468,7 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
     const monthlySales: { month: string; sales: number }[] = [];
     const monthlyFuel: { month: string; sales: number }[] = [];
     const monthlyCounter: { month: string; sales: number }[] = [];
+    const monthlyGas: { month: string; sales: number }[] = [];
 
     for (let i = 11; i >= 0; i--) {
       const monthStart = new Date(today.getFullYear(), today.getMonth() - i, 1);
@@ -393,10 +476,12 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
       const k = monthKey(monthStart.getFullYear(), monthStart.getMonth() + 1);
       const f = fuelMap.get(k) || 0;
       const c = counterMap.get(k) || 0;
+      const g = gasMap.get(k) || 0;
 
       monthlyFuel.push({ month: label, sales: f });
       monthlyCounter.push({ month: label, sales: c });
-      monthlySales.push({ month: label, sales: f + c });
+      monthlyGas.push({ month: label, sales: g });
+      monthlySales.push({ month: label, sales: f + c + g });
     }
 
     const productSales = await Shift.aggregate([
@@ -409,7 +494,8 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
       },
       {
         $group: {
-          _id: "$product",
+          // Two spellings of the same fuel were two slices of the chart.
+          _id: canonicalFuelExpr("$product"),
           totalLitres: { $sum: "$litresSold" },
           totalAmount: { $sum: "$totalAmount" },
         },
@@ -417,7 +503,14 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
     ]);
 
     /**
-     * What the counter sold over the same range, by product.
+     * What the counter sold over the same range, as TWO lines: lubricants and
+     * store items.
+     *
+     * Not per product. A distribution chart answers "where is the money coming
+     * from", and against four fuel grades a station with two hundred shop lines
+     * would drown that question in slices of one percent each. Choco rings and
+     * Sprite are the same answer to it: the shop. Per-product detail belongs in
+     * the product tracker, which exists for exactly that.
      *
      * Fuel is measured in litres and shop stock in pieces, so the two cannot
      * share one "litres" column honestly. Both carry an amount, and money is
@@ -433,14 +526,22 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
       { $unwind: "$items" },
       {
         $group: {
-          _id: "$items.productName",
+          // One bucket for oil, one for everything else on the shelf. Items
+          // recorded before categories existed were lubricants, so they fall
+          // there rather than inflating the newer number.
+          _id: {
+            $cond: [
+              { $in: ["$items.category", ["drinks", "snacks", "other"]] },
+              "store",
+              "lubricant",
+            ],
+          },
           totalAmount: { $sum: "$items.amount" },
-          totalUnits: { $sum: "$items.qtySold" },
-          category: { $first: "$items.category" },
+          totalUnits: { $sum: "$items.qtyInUnits" },
+          lines: { $sum: 1 },
         },
       },
       { $sort: { totalAmount: -1 } },
-      { $limit: 15 },
     ]);
 
     const recentTransactions = await Shift.find({
@@ -464,7 +565,7 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
       timestamp: shift.updatedAt,
       txnId: `TXN ${shift._id.toString().slice(-3)}`,
       pumpNo: shift.pumpTitle,
-      productType: shift.product,
+      productType: canonicalFuel(shift.product),
       quantity: `${shift.litresSold || 0}L`,
       amount: shift.totalAmount || 0,
       role: shift.attendant?.role || "attendant",
@@ -513,13 +614,24 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
           }));
 
           const counterRows = (counterProducts as any[]).map((p) => ({
-            product: p._id || "Item",
+            product: p._id === "store" ? "Store Items" : "Lubricants",
             units: p.totalUnits || 0,
+            lines: p.lines || 0,
             amount: p.totalAmount || 0,
-            kind: p.category && p.category !== "lubricant" ? "store" : "lubricant",
+            kind: p._id === "store" ? "store" : "lubricant",
           }));
 
-          const all = [...fuelRows, ...counterRows];
+          const gasRows = gasEnabled && gasRange.total > 0
+            ? [{
+                product: "Gas (LPG)",
+                units: Math.round(gasRange.kg),
+                cylinders: gasRange.cylinders,
+                amount: gasRange.total,
+                kind: "gas",
+              }]
+            : [];
+
+          const all = [...fuelRows, ...counterRows, ...gasRows];
           const grand = all.reduce((s, r) => s + Number(r.amount || 0), 0);
 
           return all
@@ -530,18 +642,24 @@ export const getSalesOverview = async (req: AuthenticatedRequest, res: Response)
             .sort((a, b) => b.amount - a.amount);
         })(),
         // Each side on its own, for the Fuel / Counter switch.
-        salesTrendByKind: { fuel: monthlyFuel, counter: monthlyCounter },
+        salesTrendByKind: { fuel: monthlyFuel, counter: monthlyCounter, gas: monthlyGas },
+        // The switch hides its Gas tab when the department is off, so a
+        // fuel-only station never sees an empty option.
+        gasEnabled,
         recentTransactions: transactions,
         // What the selected date range holds, so moving the date filter moves
         // the numbers and not only the chart.
         rangeSales: {
-          total: rangeFuel + rangeCounter,
+          total: rangeFuel + rangeCounter + gasRange.total,
           fuel: rangeFuel,
           counter: rangeCounter,
-          transactions: rangeShifts.length + rangeCounterCount,
+          gas: gasRange.total,
+          transactions: rangeShifts.length + rangeCounterCount + gasRange.count,
         },
         // Today, split, for the live headline.
-        todayBreakdown: { fuel: fuelToday, counter: counterTodayTotal },
+        todayBreakdown: { fuel: fuelToday, counter: counterTodayTotal, gas: gasToday.total },
+        // Volume, in the units LPG is actually sold in.
+        gasToday: { kg: gasToday.kg, cylinders: gasToday.cylinders, transactions: gasToday.count },
       },
     });
   } catch (error: any) {
@@ -607,6 +725,134 @@ export const getCashOverview = async (req: AuthenticatedRequest, res: Response) 
 
     const total = await CashReconciliation.countDocuments({ fillingStation: stationId });
 
+    /**
+     * What the COUNTER took today, by how it was paid.
+     *
+     * The report above it reconciles pump cash and nothing else, so money taken
+     * over the till was invisible to it: a station could balance its fuel to the
+     * naira and still be blind to the shop's takings.
+     *
+     * Split by tender because that is what an audit compares against. Cash is
+     * the figure that must be in the drawer; POS and transfer are the figures
+     * that must appear on a statement. A single combined total cannot be
+     * checked against anything.
+     *
+     * A mixed payment is apportioned from its own recorded breakdown rather
+     * than being dropped into one bucket, which would misstate both.
+     */
+    const counterSales = await LubricantTransaction.find({
+      fillingStation: new Types.ObjectId(String(stationId)),
+      createdAt: { $gte: today, $lte: todayEnd },
+    })
+      .select("totalAmount paymentMethod paymentBreakdown")
+      .lean();
+
+    const counterSplit = emptyTenderSplit();
+    let counterTotal = 0;
+
+    for (const s of counterSales as any[]) {
+      const total = Number(s.totalAmount || 0);
+      counterTotal += total;
+      addTender(counterSplit, splitSaleTender({ ...s, total }));
+    }
+
+    const counterCash = counterSplit.cash;
+    const counterTransfer = counterSplit.transfer;
+    const counterPOS = counterSplit.POS;
+    const ct = { count: counterSales.length } as any;
+
+    /**
+     * The same takings split by WHAT was sold, so oil and shop can be audited
+     * apart. Deliberately not crossed with tender: a payment is recorded
+     * against the whole sale, not line by line, so apportioning cash across a
+     * basket holding both would be an invention rather than a fact.
+     */
+    const counterByKind = await LubricantTransaction.aggregate([
+      {
+        $match: {
+          fillingStation: new Types.ObjectId(String(stationId)),
+          createdAt: { $gte: today, $lte: todayEnd },
+        },
+      },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $in: ["$items.category", ["drinks", "snacks", "other"]] },
+              "store",
+              "lubricant",
+            ],
+          },
+          amount: { $sum: "$items.amount" },
+          units: { $sum: "$items.qtyInUnits" },
+        },
+      },
+    ]);
+
+    const kindRow = (k: string) => (counterByKind as any[]).find((r) => r._id === k) || {};
+
+    /**
+     * LPG takings today, by tender.
+     *
+     * Gas records a single payment method per sale with no mixed option, so no
+     * apportioning is needed: each sale lands whole in one bucket. Note the
+     * enum here is lowercase "pos" while the counter uses "POS"; they are
+     * different collections written by different modules, and normalising the
+     * label here is safer than assuming either is wrong.
+     */
+    const gasStation = await FillingStation.findById(stationId).select("gasEnabled").lean();
+    const gasOn = (gasStation as any)?.gasEnabled === true;
+
+    const gasTender = { cash: 0, transfer: 0, POS: 0 };
+    let gasTotalToday = 0;
+    let gasCountToday = 0;
+
+    if (gasOn) {
+      const match = {
+        fillingStation: new Types.ObjectId(String(stationId)),
+        createdAt: { $gte: today, $lte: todayEnd },
+        status: { $ne: "voided" },
+      };
+
+      /**
+       * Read the sales rather than $group them by method.
+       *
+       * A customer paying ₦15,000 as ₦5,000 cash and ₦10,000 transfer belongs
+       * in TWO buckets, and no grouping on paymentMethod alone can express
+       * that: it would drop the whole sale into "mixed" and leave the drawer
+       * figure understated by the cash actually taken. The split is per sale,
+       * so the sales have to be read.
+       *
+       * Only the fields needed for the split are selected, so this stays cheap
+       * on a busy day.
+       */
+      const [bulk, cyl] = await Promise.all([
+        GasSale.find(match).select("amountPaid paymentMethod paymentBreakdown").lean(),
+        GasCylinderSale.find(match).select("totalAmount paymentMethod paymentBreakdown").lean(),
+      ]);
+
+      const running = emptyTenderSplit();
+
+      for (const s of bulk as any[]) {
+        const total = Number(s.amountPaid || 0);
+        gasTotalToday += total;
+        gasCountToday += 1;
+        addTender(running, splitSaleTender({ ...s, total }));
+      }
+
+      for (const s of cyl as any[]) {
+        const total = Number(s.totalAmount || 0);
+        gasTotalToday += total;
+        gasCountToday += 1;
+        addTender(running, splitSaleTender({ ...s, total }));
+      }
+
+      gasTender.cash = running.cash;
+      gasTender.transfer = running.transfer;
+      gasTender.POS = running.POS;
+    }
+
     res.json({
       success: true,
       data: {
@@ -614,6 +860,40 @@ export const getCashOverview = async (req: AuthenticatedRequest, res: Response) 
         actualCashToday: actualCash,
         totalDiscrepancy,
         reconciliationRate: parseFloat(reconciliationRate),
+        /**
+         * Counter takings, kept beside the pump reconciliation rather than
+         * folded into it. The two are counted by different people at different
+         * moments, and merging them would hide which side a shortfall came from.
+         */
+        counterSalesToday: {
+          total: counterTotal,
+          transactions: Number(ct.count || 0),
+          byTender: { cash: counterCash, transfer: counterTransfer, POS: counterPOS },
+          byKind: {
+            lubricant: {
+              amount: Number(kindRow("lubricant").amount || 0),
+              units: Number(kindRow("lubricant").units || 0),
+            },
+            store: {
+              amount: Number(kindRow("store").amount || 0),
+              units: Number(kindRow("store").units || 0),
+            },
+          },
+        },
+        /**
+         * Gas kept apart from both the pumps and the counter. Three places
+         * money is taken, three sets of figures, so a shortfall points at the
+         * one that caused it instead of disappearing into a combined total.
+         */
+        ...(gasOn
+          ? {
+              gasSalesToday: {
+                total: gasTotalToday,
+                transactions: gasCountToday,
+                byTender: gasTender,
+              },
+            }
+          : {}),
         records,
         pagination: {
           page: Number(page),
