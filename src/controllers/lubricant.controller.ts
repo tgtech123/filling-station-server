@@ -482,8 +482,17 @@ export const getAllLubricants = async (req: AuthenticatedRequest, res: Response)
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
-    // ðŸ§­ Find all lubricants for this filling station
-    const lubricants = await lubricantModel.find({ fillingStation })
+    /**
+     * Live products only, unless a caller explicitly asks for the retired ones.
+     *
+     * `?includeRetired=true` exists for auditing, where the question is about a
+     * period rather than about what is on the shelf today.
+     */
+    const includeRetired = String((req.query as any)?.includeRetired) === "true";
+    const catalogueQuery: Record<string, unknown> = { fillingStation };
+    if (!includeRetired) catalogueQuery.isActive = { $ne: false };
+
+    const lubricants = await lubricantModel.find(catalogueQuery)
       .sort({ createdAt: -1 })
       .lean();
 
@@ -530,6 +539,9 @@ export const getLubricantByBarcode = async (req: AuthenticatedRequest, res: Resp
     // former answered "not found" for a barcode the station had registered.
     const lubricant = await lubricantModel.findOne({
       fillingStation,
+      // A retired product must not come back through a scan. Its barcode may
+      // even have been reused on the shelf by now.
+      isActive: { $ne: false },
       $or: [
         { barcode: barcode.trim() },
         { "saleUnits.barcode": barcode.trim() },
@@ -685,6 +697,10 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
     const lubricant = await lubricantModel.findOne({
       _id: new mongoose.Types.ObjectId(lubricantId),
       fillingStation: new mongoose.Types.ObjectId(fillingStation),
+      // Retired stock cannot be sold. The guard belongs here as well as in the
+      // lookup, because a basket can be assembled before a product is retired
+      // and submitted after.
+      isActive: { $ne: false },
     });
 
     if (!lubricant) {
@@ -1728,3 +1744,92 @@ export const getLubricantTransactionById = async (req: AuthenticatedRequest, res
 };
 
 
+
+/**
+ * PATCH /api/lubricant/:id/retire
+ *
+ * Take a product off the shelf without erasing what it did.
+ *
+ * There is no hard delete and there should not be one. A sale line names its
+ * product and copies its category at the moment of sale, so history survives on
+ * its own; but the tracker, the FIFO layers and every stock batch still point
+ * at this row, and removing it would strand all of them. Retiring hides it from
+ * the till, the reorder list and the picker while leaving every report intact.
+ */
+export const retireLubricant = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const product = await lubricantModel.findOne({ _id: req.params.id, fillingStation });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    if ((product as any).isActive === false) {
+      return res.status(200).json({ message: `${product.productName} is already retired`, data: product });
+    }
+
+    /**
+     * Stock still on the shelf is the one thing worth stopping for.
+     *
+     * Retiring a product holding stock would leave those units counted in the
+     * station's inventory value with no way to sell them, and no note of where
+     * they went. Write them off or sell them through first, deliberately, so
+     * the loss lands in the accounts as a decision rather than a disappearance.
+     */
+    const remaining = Number(product.qtyInStock) || 0;
+    if (remaining > 0 && req.body?.force !== true) {
+      return res.status(409).json({
+        error: `${product.productName} still has ${remaining} ${product.baseUnit || "piece"}(s) in stock. Sell it through or adjust the count to zero first.`,
+        code: "HAS_STOCK",
+        qtyInStock: remaining,
+      });
+    }
+
+    (product as any).isActive = false;
+    (product as any).retiredAt = new Date();
+    (product as any).retiredBy = req.user?.id;
+    await product.save();
+
+    Activity.create({
+      ...actorFrom(req.user),
+      fillingStation,
+      type: "stock",
+      title: "Product retired",
+      description: `${product.productName} was taken off the shelf. Its sales history is unchanged.`,
+      timestamp: new Date(),
+      severity: null,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    }).catch((err) => console.error("Activity log error (retireLubricant):", err));
+
+    return res.status(200).json({
+      message: `${product.productName} retired. It stays in reports and in the product tracker.`,
+      data: product,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+/** PATCH /api/lubricant/:id/restore — put a retired product back on the shelf. */
+export const restoreLubricant = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) {
+      return res.status(403).json({ error: "You are not authorized to perform this action" });
+    }
+
+    const product = await lubricantModel.findOneAndUpdate(
+      { _id: req.params.id, fillingStation },
+      { $set: { isActive: true, retiredAt: null, retiredBy: null } },
+      { new: true }
+    );
+
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    return res.status(200).json({ message: `${product.productName} is back on the shelf`, data: product });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};

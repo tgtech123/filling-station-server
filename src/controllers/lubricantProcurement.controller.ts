@@ -34,7 +34,9 @@ export const getReorderItems = async (req: AuthenticatedRequest, res: Response) 
      * step that gets it wrong.
      */
     const { orderType } = req.query as { orderType?: string };
-    const query: Record<string, unknown> = { fillingStation: stationId };
+    // Nobody should be prompted to reorder something the station stopped
+    // selling; that is the whole point of retiring it.
+    const query: Record<string, unknown> = { fillingStation: stationId, isActive: { $ne: false } };
     if (orderType === "lubricant") query.category = "lubricant";
     else if (orderType === "store") query.category = { $ne: "lubricant" };
 
