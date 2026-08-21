@@ -6,6 +6,7 @@ import StockAdjustment, { ADJUSTMENT_REASONS } from "../models/stockAdjustment.m
 import LubricantTransaction from "../models/lubricant-transaction.model";
 import LubricantPurchase from "../models/lubricant-purchase.model";
 import { parseInvoiceDate } from "../utils/invoiceDate";
+import { emitToStation } from "../services/socket.service";
 import LubricantProcurement from "../models/lubricantProcurement.model";
 import { notifyStation } from "../utils/notifyHelpers";
 import StockBatch from "../models/stockBatch.model";
@@ -116,6 +117,13 @@ export const adjustStock = async (req: AuthenticatedRequest, res: Response) => {
     } catch (e: any) {
       console.error("Cost layer error (adjust):", e?.message);
     }
+
+    // A correction is the one case where the counter figure was wrong and
+    // somebody has just made it right. Pushing it out matters most here.
+    emitToStation(String(fillingStation), "catalogue:changed", {
+      reason: "stock_adjusted",
+      products: [String(req.params.id)],
+    });
 
     const adjustment = await StockAdjustment.create({
       fillingStation,
