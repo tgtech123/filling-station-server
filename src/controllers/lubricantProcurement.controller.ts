@@ -10,6 +10,7 @@ import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
 import { repriceSaleUnits, toNaira } from "../utils/storePricing";
 import { receiveBatch } from "../services/stockBatch.service";
+import { emitToStation } from "../services/socket.service";
 
 // â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -660,7 +661,12 @@ export const markReceived = async (req: AuthenticatedRequest, res: Response) => 
             },
           };
         });
-      if (bulkOps.length > 0) await Lubricant.bulkWrite(bulkOps);
+      if (bulkOps.length > 0) {
+        await Lubricant.bulkWrite(bulkOps);
+        // A delivery changes both stock and price, so the tills need the new
+        // catalogue rather than the one they loaded this morning.
+        emitToStation(String(stationId), "catalogue:changed", { reason: "goods_received" });
+      }
 
       /**
        * Open a cost layer for every unit actually accepted.

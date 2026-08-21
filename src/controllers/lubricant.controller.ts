@@ -173,6 +173,16 @@ export const updateLubricantPricing = async (req: AuthenticatedRequest, res: Res
     product.pendingPricing = false;
     await product.save();
 
+    /**
+     * The till refuses to sell an unpriced product, so it MUST hear about this
+     * one: without it the cashier keeps being told to fetch a manager who has
+     * already priced the item.
+     */
+    emitToStation(String(fillingStation), "catalogue:changed", {
+      reason: "price_updated",
+      products: [String(product._id)],
+    });
+
     return res.status(200).json({
       message: `${product.productName} priced at ₦${price.toLocaleString()}.`,
       lubricant: product,
@@ -503,8 +513,10 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
 
       notifyProductRegistered(req, fillingStation, result);
 
+      emitToStation(String(fillingStation), "catalogue:changed", { reason: "product_saved" });
+
       return res.status(200).json({
-        message: "Lubricant added/updated successfully",
+        message: "Product saved successfully",
         lubricant: result,
       });
     }
@@ -529,6 +541,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
     });
 
     notifyProductRegistered(req, fillingStation, newLubricant);
+    emitToStation(String(fillingStation), "catalogue:changed", { reason: "product_registered" });
 
     return res.status(201).json({
       message: "Product added successfully",

@@ -8,6 +8,7 @@ import Activity from "../models/activity.model";
 import { actorFrom } from "../utils/actor";
 import Notification from "../models/notification.model";
 import { receiveBatch } from "../services/stockBatch.service";
+import { emitToStation } from "../services/socket.service";
 
 /**
  * Read the till's invoice date without letting JS guess at it.
@@ -234,6 +235,23 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
     }
 
     await session.commitTransaction();
+
+    /**
+     * Tell every open till that the shelf has changed.
+     *
+     * The POS holds the catalogue in memory so a scan resolves without a
+     * network round trip. That is right for speed and wrong for freshness: a
+     * product restocked on the office machine stayed at zero on the counter
+     * until somebody reloaded the page, and the cashier was told an item was
+     * out of stock while the carton sat behind them.
+     *
+     * Emitted AFTER the commit, so no till can refetch and read the old figures
+     * from a transaction that has not landed yet.
+     */
+    emitToStation(String(fillingStation), "catalogue:changed", {
+      reason: "invoice_purchase",
+      products: processedItems.map((i) => String(i.lubricantId)),
+    });
 
     // Log stock activity (fire-and-forget)
     const itemSummary = processedItems
