@@ -1,6 +1,7 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { getStaffSales } from "../controllers/staffSales.controller";
+import { getCashExpected } from "../controllers/cashExpected.controller";
 import { checkRole } from "../middlewares/checkRole";
 import {
   getAccountantDashboard,
@@ -32,6 +33,12 @@ const accountantOrMgr = checkRole("accountant", "manager");
 // Dashboard
 router.get("/dashboard",                          accountantOnly,  getAccountantDashboard);
 router.get("/staff-sales",                        financeReaders,  getStaffSales);
+/**
+ * What the cashier should be holding, across every channel, split by tender.
+ * Read-only for the three roles that answer for the money; GET is the only
+ * verb, so there is nothing here to adjust a figure with.
+ */
+router.get("/cash-expected",                      financeReaders,  getCashExpected);
 
 // Audited Reconciled Sales
 router.get("/audited-reconciled-sales",           accountantOnly,  getAuditedReconciledSales);
