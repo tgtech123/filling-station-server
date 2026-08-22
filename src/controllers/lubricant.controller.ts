@@ -448,7 +448,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
     // prices at all, so there is nothing to compute.
     const pricedUnits = isCashier ? [] : repriceSaleUnits(cleanUnits, unitCostNum, unitPriceNum);
 
-    // ðŸ”¥ If barcode is provided â†’ upsert/update
+    // ðŸ”¥ If barcode is provided -> upsert/update
     if (barcode) {
       const query = {
         fillingStation: new Types.ObjectId(fillingStation),
@@ -521,7 +521,7 @@ export const addLubricant = async (req: AuthenticatedRequest, res: Response) => 
       });
     }
 
-    // ðŸ”¥ If NO barcode â†’ create new product only
+    // ðŸ”¥ If NO barcode -> create new product only
     const newLubricant = await lubricantModel.create({
       fillingStation,
       productName,
@@ -792,7 +792,7 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // â­ If payment is mixed â†’ validate breakdown
+    // â­ If payment is mixed -> validate breakdown
     if (paymentMethod === "mixed") {
       if (!paymentBreakdown) {
         return res.status(400).json({
@@ -860,7 +860,7 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
       fillingStation,
       type: "sale",
       title: `Sale completed - ${lubricant.productName}`,
-      description: `${lubricant.productName} â€“ ${qtySold} units sold`,
+      description: `${lubricant.productName} - ${qtySold} units sold`,
       timestamp: new Date(),
       severity: null,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -1065,11 +1065,11 @@ export const getWeeklyLubricantSummaryCalendarWeek = async (
     const topThree = summary.slice(0, 3);
 
     return res.status(200).json({
-      message: "Weekly (calendar week Monâ†’Sun) lubricant summary retrieved successfully",
+      message: "Weekly (calendar week Mon->Sun) lubricant summary retrieved successfully",
       period: {
         from: weekStart.toISOString(),
         to: weekEnd.toISOString(),
-        note: "Calendar week (Monday 00:00 â†’ Sunday 23:59:59.999)",
+        note: "Calendar week (Monday 00:00 -> Sunday 23:59:59.999)",
       },
       totalLubricants: summary.length,
       data: summary,
@@ -1091,7 +1091,7 @@ export const getDailyLubricantSummary = async (req: AuthenticatedRequest, res: R
 
     const stationObjectId = new Types.ObjectId(fillingStation);
 
-    // ðŸ•’ Define today's range (midnight â†’ 23:59:59)
+    // ðŸ•’ Define today's range (midnight -> 23:59:59)
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date();
@@ -1759,7 +1759,7 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
     console.log("ðŸ”” About to create activity for lubricant sale");
     // Reads back the way it was sold: "Coke ×2 Pack", not "Coke ×24".
     const itemSummary = processedItems
-      .map((i) => `${i.productName} Ã—${i.qtyInUnits} ${i.unitName}${i.qtyInUnits > 1 ? "s" : ""}`)
+      .map((i) => `${i.productName} x${i.qtyInUnits} ${i.unitName}${i.qtyInUnits > 1 ? "s" : ""}`)
       .join(", ");
     Activity.create({
       ...actorFrom(req.user),

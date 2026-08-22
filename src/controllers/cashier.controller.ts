@@ -669,7 +669,7 @@ export const getCashierDashboard = async (req: AuthenticatedRequest, res: Respon
       lubricantUnitsSold = Number(thisWeekRes[0]?.totalUnits || 0);
       lastWeekLubricant  = Number(lastWeekRes[0]?.totalUnits  || 0);
     } catch {
-      // lubricant collection unavailable â€” default to 0
+      // lubricant collection unavailable - default to 0
     }
 
     const lubricantGrowth = lastWeekLubricant > 0
@@ -762,7 +762,7 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // Build match filter â€” all completed shifts from the last 24 hours
+    // Build match filter - all completed shifts from the last 24 hours
     const matchFilter: any = {
       fillingStation: stationObjectId,
       status: "Completed",
@@ -888,7 +888,7 @@ export const getDailyAttendantSales = async (req: AuthenticatedRequest, res: Res
     // Get total count for pagination
     const countStart = Date.now();
     const totalShifts = await Shift.countDocuments(matchFilter);
-    console.log(`â±ï¸ Count query took: ${Date.now() - countStart}ms â€” total: ${totalShifts}`);
+    console.log(`â±ï¸ Count query took: ${Date.now() - countStart}ms - total: ${totalShifts}`);
 
     const getNigeriaDate = (date: Date): string => {
       return new Date(date).toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });

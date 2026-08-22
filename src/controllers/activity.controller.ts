@@ -21,9 +21,35 @@ export const getRecentActivity = async (req: AuthenticatedRequest, res: Response
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
+    /**
+     * Who signed in is attendance, not activity, and it is not everybody's
+     * business.
+     *
+     * Every successful login used to write a row that everyone saw, so the feed
+     * filled with "X logged in" and pushed the sales, stock movements and alerts
+     * it exists for off the end of a twenty-row list.
+     *
+     * Three rules now decide whether a login row is shown:
+     *
+     *  - Your own sign-ins, always. A session you did not start is precisely
+     *    what you should notice.
+     *  - MANAGER sign-ins, but only to the owner. Who is running the station
+     *    and when is the owner's concern; a cashier arriving for their shift is
+     *    not, and neither is a hired manager's view of another cashier.
+     *  - A FAILED login, to anyone. That is a security event rather than
+     *    attendance, and hiding it would be the wrong kind of tidy.
+     */
+    const viewerId = req.user?.id ? new Types.ObjectId(String(req.user.id)) : null;
+    const isOwner = Boolean((req.user as any)?.isOwner);
+
+    const loginVisibility: Record<string, unknown>[] = [{ status: "failed" }];
+    if (viewerId) loginVisibility.push({ type: "login", user: viewerId });
+    if (isOwner) loginVisibility.push({ type: "login", userRole: "manager" });
+
     const activities = await Activity.find({
       fillingStation: stationObjectId,
       expiresAt: { $gt: new Date() },
+      $or: [{ type: { $ne: "login" } }, ...loginVisibility],
     })
       .sort({ timestamp: -1 })
       .limit(20)

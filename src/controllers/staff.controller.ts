@@ -318,7 +318,7 @@ export const getStaffTarget = async (
       const progressFmt = target.currentProgress.toLocaleString();
 
       if (target.currentProgress >= target.targetAmount) {
-        // Target was met â€” notify manager and staff
+        // Target was met - notify manager and staff
         Notification.create({
           fillingStation,
           type: "message",
@@ -342,7 +342,7 @@ export const getStaffTarget = async (
           targetRole: "attendant",
         }).catch((err) => console.error("Notification error (target met - staff):", err));
       } else {
-        // Target not met â€” notify manager and staff
+        // Target not met - notify manager and staff
         Notification.create({
           fillingStation,
           type: "message",

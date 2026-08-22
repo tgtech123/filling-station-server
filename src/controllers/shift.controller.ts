@@ -370,7 +370,7 @@ export const endShift = async (req: AuthenticatedRequest, res: Response) => {
         await tankDoc.save();
 
         console.log(
-          `âœ… Tank updated: ${tank.fuelType} ${prevQty} â†’ ${tankDoc.tanks[tankIndex].currentQuantity}L (sold: ${litresSold}L)`
+          `âœ… Tank updated: ${tank.fuelType} ${prevQty} -> ${tankDoc.tanks[tankIndex].currentQuantity}L (sold: ${litresSold}L)`
         );
 
         // Alert if tank drops below 20%

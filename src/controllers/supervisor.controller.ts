@@ -545,7 +545,7 @@ export const clearStaleShifts = async (req: AuthenticatedRequest, res: Response)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // Find shift IDs that already have an approved reconciliation â€” don't touch those
+    // Find shift IDs that already have an approved reconciliation - don't touch those
     const approvedShiftIds = await CashReconciliation.find({
       fillingStation: stationId,
       status: { $in: ["Matched", "Flagged"] },

@@ -20,7 +20,7 @@ const genOrderNumber = async (stationId: string): Promise<string> => {
 const statusLabel: Record<string, string> = {
   ordered:           "Order Placed",
   awaiting_delivery: "Awaiting Delivery",
-  delivered:         "Delivered â€“ Pending Validation",
+  delivered:         "Delivered - Pending Validation",
   validated:         "Validated & Added to Inventory",
   cancelled:         "Cancelled",
 };

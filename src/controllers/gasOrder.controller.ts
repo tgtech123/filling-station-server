@@ -226,7 +226,7 @@ export const confirmOrder = async (req: AuthenticatedRequest, res: Response) => 
     order.confirmedAt = new Date();
     await order.save();
 
-    return res.status(200).json({ message: "Order confirmed â€” receipt created", data: { order, sale } });
+    return res.status(200).json({ message: "Order confirmed - receipt created", data: { order, sale } });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }

@@ -119,7 +119,7 @@ const getDateRange = (duration: string = "today") => {
       endDate.setHours(23, 59, 59, 999);
       break;
     case "last3months":
-      // Rolling 3 months: first day of 2 months ago â†’ today (includes current month)
+      // Rolling 3 months: first day of 2 months ago -> today (includes current month)
       endDate = new Date(now);
       endDate.setHours(23, 59, 59, 999);
       startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
@@ -374,7 +374,7 @@ export const getAccountantDashboard = async (req: AuthenticatedRequest, res: Res
       });
     }
 
-    // 7. Accounts Payable â€” received procurements with outstanding supplier balance
+    // 7. Accounts Payable - received procurements with outstanding supplier balance
     const unpaidProcurements = await LubricantProcurement.find({
       fillingStation: new Types.ObjectId(stationId),
       status: "received",
@@ -695,7 +695,7 @@ export const getIncomeStatement = async (req: AuthenticatedRequest, res: Respons
       });
     }
 
-    // Lubricant COGS = cost price of lubricants sold (qty sold Ã— unit cost)
+    // Lubricant COGS = cost price of lubricants sold (qty sold x unit cost)
     const lubricantTxns = await LubricantTransaction.find({
       fillingStation: new Types.ObjectId(stationId),
       createdAt: { $gte: currentStart, $lte: currentEnd },
@@ -1001,7 +1001,7 @@ export const getBalanceSheet = async (req: AuthenticatedRequest, res: Response) 
 
     const totalCurrentAssets = cashAndEquivalents + fuelInventory + lubricantInventory;
 
-    // Fixed Assets â€” read from FixedAsset register, compute net book value per asset
+    // Fixed Assets - read from FixedAsset register, compute net book value per asset
     const fixedAssets = await FixedAsset.find({ fillingStation: new Types.ObjectId(stationId) }).lean();
     let landAndBuilding = 0;
     let fuelDispenser = 0;
@@ -1549,7 +1549,7 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
     const operatingProfitMargin = totalRevenue > 0 ? (operatingProfit / totalRevenue) * 100 : 0;
     const netProfitMargin       = totalRevenue > 0 ? (netProfit       / totalRevenue) * 100 : 0;
 
-    // â”€â”€ Inventory (current balance â€” same source as Balance Sheet) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Inventory (current balance - same source as Balance Sheet) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const krTanks = await Tank.findOne({ fillingStation: new Types.ObjectId(stationId) }).lean();
     let fuelInventoryValue = 0;
     if (krTanks && krTanks.tanks) {
@@ -1563,7 +1563,7 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
     );
     const totalInventory = fuelInventoryValue + lubricantInventoryValue;
 
-    // â”€â”€ Cash (net operating cash for the period â€” same as Balance Sheet) â”€â”€â”€â”€â”€
+    // â”€â”€ Cash (net operating cash for the period - same as Balance Sheet) â”€â”€â”€â”€â”€
     const krRevAgg = await Shift.aggregate([
       { $match: { fillingStation: new Types.ObjectId(stationId), shiftDate: { $gte: currentStart, $lte: currentEnd }, status: "Completed" } },
       { $group: { _id: null, total: { $sum: "$totalAmount" } } },
@@ -1576,7 +1576,7 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
     const cash             = Math.max(0, krPeriodRevenue - totalExpenses);
     const totalCurrentAssets = cash + totalInventory;
 
-    // â”€â”€ Fixed assets (FixedAsset register â€” same as Balance Sheet) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Fixed assets (FixedAsset register - same as Balance Sheet) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const krFixedAssets = await FixedAsset.find({ fillingStation: new Types.ObjectId(stationId) }).lean();
     const fixedAssetsValue = krFixedAssets.reduce((s: number, fa: any) => {
       const { netBookValue } = calcNetBookValue(fa.purchasePrice, fa.purchaseDate, fa.usefulLifeYears, fa.depreciationMethod);
@@ -1609,12 +1609,12 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
     const retainedEarnings      = krByCat["Retained Earnings"]   || 0;
     const totalEquity           = ownersCapital + retainedEarnings + netProfit;
 
-    // â”€â”€ Profitability â€” ROA & ROE now use proper assets/equity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Profitability - ROA & ROE now use proper assets/equity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const returnOnAssets = totalAssets > 0 ? (netProfit / totalAssets) * 100 : 0;
     const returnOnEquity = totalEquity > 0 ? (netProfit / totalEquity) * 100 : 0;
 
     // â”€â”€ Liquidity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // null = no liabilities recorded yet â†’ frontend shows "N/A"
+    // null = no liabilities recorded yet -> frontend shows "N/A"
     const currentRatio = totalCurrentLiabilities > 0 ? totalCurrentAssets / totalCurrentLiabilities : null;
     const quickRatio   = totalCurrentLiabilities > 0 ? cash / totalCurrentLiabilities : null;   // cash only (inventory excluded as illiquid)
     const cashRatio    = totalCurrentLiabilities > 0 ? cash / totalCurrentLiabilities : null;
@@ -1623,13 +1623,13 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
     // â”€â”€ Efficiency â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const inventoryTurnover = totalInventory > 0 ? cogs / totalInventory : 0;
     const assetTurnover     = totalAssets > 0    ? totalRevenue / totalAssets : 0;
-    // Receivables: filling stations are a cash/POS business â€” no credit sales â†’ N/A
-    // DaySalesOutstanding: follows from receivables â†’ N/A
+    // Receivables: filling stations are a cash/POS business - no credit sales -> N/A
+    // DaySalesOutstanding: follows from receivables -> N/A
 
     // â”€â”€ Leverage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const debtToAssets     = totalAssets  > 0 ? (totalDebt / totalAssets)  * 100 : 0;
     const debtToEquity     = totalEquity  > 0 ? (totalDebt / totalEquity)  * 100 : 0;
-    // Interest Coverage needs interest expense which isn't tracked separately â†’ N/A
+    // Interest Coverage needs interest expense which isn't tracked separately -> N/A
     const equityMultiplier = totalEquity  > 0 ? totalAssets / totalEquity : null;
 
     return res.status(200).json({
@@ -1651,13 +1651,13 @@ export const getKeyRatios = async (req: AuthenticatedRequest, res: Response) => 
         efficiency: {
           inventoryTurnover: Number(inventoryTurnover.toFixed(2)),
           assetTurnover:     Number(assetTurnover.toFixed(2)),
-          receivablesTurnover: null,   // N/A â€” cash/POS business, no credit sales
-          daySalesOutstanding: null,   // N/A â€” follows from receivables
+          receivablesTurnover: null,   // N/A - cash/POS business, no credit sales
+          daySalesOutstanding: null,   // N/A - follows from receivables
         },
         leverage: {
           debtToAssets:     Number(debtToAssets.toFixed(2)),
           debtToEquity:     Number(debtToEquity.toFixed(2)),
-          interestCoverage: null,      // N/A â€” interest expense not tracked separately
+          interestCoverage: null,      // N/A - interest expense not tracked separately
           equityMultiplier: equityMultiplier !== null ? Number(equityMultiplier.toFixed(2)) : null,
         },
       },
@@ -1937,7 +1937,7 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
 
     const totalFuelSales = fuelBreakdown.reduce((sum: number, item: any) => sum + Number(item.totalRevenue || 0), 0) || totalFuelRevenue;
 
-    // Build a lookup map: fuelType â†’ aggregated sales row
+    // Build a lookup map: fuelType -> aggregated sales row
     const salesByType: Record<string, any> = {};
     fuelBreakdown.forEach((item: any) => {
       if (item._id) salesByType[item._id] = item;
@@ -2040,7 +2040,7 @@ export const getIncomeReport = async (req: AuthenticatedRequest, res: Response) 
 
 /**
  * GET /api/accountant/tax-report
- * Full tax-ready report â€” VAT, PAYE (real salary draft data), CIT, Education Tax
+ * Full tax-ready report - VAT, PAYE (real salary draft data), CIT, Education Tax
  */
 export const getTaxReport = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -2141,7 +2141,7 @@ export const getTaxReport = async (req: AuthenticatedRequest, res: Response) => 
     const expDepreciation   = expMap["Depreciation"]         || 0;
     const totalExpenses     = Object.values(expMap).reduce((s, v) => s + v, 0);
 
-    // â”€â”€ 5. PAYE â€” real data from SalaryDraft â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ 5. PAYE - real data from SalaryDraft â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const salaryDraft = await SalaryDraft.findOne({ station: stId, month: monthStr }).lean() as any;
 
     type PayeSource = "salary_draft" | "estimate";
@@ -2169,7 +2169,7 @@ export const getTaxReport = async (req: AuthenticatedRequest, res: Response) => 
         });
       });
     } else {
-      // No salary draft yet â€” estimate from approved salary expense
+      // No salary draft yet - estimate from approved salary expense
       totalGrossSalary  = expSalaries;
       totalPAYEDeducted = expSalaries * 0.15;
     }

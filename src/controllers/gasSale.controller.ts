@@ -239,7 +239,7 @@ export const dispenseSale = async (req: AuthenticatedRequest, res: Response) => 
     const sale = await GasSale.findOne({ _id: req.params.id, fillingStation: station, status: "confirmed" });
     if (!sale) return res.status(404).json({ message: "Confirmed sale not found" });
 
-    // Resolve which tank to deduct from via the sale's pump â†’ tank link
+    // Resolve which tank to deduct from via the sale's pump -> tank link
     let tankId: Types.ObjectId | null = null;
     if (sale.pump) {
       const pump = await GasPump.findById(sale.pump).lean();

@@ -677,7 +677,7 @@ export const getPaymentHistory = async (req: AuthenticatedRequest, res: Response
       matchFilter["period.year"]  = Number(year);
     }
 
-    // â”€â”€ Aggregation pipeline â€” joins staff so search runs at DB level â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Aggregation pipeline - joins staff so search runs at DB level â”€â”€â”€â”€â”€â”€â”€â”€
     const basePipeline: any[] = [
       { $match: matchFilter },
       {
