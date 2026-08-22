@@ -767,7 +767,7 @@ export const recordPayment = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ message: "A valid payment amount is required" });
     }
 
-    // Total owed = sum of actual received qty Ã— unit cost (the supplier's invoice amount)
+    // Total owed = sum of actual received qty x unit cost (the supplier's invoice amount)
     const totalCost = procurement.items.reduce(
       (s, item) => s + (item.receivedQuantity ?? item.quantityToProcure) * item.unitCost,
       0

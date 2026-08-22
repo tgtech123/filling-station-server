@@ -171,13 +171,13 @@ export const getAllPumps = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // 3ï¸âƒ£ Build lookup (tankId â†’ fuelType)
+    // 3ï¸âƒ£ Build lookup (tankId -> fuelType)
     const tankSubIds = tankSubs.map((t: any) => String(t._id));
     const tanksMap = new Map<string, string | undefined>(
       tankSubs.map((t: any) => [String(t._id), (t as any).fuelType])
     );
 
-    // 4ï¸âƒ£ Find all Pump documents belonging to the stationâ€™s tanks
+    // 4ï¸âƒ£ Find all Pump documents belonging to the station's tanks
     const pumpDocs = await Pump.find({
       tank: { $in: tankSubIds.map((id) => new mongoose.Types.ObjectId(id)) },
     }).lean();
@@ -395,7 +395,7 @@ export const updatePump = async (req: AuthenticatedRequest, res: Response) => {
         fillingStation,
         type: "maintenance",
         title: "Maintenance Scheduled",
-        description: `${pumpSubdoc.title} â€” scheduled for maintenance`,
+        description: `${pumpSubdoc.title} - scheduled for maintenance`,
         timestamp: new Date(),
         severity: null,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -722,7 +722,7 @@ export const scheduleMaintenance = async (req: AuthenticatedRequest, res: Respon
       type: "alert",
       category: "pump_maintenance",
       title: "Pump Scheduled for Maintenance",
-      body: `${pumpSubdoc.title}${reason ? ` â€” ${reason}` : ""}. Duration: ${dateRange}`,
+      body: `${pumpSubdoc.title}${reason ? ` - ${reason}` : ""}. Duration: ${dateRange}`,
       severity: "warning",
       timestamp: new Date(),
       targetRole: "supervisor",

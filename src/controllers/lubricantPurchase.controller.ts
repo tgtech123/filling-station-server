@@ -255,7 +255,7 @@ export const addLubricantPurchase = async (req: AuthenticatedRequest, res: Respo
 
     // Log stock activity (fire-and-forget)
     const itemSummary = processedItems
-      .map((i) => `${i.productName} Ã—${i.quantity}`)
+      .map((i) => `${i.productName} x${i.quantity}`)
       .join(", ");
     Activity.create({
       ...actorFrom(req.user),

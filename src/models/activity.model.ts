@@ -67,7 +67,12 @@ const ActivitySchema = new Schema<IActivity>(
     },
     expiresAt: {
       type: Date,
-      default: () => new Date(Date.now() + 24 * 60 * 60 * 1000),
+      /**
+       * Twelve hours, so the feed covers the shift you are in rather than the
+       * one before it. A day's worth pushed this morning's real events off the
+       * end of a twenty-row list by the afternoon.
+       */
+      default: () => new Date(Date.now() + 12 * 60 * 60 * 1000),
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,

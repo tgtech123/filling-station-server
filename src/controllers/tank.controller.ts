@@ -441,12 +441,12 @@ export const getTankConsumptionAndCapacity = async (req: AuthenticatedRequest, r
         calendarWeek: {
           from: weekStart.toISOString(),
           to: weekEnd.toISOString(),
-          note: "Calendar week (Monday 00:00 â†’ Sunday 23:59:59.999)",
+          note: "Calendar week (Monday 00:00 -> Sunday 23:59:59.999)",
         },
       },
       data: {
         dailyConsumption,       // litres
-        weeklyConsumption,      // litres (calendar week Monâ†’Sun)
+        weeklyConsumption,      // litres (calendar week Mon->Sun)
         totalCapacity,          // total tank capacity (sum of limits) in litres
         totalCurrentQuantity,   // current stored litres across tanks
         totalCapacityAvailable, // remaining capacity in litres
