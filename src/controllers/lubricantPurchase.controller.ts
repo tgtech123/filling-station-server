@@ -324,6 +324,7 @@ export const getAllLubricantPurchases = async (req: AuthenticatedRequest, res: R
     if (paymentMethod) query.paymentMethod = paymentMethod;
 
     const purchases = await LubricantPurchase.find(query)
+      .populate("createdBy", "firstName lastName role")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -383,7 +384,9 @@ export const getLubricantPurchaseById = async (req: AuthenticatedRequest, res: R
     if (!fillingStation) return res.status(403).json({ error: "Unauthorized" });
     if (!id || !Types.ObjectId.isValid(id)) return res.status(400).json({ error: "Invalid purchase ID" });
 
-    const purchase = await LubricantPurchase.findOne({ _id: id, fillingStation }).lean();
+    const purchase = await LubricantPurchase.findOne({ _id: id, fillingStation })
+      .populate("createdBy", "firstName lastName role")
+      .lean();
     if (!purchase) return res.status(404).json({ error: "Purchase not found" });
 
     return res.status(200).json({
