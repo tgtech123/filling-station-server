@@ -19,8 +19,18 @@ const router = express.Router();
 
 router.get("/reorder-items", requireAuth, checkRole("manager", "supervisor"), getReorderItems);
 router.post("/", requireAuth, checkRole("manager", "supervisor"), createProcurement);
-router.get("/", requireAuth, checkRole("manager", "supervisor", "cashier", "accountant"), getProcurements);
-router.get("/:id", requireAuth, checkRole("manager", "supervisor", "cashier", "accountant"), getProcurementById);
+/**
+ * A purchase order carries what the station PAYS its suppliers: unit costs,
+ * vendor names, totals. A cashier sells at a till and has no use for any of it,
+ * and knowing the buying price of everything on the shelf is not something a
+ * till operator should carry around. Same reasoning that took the product
+ * tracker off them.
+ *
+ * The accountant stays: reconciling supplier invoices against orders is the
+ * whole of their job here.
+ */
+router.get("/", requireAuth, checkRole("manager", "supervisor", "accountant"), getProcurements);
+router.get("/:id", requireAuth, checkRole("manager", "supervisor", "accountant"), getProcurementById);
 router.patch("/:id", requireAuth, checkRole("manager", "supervisor"), updateProcurement);
 router.patch("/:id/submit", requireAuth, checkRole("manager", "supervisor"), submitProcurement);
 // Supplier came back with their available quantity and current price.
