@@ -244,8 +244,25 @@ export const declareTender = async (req: AuthenticatedRequest, res: Response) =>
 /**
  * GET /api/shift-tender/pending
  *
- * The cashier's queue: takings declared but not yet confirmed, oldest first,
+ * The cashier's queue: takings declared but NOT YET COUNTED, oldest first,
  * because the attendant who has been waiting longest is standing there.
+ *
+ * "disputed" used to be in this list, and it does not belong: status becomes
+ * disputed inside confirmTender, immediately after `received` is written, so
+ * every disputed record has already been counted. The queue offered a "Count
+ * and confirm" card for each of them and confirmTender then refused every one
+ * with ALREADY_COUNTED — the same row appearing as both outstanding work and
+ * finished work, which is exactly how a cashier ends up not trusting the
+ * screen.
+ *
+ * A disputed shift is not unfinished business here. What is outstanding about
+ * it is the SHORTAGE, and that is already on this page under "Attendants
+ * currently short", with its own repayment action. Correcting a count itself
+ * needs a manager to reopen it.
+ *
+ * `received: { $exists: false }` states the real rule rather than relying on
+ * the status list to imply it — it is the same condition confirmTender guards
+ * on, so the two cannot drift apart again.
  */
 export const listPendingTenders = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -254,7 +271,8 @@ export const listPendingTenders = async (req: AuthenticatedRequest, res: Respons
 
     const pending = await ShiftTender.find({
       fillingStation: new Types.ObjectId(String(fillingStation)),
-      status: { $in: ["submitted", "disputed"] },
+      status: "submitted",
+      received: { $exists: false },
     })
       .populate("attendant", "firstName lastName role")
       .populate("shift", "pumpTitle product litresSold pricePerLtr shiftDate")
