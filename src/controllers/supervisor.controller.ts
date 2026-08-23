@@ -174,11 +174,18 @@ export const getSupervisorDashboard = async (req: AuthenticatedRequest, res: Res
       .limit(10)
       .lean();
 
+    /**
+     * Litres, never naira.
+     *
+     * The supervisor runs the forecourt: which pump is moving, who is on it,
+     * how much product went out. What that product was worth, and whether the
+     * cash came back, belongs to the people who handle the money. A role that
+     * both supervises the attendants and sees the value of what they took is
+     * one person holding two halves of the same control.
+     */
     const liveSalesFeed = liveSales.map((shift: any) => ({
       pumpNo: shift.pumpTitle,
-      pricePerLtr: shift.pricePerLtr,
       litres: shift.litresSold || 0,
-      amount: shift.totalAmount || 0,
       timestamp: shift.updatedAt,
       attendant: isPopulated(shift.attendant)
         ? `${shift.attendant.firstName} ${shift.attendant.lastName}`
@@ -239,7 +246,8 @@ export const getSupervisorDashboard = async (req: AuthenticatedRequest, res: Res
         availableStocks: {
           fuelLitres: totalFuelLitres,
           lubricantBottles: totalLubricantBottles,
-          stockValue,
+          // What is on the forecourt, not what it is worth. Valuing the stock
+          // is an accounting question and it is answered on accounting screens.
         },
         liveSalesFeed,
         scheduledAttendants: {
@@ -326,13 +334,18 @@ export const getPendingShifts = async (req: AuthenticatedRequest, res: Response)
         date: shift.shiftDate,
         pumpNo: shift.pumpTitle,
         product: shift.product,
-        pricePerLtr: shift.pricePerLtr,
         litresSold: shift.litresSold || 0,
         noOfTransactions: 0, // This would need to be tracked separately
-        amount: shift.totalAmount || 0,
-        reconciledCash: reconciliation?.cashReceived || 0,
+        /**
+         * Whether the money has been signed for, but never how much.
+         *
+         * The supervisor needs to know a shift is still open so they can chase
+         * the attendant, which is an operational fact. The amount, the cash
+         * counted and the size of any discrepancy are all figures for the
+         * cashier, accountant and manager, and none of them are needed to know
+         * that a shift is outstanding.
+         */
         status: reconciliation ? (reconciliation.status === "Matched" ? "Matched" : "Flagged") : "Pending",
-        discrepancy: reconciliation?.discrepancy || 0,
       };
     });
 
@@ -418,9 +431,12 @@ export const getApprovedShifts = async (req: AuthenticatedRequest, res: Response
       pumpNo: recon.pumpTitle,
       litresSold: recon.litresSold,
       noOfTransactions: 0, // Would need separate tracking
-      total: recon.expectedAmount,
-      cashReceived: recon.cashReceived,
-      discrepancy: recon.discrepancy,
+      /**
+       * Whether it settled, never by how much. A supervisor chasing an open
+       * shift needs to know it is open; the expected total, what was counted
+       * and the size of the gap are the cashier's, accountant's and manager's
+       * to see.
+       */
       approvedBy: isPopulated(recon.reconciledBy)
         ? `${recon.reconciledBy.firstName} ${recon.reconciledBy.lastName}`
         : "Unknown",
@@ -449,7 +465,21 @@ export const getApprovedShifts = async (req: AuthenticatedRequest, res: Response
 
 /**
  * POST /api/supervisor/shift-approval/:shiftId/approve
- * Approve a shift
+ *
+ * The supervisor signs off the SHIFT, never the money.
+ *
+ * This used to force-approve: when no cashier had counted the takings, it wrote
+ * a reconciliation with cashReceived set equal to the expected amount. That is
+ * a record saying every naira came back, created by somebody who never held the
+ * notes, on behalf of an attendant they supervise. It cleared the shift out of
+ * the pending queue, so the absence of a real count stopped being visible, and
+ * a shortage would have been signed away by the one role that should never be
+ * able to sign it away.
+ *
+ * Now the money must already have been counted by a cashier or an accountant.
+ * The supervisor adds their operational approval on top of it and their note is
+ * kept, but reconciledBy is left alone: the person of record for the cash is
+ * whoever actually counted it.
  */
 export const approveShift = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -471,38 +501,33 @@ export const approveShift = async (req: AuthenticatedRequest, res: Response) => 
   return res.status(403).json({ message: "Unauthorized" });
 }
 
-    let reconciliation = await CashReconciliation.findOne({ shift: shiftId });
+    const reconciliation = await CashReconciliation.findOne({ shift: shiftId });
 
-    if (reconciliation) {
-      // Update existing reconciliation — pre-save hook recalculates discrepancy + status
-      reconciliation.reconciledBy = new Types.ObjectId(userId);
-      if (comment) reconciliation.notes = comment;
-      await reconciliation.save();
-    } else {
-      // Cashier never submitted cash reconciliation — supervisor force-approves.
-      // Create a reconciliation with cashReceived = expectedAmount so the shift is
-      // excluded from pending (getPendingShifts filters by Matched/Flagged reconciliations).
-      // Same netting as the cashier's own submission: loyalty fuel passed through
-      // the meter but brought no cash with it.
-      const rewardValue = await loyaltyRewardForShift(shift._id as Types.ObjectId);
-      const expectedCash = expectedCashAfterRewards(shift.totalAmount || 0, rewardValue);
-
-      reconciliation = await CashReconciliation.create({
-        fillingStation: stationId,
-        shift: shiftId,
-        attendant: shift.attendant,
-        pump: shift.pump,
-        pumpTitle: shift.pumpTitle,
-        shiftDate: shift.shiftDate,
-        product: shift.product,
-        litresSold: shift.litresSold || 0,
-        pricePerLtr: shift.pricePerLtr || 0,
-        loyaltyRewardAmount: rewardValue,
-        expectedAmount: expectedCash,
-        cashReceived: expectedCash,
-        reconciledBy: userId,
-        notes: comment || "Approved by supervisor",
+    /**
+     * No count, no approval. Refused rather than fabricated: a shift whose
+     * money nobody has counted is not a shift waiting on a signature, it is one
+     * waiting on a count, and clearing it from the queue would hide exactly the
+     * thing somebody needs to chase.
+     */
+    if (!reconciliation) {
+      return res.status(409).json({
+        code: "NOT_COUNTED",
+        message:
+          "The takings for this shift have not been counted yet. A cashier or accountant " +
+          "confirms the money first; it cannot be approved on their behalf.",
       });
+    }
+
+    /**
+     * The supervisor's note is added, and nothing else. reconciledBy stays with
+     * whoever counted the cash, because that is the name the figure has to be
+     * answerable to.
+     */
+    if (comment) {
+      reconciliation.notes = [reconciliation.notes, `Supervisor: ${comment}`]
+        .filter(Boolean)
+        .join(" | ");
+      await reconciliation.save();
     }
 
     // Log activity

@@ -72,23 +72,23 @@ router.patch("/:id/restore", requireAuth, checkRole("manager", "supervisor"), re
 
 router.post("/:id/adjust-stock", requireAuth, checkRole("manager", "supervisor"), adjustStock);
 router.get("/:id/history", requireAuth, checkRole("manager", "supervisor", "accountant"), getProductHistory);
-router.get("/", requireAuth, checkRole("manager", "cashier"), getAllLubricants);
-router.post("/get-lubricant", requireAuth, checkRole("manager", "cashier"), getLubricantByBarcode);
+router.get("/", requireAuth, checkRole("manager", "supervisor", "cashier"), getAllLubricants);
+router.post("/get-lubricant", requireAuth, checkRole("manager", "supervisor", "cashier"), getLubricantByBarcode);
 
 // --- Lubricant sales ---
 // router.post("/sell-lubricant", requireAuth, checkRole("cashier"), addLubricantSale);
 router.post("/sell-lubricant-transaction", requireAuth, checkRole("manager", "cashier"), addLubricantTransaction);
-router.get("/lubricant-sales", requireAuth, checkRole("manager", "cashier"), getAllLubricantSales);
-router.get("/lubricant-sales/:id", requireAuth, checkRole("manager", "cashier"), getLubricantSaleById);
+router.get("/lubricant-sales", requireAuth, checkRole("manager", "supervisor", "cashier"), getAllLubricantSales);
+router.get("/lubricant-sales/:id", requireAuth, checkRole("manager", "supervisor", "cashier"), getLubricantSaleById);
 
 // --- Lubricant summaries ---
-router.get("/lubricant-weekly-summary", requireAuth, checkRole("manager", "cashier"), getWeeklyLubricantSummaryCalendarWeek);
-router.get("/lubricant-daily-summary", requireAuth, checkRole("manager", "cashier"), getDailyLubricantSummary);
-router.get("/lubricant-monthly-summary", requireAuth, checkRole("manager", "cashier"), getMonthlyLubricantSummary);
+router.get("/lubricant-weekly-summary", requireAuth, checkRole("manager", "supervisor", "cashier"), getWeeklyLubricantSummaryCalendarWeek);
+router.get("/lubricant-daily-summary", requireAuth, checkRole("manager", "supervisor", "cashier"), getDailyLubricantSummary);
+router.get("/lubricant-monthly-summary", requireAuth, checkRole("manager", "supervisor", "cashier"), getMonthlyLubricantSummary);
 
 // --- Transactions ---
-router.get("/transactions", requireAuth, checkRole("manager", "cashier"), getAllLubricantTransactions);
-router.get("/transactions/:id", requireAuth, checkRole("manager", "cashier"), getLubricantTransactionById);
+router.get("/transactions", requireAuth, checkRole("manager", "supervisor", "cashier"), getAllLubricantTransactions);
+router.get("/transactions/:id", requireAuth, checkRole("manager", "supervisor", "cashier"), getLubricantTransactionById);
 
 // --- Stock audit ---
 // Opening and closing stock, in units and in naira, with everything that moved
