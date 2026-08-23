@@ -34,6 +34,26 @@ export type TenderStatus = "submitted" | "confirmed" | "disputed";
 export type ShortfallStatus = "none" | "outstanding" | "paid" | "waived";
 
 /**
+ * Money coming back against a shortage.
+ *
+ * A shortage is rarely settled in one movement. An attendant short 4,000 pays
+ * 2,000 on Friday and the rest next week, and each of those is a separate
+ * handover with its own witness. Storing only a status would lose that: the
+ * debt would flip from "outstanding" to "paid" with nothing to show who took
+ * the money, when, or in how many pieces.
+ *
+ * So repayments accumulate as entries. `shortfall` never changes, because what
+ * the shift was missing is a fact; only what has come back against it moves.
+ */
+export interface IRepayment {
+  amount: number;
+  method: "cash" | "POS" | "transfer" | "deduction";
+  takenBy: mongoose.Types.ObjectId;
+  takenAt: Date;
+  note?: string;
+}
+
+/**
  * Whether the attendant has signed for the difference.
  *
  * The cashier's count is what is physically there, so it settles what the
@@ -85,6 +105,11 @@ export interface IShiftTender extends Document {
    */
   shortfall: number;
   shortfallStatus: ShortfallStatus;
+
+  /** Every payment made against this shortage, oldest first. */
+  repayments: IRepayment[];
+  /** The sum of them, kept so a ledger does not have to re-add it every read. */
+  repaidTotal: number;
 
   /** The attendant's own mark against the shortfall the cashier counted. */
   attendantAck: AckStatus;
@@ -144,6 +169,23 @@ const ShiftTenderSchema = new Schema<IShiftTender>(
     note: { type: String, trim: true, maxlength: 500 },
 
     shortfall: { type: Number, default: 0, min: 0 },
+    repayments: {
+      type: [
+        {
+          amount: { type: Number, required: true, min: 0 },
+          method: {
+            type: String,
+            enum: ["cash", "POS", "transfer", "deduction"],
+            default: "cash",
+          },
+          takenBy: { type: Schema.Types.ObjectId, ref: "Staff", required: true },
+          takenAt: { type: Date, default: Date.now },
+          note: { type: String, trim: true, maxlength: 300 },
+        },
+      ],
+      default: [],
+    },
+    repaidTotal: { type: Number, default: 0, min: 0 },
     attendantAck: {
       type: String,
       enum: ["not_required", "pending", "accepted", "disputed"],

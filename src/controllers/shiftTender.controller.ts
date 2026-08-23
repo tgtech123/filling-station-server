@@ -144,14 +144,27 @@ export const declareTender = async (req: AuthenticatedRequest, res: Response) =>
 
     /**
      * Re-declaring corrects the earlier attempt rather than adding to it, and
-     * only while the cashier has not already confirmed. Once confirmed the
-     * money has changed hands and the record is evidence.
+     * only until the cashier has counted.
+     *
+     * The cut-off is the COUNT, not the confirmation. Once a cashier has held
+     * the notes there is a second account of the same money on this record, and
+     * letting the attendant rewrite their half afterwards would leave the two
+     * halves describing different events: a declaration edited to match a count
+     * it never agreed with, with nothing left to show they ever differed. That
+     * is the exact evidence the record exists to keep.
+     *
+     * Before the count, correcting your own figures is just fixing a mistake,
+     * and it is allowed freely.
      */
     const existing = await ShiftTender.findOne({ shift: shift._id });
-    if (existing && existing.status === "confirmed") {
+    if (existing?.received) {
       return res.status(409).json({
-        error: "This shift has already been confirmed by the cashier. Ask a manager to reopen it.",
-        code: "ALREADY_CONFIRMED",
+        error:
+          "The cashier has already counted this shift, so it can no longer be edited here. " +
+          "If the figures are wrong, ask a manager or supervisor to reopen it.",
+        code: "ALREADY_COUNTED",
+        declaredTotal: existing.declaredTotal,
+        receivedTotal: existing.receivedTotal,
       });
     }
 
@@ -280,8 +293,31 @@ export const confirmTender = async (req: AuthenticatedRequest, res: Response) =>
       .populate("attendant", "firstName lastName");
     if (!doc) return res.status(404).json({ error: "Takings not found" });
 
-    if (doc.status === "confirmed") {
-      return res.status(409).json({ error: "These takings have already been confirmed." });
+    /**
+     * Counted once. A second count goes through a reopen, not through here.
+     *
+     * Only "confirmed" used to be blocked, which left a DISPUTED shift open to
+     * being counted again. Typing a different number into it silently restated
+     * what that shift took and recalculated the shortage, with no record that
+     * the first count had ever said something else. It also looked, to whoever
+     * did it, like a way to clear a debt: it is not, and the shortage simply
+     * reappeared.
+     *
+     * Repaying a shortage is a different action entirely and has its own route.
+     */
+    if (doc.received) {
+      return res.status(409).json({
+        code: "ALREADY_COUNTED",
+        error:
+          doc.shortfall > 0
+            ? "This shift has already been counted and is short by " +
+              doc.shortfall.toLocaleString() +
+              ". To record money the attendant is paying back, use Record repayment on the " +
+              "shortage. To correct the count itself, ask a manager to reopen it."
+            : "These takings have already been counted. Ask a manager to reopen the shift to count it again.",
+        shortfall: doc.shortfall,
+        countedAt: doc.confirmedAt,
+      });
     }
 
     const counted = received ? cleanSplit(received) : { ...doc.declared };
@@ -300,7 +336,33 @@ export const confirmTender = async (req: AuthenticatedRequest, res: Response) =>
      * would call that a clean shift, which is precisely the hole this closes.
      */
     const shortfall = Math.max(0, round2(doc.expectedAmount - receivedTotal));
-    const matched = shortfall <= TOLERANCE && Math.abs(receivedVariance) <= TOLERANCE;
+
+    /**
+     * More money than the meter accounts for. Not a debt, and not the
+     * attendant's to keep either, so it is flagged rather than ignored.
+     */
+    const overage = Math.max(0, round2(receivedTotal - doc.expectedAmount));
+
+    /**
+     * The attendant wrote down more than they handed over. The one outcome
+     * here that is a statement rather than an arithmetic slip.
+     */
+    const overDeclared = receivedVariance < -TOLERANCE;
+
+    /**
+     * The attendant UNDER-declared and the cashier found the full amount.
+     *
+     * An attendant miscounts their own cash, writes 9,000 on a 10,000 shift,
+     * and the cashier counts the notes and finds all 10,000 there. Nothing is
+     * missing and nobody has done anything wrong: the declaration was simply
+     * wrong and the count corrected it, which is exactly what a second pair of
+     * hands is for. Calling that "disputed" and alerting a manager punishes the
+     * process for working, so it is recorded as a correction and confirmed.
+     */
+    const correctedUp = receivedVariance > TOLERANCE && shortfall <= TOLERANCE && overage <= TOLERANCE;
+
+    // Clean when the meter is satisfied and nothing was overclaimed.
+    const matched = shortfall <= TOLERANCE && !overDeclared && overage <= TOLERANCE;
 
     doc.received = counted;
     doc.receivedTotal = receivedTotal;
@@ -351,24 +413,18 @@ export const confirmTender = async (req: AuthenticatedRequest, res: Response) =>
         .filter(Boolean)
         .join(" ") || "An attendant";
 
-    /**
-     * Declared more than was handed over.
-     *
-     * A different event from an honest short shift, and a different
-     * conversation. "The shift was short and they said so" is a cash problem.
-     * "They wrote down money that was not in the envelope" is a statement that
-     * turned out to be untrue, and it must not be filed under the same heading.
-     */
-    const overDeclared = receivedVariance < -TOLERANCE;
-
     Activity.create({
       ...actorFrom(req.user),
       fillingStation,
       type: "sale",
-      title: matched
+      title: correctedUp
+        ? "Shift takings corrected by the cashier"
+        : matched
         ? "Shift takings confirmed"
         : overDeclared
         ? "Declared more than was handed over"
+        : overage > TOLERANCE
+        ? "More handed over than the meter shows"
         : "Shift takings short",
       description: !matched
         ? who + ": declared " + doc.declaredTotal.toLocaleString() +
@@ -394,7 +450,7 @@ export const confirmTender = async (req: AuthenticatedRequest, res: Response) =>
     });
     emitToStation(String(fillingStation), "dashboard:refresh", { reason: "tender_confirmed" });
 
-    if (!matched) {
+    if (!matched || overage > TOLERANCE) {
       notifyStation(fillingStation, {
         type: "alert",
         category: "cash_reconciliation",
@@ -402,6 +458,8 @@ export const confirmTender = async (req: AuthenticatedRequest, res: Response) =>
           ? "Declared more than was handed over"
           : doc.shortfall > 0
           ? "Shift takings short"
+          : overage > TOLERANCE
+          ? "More handed over than the meter shows"
           : "Shift takings do not match",
         body:
           who + ": " + doc.expectedAmount.toLocaleString() + " expected, " +
@@ -421,7 +479,10 @@ export const confirmTender = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     return res.status(200).json({
-      message: matched
+      message: correctedUp
+        ? `Confirmed. ${who} declared ${doc.declaredTotal.toLocaleString()}, you counted ` +
+          `${receivedTotal.toLocaleString()}, and that matches the meter. Nothing is owed.`
+        : matched
         ? "Takings confirmed."
         : overDeclared
         ? `Counted ${receivedTotal.toLocaleString()} against ${doc.declaredTotal.toLocaleString()} declared. ` +
@@ -433,6 +494,8 @@ export const confirmTender = async (req: AuthenticatedRequest, res: Response) =>
         : "Confirmed with a difference. The manager has been told.",
       matched,
       overDeclared,
+      correctedUp,
+      overage,
       shortfall: doc.shortfall,
       shortfallStatus: doc.shortfallStatus,
       awaitingAttendant: doc.attendantAck === "pending",
@@ -455,13 +518,28 @@ export const auditTenders = async (req: AuthenticatedRequest, res: Response) => 
     const fillingStation = req.user?.station;
     if (!fillingStation) return res.status(403).json({ error: "Not authorized" });
 
-    const { attendant, from, to, status } = req.query as Record<string, string>;
+    const { attendant, from, to, status, confirmedBy, outcome, mine } =
+      req.query as Record<string, string>;
 
     const query: Record<string, unknown> = {
       fillingStation: new Types.ObjectId(String(fillingStation)),
     };
     if (attendant) query.attendant = new Types.ObjectId(attendant);
     if (status) query.status = status;
+
+    /**
+     * Whose signature is on it.
+     *
+     * A cashier's first question about this list is "what did I sign for",
+     * which is a different list from everything the station confirmed. `mine`
+     * resolves against the session so the caller cannot ask for somebody else's
+     * name by passing an id.
+     */
+    if (mine === "true" && req.user?.id) {
+      query.confirmedBy = new Types.ObjectId(String(req.user.id));
+    } else if (confirmedBy) {
+      query.confirmedBy = new Types.ObjectId(confirmedBy);
+    }
 
     if (from || to) {
       const range: Record<string, Date> = {};
@@ -474,13 +552,58 @@ export const auditTenders = async (req: AuthenticatedRequest, res: Response) => 
       query.declaredAt = range;
     }
 
-    const rows = await ShiftTender.find(query)
+    const found = await ShiftTender.find(query)
       .populate("attendant", "firstName lastName role")
       .populate("confirmedBy", "firstName lastName role")
-      .populate("shift", "pumpTitle product litresSold pricePerLtr shiftDate")
+      .populate("shift", "pumpTitle product litresSold pricePerLtr shiftDate shiftType")
       .sort({ declaredAt: -1 })
       .limit(500)
       .lean();
+
+    /**
+     * How each one turned out, decided here rather than in the browser.
+     *
+     * The same four cases the confirmation itself distinguishes, so a row can
+     * never be labelled one way on this screen and another way in the record it
+     * came from:
+     *
+     *   matched    the count met the meter
+     *   corrected  the count met the meter but disagreed with the declaration,
+     *              which means the cashier caught a miscount. Still clean.
+     *   short      less reached the till than the meter says was sold
+     *   over       more did, which is unexplained rather than welcome
+     *   awaiting   nobody has counted it yet
+     */
+    const classify = (r: any) => {
+      if (!r.received) return "awaiting";
+      const receivedTotal = Number(r.receivedTotal) || 0;
+      const expected = Number(r.expectedAmount) || 0;
+      const shortfall = Math.max(0, round2(expected - receivedTotal));
+      const overage = Math.max(0, round2(receivedTotal - expected));
+      if (shortfall > TOLERANCE) return "short";
+      if (overage > TOLERANCE) return "over";
+      const declared = Number(r.declaredTotal) || 0;
+      if (Math.abs(round2(receivedTotal - declared)) > TOLERANCE) return "corrected";
+      return "matched";
+    };
+
+    const withOutcome = found.map((r: any) => ({
+      ...r,
+      outcome: classify(r),
+      overage: r.received
+        ? Math.max(0, round2((Number(r.receivedTotal) || 0) - (Number(r.expectedAmount) || 0)))
+        : 0,
+    }));
+
+    // "corrected" is a clean outcome, so asking for correct ones returns both.
+    const rows =
+      outcome && outcome !== "all"
+        ? withOutcome.filter((r) =>
+            outcome === "matched"
+              ? r.outcome === "matched" || r.outcome === "corrected"
+              : r.outcome === outcome
+          )
+        : withOutcome;
 
     /**
      * Totals over whatever was asked for, by tender, and by product.
@@ -539,6 +662,18 @@ export const auditTenders = async (req: AuthenticatedRequest, res: Response) => 
           shortfall: round2(totals.shortfall),
           outstanding: round2(totals.outstanding),
         },
+        /**
+         * How many of each. Counted over everything the filters matched, so the
+         * tab labels stay honest whichever tab is open.
+         */
+        outcomes: withOutcome.reduce(
+          (acc: Record<string, number>, r: any) => {
+            acc[r.outcome] = (acc[r.outcome] || 0) + 1;
+            acc.overageTotal = round2((acc.overageTotal || 0) + (r.overage || 0));
+            return acc;
+          },
+          { matched: 0, corrected: 0, short: 0, over: 0, awaiting: 0, overageTotal: 0 }
+        ),
         byProduct: Object.values(byProduct)
           .map((p: any) => ({
             ...p,
@@ -620,8 +755,11 @@ export const listShortfalls = async (req: AuthenticatedRequest, res: Response) =
       }
       const a = byAttendant.get(id);
       const amount = Number(r.shortfall) || 0;
-      if (r.shortfallStatus === "outstanding") a.outstanding += amount;
-      else if (r.shortfallStatus === "paid") a.paid += amount;
+      const repaid = Number(r.repaidTotal) || 0;
+      if (r.shortfallStatus === "outstanding") {
+        a.outstanding += Math.max(0, amount - repaid);
+        a.paid += repaid; // part payments are money that has genuinely come back
+      } else if (r.shortfallStatus === "paid") a.paid += amount;
       else if (r.shortfallStatus === "waived") a.waived += amount;
       a.shifts += 1;
     }
@@ -682,6 +820,21 @@ export const settleShortfall = async (req: AuthenticatedRequest, res: Response) 
     if (!doc) return res.status(404).json({ error: "Takings not found" });
     if (!doc.shortfall || doc.shortfall <= 0) {
       return res.status(409).json({ error: "This shift is not short of anything." });
+    }
+
+    /**
+     * Writing off a debt that has already been partly repaid would leave the
+     * repayment entries pointing at a shortage nobody owes, and the money that
+     * came back unaccounted for. Reverse the payments first, deliberately.
+     */
+    if (action === "waived" && (doc.repaidTotal || 0) > 0) {
+      return res.status(409).json({
+        code: "ALREADY_REPAID",
+        error:
+          doc.repaidTotal.toLocaleString() +
+          " has already been paid back against this shortage. Reverse those payments before writing off the rest.",
+        repaidTotal: doc.repaidTotal,
+      });
     }
 
     doc.shortfallStatus = action as any;
@@ -935,6 +1088,360 @@ export const awaitingDeclaration = async (req: AuthenticatedRequest, res: Respon
     }
 
     return res.status(200).json({ data: rows });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+/**
+ * PATCH /api/shift-tender/:id/reopen
+ *
+ * Put a counted shift back so the attendant can declare it again.
+ *
+ * Both parties can be wrong at once: an attendant miscounts, a cashier counts
+ * in a hurry, a transfer alert lands an hour late. Without a way back, the only
+ * options are to leave a wrong figure standing or to edit the database, and a
+ * system whose corrections happen outside itself has no audit trail worth the
+ * name.
+ *
+ * The previous figures are written into the note before they are cleared, so
+ * reopening adds to the history rather than erasing it. A shortage that has
+ * already been repaid is NOT reopened here: that is money that changed hands,
+ * and unwinding it belongs to the accountant on the shortage ledger.
+ */
+export const reopenTender = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) return res.status(403).json({ error: "Not authorized" });
+
+    const { reason } = req.body as { reason?: string };
+    if (!String(reason || "").trim()) {
+      return res.status(400).json({
+        code: "REASON_REQUIRED",
+        error: "Say why this is being reopened. It stays on the record with your name against it.",
+      });
+    }
+
+    const doc = await ShiftTender.findOne({ _id: req.params.id, fillingStation })
+      .populate("attendant", "firstName lastName");
+    if (!doc) return res.status(404).json({ error: "Takings not found" });
+    if (!doc.received) {
+      return res.status(409).json({
+        error: "Nothing to reopen. The cashier has not counted this shift yet.",
+      });
+    }
+    if (doc.shortfallStatus === "paid") {
+      return res.status(409).json({
+        error:
+          "This shortage has already been repaid. Unwinding money that changed hands is for " +
+          "the accountant to do on the shortage ledger, not here.",
+        code: "ALREADY_SETTLED",
+      });
+    }
+
+    const by =
+      [req.user?.firstName, req.user?.lastName].filter(Boolean).join(" ") || "A manager";
+
+    /**
+     * The figures being undone, kept in writing. A reopen that leaves no trace
+     * of what it replaced is indistinguishable from tampering.
+     */
+    const history =
+      `[Reopened ${new Date().toLocaleString("en-GB")} by ${by}: was ` +
+      `declared ${doc.declaredTotal.toLocaleString()}, counted ${(doc.receivedTotal ?? 0).toLocaleString()}` +
+      (doc.shortfall > 0 ? `, short ${doc.shortfall.toLocaleString()}` : "") +
+      `. Reason: ${String(reason).trim()}]`;
+
+    doc.note = [doc.note, history].filter(Boolean).join(" ");
+    doc.received = undefined;
+    doc.receivedTotal = undefined;
+    doc.receivedVariance = undefined;
+    doc.status = "submitted";
+    doc.confirmedBy = null;
+    doc.confirmedAt = null;
+    doc.shortfall = 0;
+    doc.shortfallStatus = "none";
+    doc.shortfallPaidAt = null;
+    doc.shortfallPaidBy = null;
+    doc.attendantAck = "not_required";
+    doc.attendantAckAt = null;
+    doc.attendantAckNote = undefined;
+    await doc.save();
+
+    const who =
+      [(doc.attendant as any)?.firstName, (doc.attendant as any)?.lastName]
+        .filter(Boolean)
+        .join(" ") || "An attendant";
+
+    Activity.create({
+      ...actorFrom(req.user),
+      fillingStation,
+      type: "sale",
+      title: "Shift takings reopened",
+      description: `${who}: ${history}`,
+      timestamp: new Date(),
+      severity: "warning",
+    }).catch(() => {});
+
+    notifyStation(fillingStation, {
+      type: "message",
+      category: "cash_reconciliation",
+      title: "Shift takings reopened",
+      body: `${by} reopened ${who}'s shift for correction. Reason: ${String(reason).trim()}`,
+      severity: "info",
+      targetRole: "cashier",
+      expiresInDays: 1,
+    });
+
+    emitToStation(String(fillingStation), "tender:declared", {
+      shiftId: String(doc.shift),
+      reopened: true,
+    });
+
+    return res.status(200).json({
+      message: `Reopened. ${who} can submit their takings again and the cashier will recount.`,
+      data: doc,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+/**
+ * GET /api/shift-tender/my-history?limit=
+ *
+ * The attendant's settled shifts: what the meter read, what was sold, how it
+ * was paid, and who signed for it.
+ *
+ * Only CONFIRMED shifts appear here. A shift is confirmed once the count meets
+ * the meter, so this is the record of takings that closed cleanly, including
+ * ones where the cashier corrected an under-declaration. Shifts that came up
+ * short stay on the shortage card until they are settled, which keeps the two
+ * questions apart: "what have I handed in" and "what do I still owe". Between
+ * them nothing is hidden.
+ *
+ * Their own shifts only, scoped by the session rather than by a parameter.
+ */
+export const myTenderHistory = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    const staffId = req.user?.id;
+    if (!fillingStation || !staffId) return res.status(403).json({ error: "Not authorized" });
+
+    const limit = Math.min(Number(req.query.limit) || 30, 100);
+
+    const rows = await ShiftTender.find({
+      fillingStation: new Types.ObjectId(String(fillingStation)),
+      attendant: new Types.ObjectId(String(staffId)),
+      status: "confirmed",
+    })
+      .populate("shift", "pumpTitle product shiftType shiftDate openingMeterReading closingMeterReading litresSold pricePerLtr totalAmount")
+      .populate("confirmedBy", "firstName lastName role")
+      .sort({ confirmedAt: -1 })
+      .limit(limit)
+      .lean();
+
+    /**
+     * Flattened here rather than left for the client to dig out of two nested
+     * documents. The meter readings and the tender split are one story, and a
+     * screen that has to reach through `row.shift.x` and `row.received.y` to
+     * tell it invites the two halves to drift apart.
+     */
+    const history = rows.map((r: any) => {
+      const s = r.shift || {};
+      const t = r.received || r.declared || {};
+      return {
+        id: String(r._id),
+        pumpTitle: s.pumpTitle || null,
+        product: r.product || s.product || null,
+        shiftType: s.shiftType || null,
+        shiftDate: s.shiftDate || r.declaredAt,
+
+        openingMeterReading: s.openingMeterReading ?? null,
+        closingMeterReading: s.closingMeterReading ?? null,
+        litresSold: s.litresSold ?? 0,
+        pricePerLtr: s.pricePerLtr ?? 0,
+
+        // What the shift owed after any loyalty fuel, which is the figure the
+        // tender was actually checked against.
+        expectedAmount: round2(Number(r.expectedAmount) || 0),
+        totalAmount: round2(Number(s.totalAmount) || 0),
+
+        cash: round2(Number(t.cash) || 0),
+        POS: round2(Number(t.POS) || 0),
+        transfer: round2(Number(t.transfer) || 0),
+        total: round2(Number(r.receivedTotal ?? r.declaredTotal) || 0),
+
+        declaredTotal: round2(Number(r.declaredTotal) || 0),
+        // True when the cashier's count corrected an under-declaration. Worth
+        // showing: it is the attendant's own evidence that it came out right.
+        correctedByCashier:
+          Math.abs((Number(r.receivedTotal) || 0) - (Number(r.declaredTotal) || 0)) > TOLERANCE,
+
+        confirmedBy:
+          [r.confirmedBy?.firstName, r.confirmedBy?.lastName].filter(Boolean).join(" ") || "Cashier",
+        confirmedByRole: r.confirmedBy?.role || null,
+        confirmedAt: r.confirmedAt,
+
+        posReference: r.posReference || null,
+        transferReference: r.transferReference || null,
+      };
+    });
+
+    const totals = history.reduce(
+      (acc, h) => {
+        acc.cash += h.cash;
+        acc.POS += h.POS;
+        acc.transfer += h.transfer;
+        acc.total += h.total;
+        acc.litres += Number(h.litresSold) || 0;
+        return acc;
+      },
+      { cash: 0, POS: 0, transfer: 0, total: 0, litres: 0 }
+    );
+
+    return res.status(200).json({
+      data: {
+        history,
+        totals: {
+          cash: round2(totals.cash),
+          POS: round2(totals.POS),
+          transfer: round2(totals.transfer),
+          total: round2(totals.total),
+          litres: round2(totals.litres),
+          shifts: history.length,
+        },
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Server error" });
+  }
+};
+
+/**
+ * POST /api/shift-tender/:id/repay
+ *
+ * Record money coming back against a shortage.
+ *
+ * This is the path that was missing. A shortage is settled by the attendant
+ * handing cash to whoever is on the till, which is the CASHIER, but the only
+ * way to close one was an accountant's entry on a ledger screen. With nowhere
+ * to put it, a cashier who took the money had two bad options: leave the debt
+ * standing, or type a bigger number into the shift's count box, which does not
+ * touch the debt at all and quietly restates what that shift took.
+ *
+ * Taking money in is cash handling and belongs to the cashier. FORGIVING a
+ * debt, where no money moves, stays with the accountant: that is a decision
+ * about the books rather than a handover, and the two must not share a button.
+ *
+ * Partial payments are normal and are kept as separate entries, each with the
+ * name of whoever took it.
+ */
+export const repayShortfall = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const fillingStation = req.user?.station;
+    if (!fillingStation) return res.status(403).json({ error: "Not authorized" });
+
+    const { amount, method = "cash", note } = req.body as {
+      amount?: number; method?: string; note?: string;
+    };
+
+    const paid = round2(Number(amount) || 0);
+    if (paid <= 0) return res.status(400).json({ error: "Enter the amount you were handed." });
+
+    const doc = await ShiftTender.findOne({ _id: req.params.id, fillingStation })
+      .populate("attendant", "firstName lastName");
+    if (!doc) return res.status(404).json({ error: "Takings not found" });
+
+    if (!doc.shortfall || doc.shortfall <= 0) {
+      return res.status(409).json({ error: "This shift is not short of anything." });
+    }
+    if (doc.shortfallStatus === "waived") {
+      return res.status(409).json({
+        error: "This shortage was written off. Ask the accountant to reopen it before taking money against it.",
+        code: "ALREADY_WAIVED",
+      });
+    }
+
+    const owed = round2(doc.shortfall - (doc.repaidTotal || 0));
+    if (owed <= TOLERANCE) {
+      return res.status(409).json({ error: "This shortage has already been settled in full." });
+    }
+
+    /**
+     * Never take more than is owed.
+     *
+     * An overpayment is not a smaller debt, it is money the station now holds
+     * that belongs to somebody. Silently absorbing it would turn a clear
+     * shortage record into an unexplained credit nobody is tracking.
+     */
+    if (paid - owed > TOLERANCE) {
+      return res.status(400).json({
+        code: "MORE_THAN_OWED",
+        error:
+          `Only ${owed.toLocaleString()} is still owed on this shift. ` +
+          `Take ${owed.toLocaleString()} against it and handle anything extra separately.`,
+        owed,
+      });
+    }
+
+    doc.repayments.push({
+      amount: paid,
+      method: (["cash", "POS", "transfer", "deduction"].includes(String(method))
+        ? method
+        : "cash") as any,
+      takenBy: new Types.ObjectId(String(req.user?.id)),
+      takenAt: new Date(),
+      note: String(note || "").trim() || undefined,
+    } as any);
+
+    doc.repaidTotal = round2((doc.repaidTotal || 0) + paid);
+
+    const settled = doc.shortfall - doc.repaidTotal <= TOLERANCE;
+    if (settled) {
+      doc.shortfallStatus = "paid";
+      doc.shortfallPaidAt = new Date();
+      doc.shortfallPaidBy = new Types.ObjectId(String(req.user?.id));
+    }
+    await doc.save();
+
+    const who =
+      [(doc.attendant as any)?.firstName, (doc.attendant as any)?.lastName]
+        .filter(Boolean)
+        .join(" ") || "An attendant";
+    const stillOwed = round2(Math.max(0, doc.shortfall - doc.repaidTotal));
+
+    Activity.create({
+      ...actorFrom(req.user),
+      fillingStation,
+      type: "sale",
+      title: settled ? "Shortage settled" : "Part payment against a shortage",
+      description:
+        `${who}: ${paid.toLocaleString()} taken by ${method}` +
+        (settled
+          ? `. Shortage of ${doc.shortfall.toLocaleString()} now settled in full.`
+          : `. ${stillOwed.toLocaleString()} of ${doc.shortfall.toLocaleString()} still owing.`),
+      timestamp: new Date(),
+      severity: null,
+    }).catch(() => {});
+
+    // The accountant's ledger, the cashier's list and the attendant's own card
+    // are all showing this figure right now.
+    emitToStation(String(fillingStation), "tender:confirmed", {
+      id: String(doc._id),
+      repaid: paid,
+      stillOwed,
+    });
+
+    return res.status(200).json({
+      message: settled
+        ? `${paid.toLocaleString()} received. ${who} has now settled the full ${doc.shortfall.toLocaleString()}.`
+        : `${paid.toLocaleString()} received. ${who} still owes ${stillOwed.toLocaleString()}.`,
+      settled,
+      repaidTotal: doc.repaidTotal,
+      stillOwed,
+      data: doc,
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Server error" });
   }
