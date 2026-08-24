@@ -802,11 +802,24 @@ export const addLubricantSale = async (req: AuthenticatedRequest, res: Response)
 
       const { cash = 0, transfer = 0, POS = 0 } = paymentBreakdown;
 
-      const sum = cash + transfer + POS;
-
-      if (sum !== priceSold) {
+      if (cash < 0 || transfer < 0 || POS < 0) {
         return res.status(400).json({
-          error: `Payment breakdown total (${sum}) must equal priceSold (${priceSold})`
+          code: "NEGATIVE_TENDER",
+          error: "Payment amounts cannot be negative.",
+        });
+      }
+
+      const sum = Math.round((cash + transfer + POS) * 100) / 100;
+      const expected = Math.round(priceSold * 100) / 100;
+
+      if (Math.abs(sum - expected) > 0.5) {
+        return res.status(400).json({
+          code: "BREAKDOWN_MISMATCH",
+          error:
+            `The payment split adds up to ${sum.toLocaleString()} but this sale comes to ` +
+            `${expected.toLocaleString()}. Check the amounts and try again.`,
+          declared: sum,
+          expected,
         });
       }
     }
@@ -1378,7 +1391,9 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
   try {
     const staffId = req.user?.id;
     const fillingStation = req.user?.station;
-    const { items, paymentMethod, paymentBreakdown, idempotencyKey } = req.body;
+    const { items, paymentMethod, idempotencyKey } = req.body;
+    // Reassigned once validated, so the normalised split is what gets stored.
+    let paymentBreakdown = req.body.paymentBreakdown;
 
     // ðŸ”’ Check authorization
     if (!fillingStation) {
@@ -1735,6 +1750,71 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
       totalAmount += amount;
     }
 
+    /**
+     * A mixed payment must add up to what is actually being sold.
+     *
+     * This was checked on the single-item route and not here, on the basket
+     * route the till actually uses, so a breakdown could name any figure at all
+     * and be written down beside a completely different total.
+     *
+     * That is not a cosmetic mismatch. `paymentBreakdown` is what apportions a
+     * sale into cash, POS and transfer for every reconciliation downstream, so
+     * a 24,000 split saved against a 1,000 sale puts 23,000 of imaginary money
+     * into the day's cash position, and the drawer can never be made to agree
+     * with it again.
+     *
+     * The real case: a carton is selected, the mix is entered against the
+     * carton price, the carton turns out to be out of stock, the line is
+     * switched to pieces, and the mix is left untouched. The total changes
+     * underneath it and nothing objects.
+     *
+     * Checked against the SERVER's total, never the client's, and after the
+     * items have been priced from the catalogue.
+     */
+    if (paymentMethod === "mixed") {
+      if (!paymentBreakdown) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          code: "BREAKDOWN_REQUIRED",
+          error: "A mixed payment needs the split across cash, POS and transfer.",
+        });
+      }
+
+      const cash = Number(paymentBreakdown.cash) || 0;
+      const pos = Number(paymentBreakdown.POS ?? paymentBreakdown.pos) || 0;
+      const transfer = Number(paymentBreakdown.transfer) || 0;
+
+      if (cash < 0 || pos < 0 || transfer < 0) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          code: "NEGATIVE_TENDER",
+          error: "Payment amounts cannot be negative.",
+        });
+      }
+
+      const declared = Math.round((cash + pos + transfer) * 100) / 100;
+      const expected = Math.round(totalAmount * 100) / 100;
+
+      // Kobo-level noise from unit maths is arithmetic, not a mismatch.
+      if (Math.abs(declared - expected) > 0.5) {
+        await session.abortTransaction();
+        const over = declared > expected;
+        return res.status(400).json({
+          code: "BREAKDOWN_MISMATCH",
+          error:
+            `The payment split adds up to ${declared.toLocaleString()} but this sale comes to ` +
+            `${expected.toLocaleString()}. That is ${Math.abs(declared - expected).toLocaleString()} ` +
+            `${over ? "more than" : "short of"} the total. Check the amounts and try again.`,
+          declared,
+          expected,
+          difference: Math.round((declared - expected) * 100) / 100,
+        });
+      }
+
+      // Stored normalised, so "pos" and "POS" cannot become two buckets.
+      paymentBreakdown = { cash, POS: pos, transfer };
+    }
+
     // ðŸ§¾ Create the transaction
     const transaction = await LubricantTransaction.create(
       [
@@ -1837,10 +1917,32 @@ export const getAllLubricantTransactions = async (req: AuthenticatedRequest, res
       return res.status(403).json({ error: "You are not authorized to perform this action" });
     }
 
+    /**
+     * Whose sales come back.
+     *
+     * This matched on the station alone, so any cashier could list and reprint
+     * every other cashier's receipts. Reprinting is read-only and no money
+     * moves, but a receipt carries what a customer bought and what they paid,
+     * and there is no reason for the person on the next till to hold that by
+     * default.
+     *
+     * It cannot simply be locked to the signed-in user either. A customer comes
+     * back on Tuesday about a sale rung up by somebody who is off that day, and
+     * a till that cannot find it is useless at the counter.
+     *
+     * So: a cashier gets their OWN sales unless they deliberately ask for the
+     * station's, and rows they did not ring up carry the name of whoever did.
+     * Roles that answer for the whole station see everything as before.
+     */
+    const scope = String((req.query as any).scope || "").toLowerCase();
+    const role = String(req.user?.role || "").toLowerCase();
+    const scopeToSelf = role === "cashier" && scope !== "station" && req.user?.id;
+
     const transactions = await LubricantTransaction.aggregate([
       {
         $match: {
           fillingStation: new Types.ObjectId(fillingStation),
+          ...(scopeToSelf ? { staff: new Types.ObjectId(String(req.user?.id)) } : {}),
         },
       },
       {
