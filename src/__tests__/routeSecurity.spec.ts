@@ -67,6 +67,8 @@ const PROTECTED = [
   ["post", "/api/pump/update-prices"],
   ["get", "/api/manager/activity-logs"],
   ["get", "/api/admin/stations"],
+  ["get", "/api/demo/bookings"],
+  ["patch", "/api/demo/bookings/000000000000000000000000"],
   ["put", "/api/register/000000000000000000000000"],
   ["delete", "/api/register/000000000000000000000000"],
 ] as const;
@@ -114,6 +116,28 @@ describe("the admin panel is closed to station roles", () => {
       expect(res.status).toBe(403);
     }
   );
+});
+
+describe("the demo booking calendar is public, its admin side is not", () => {
+  // The booking endpoints are deliberately open — a prospect has no account,
+  // which is the entire point of the page. What must NOT be open is the list of
+  // everyone who booked one: names, emails and phone numbers of every lead.
+  it.each(["manager", "cashier", "attendant", "supervisor", "accountant"])(
+    "%s cannot read the demo booking list",
+    async (role) => {
+      const res = await request(app)
+        .get("/api/demo/bookings")
+        .set("Authorization", `Bearer ${tokenFor(role)}`);
+      expect(res.status).toBe(403);
+    }
+  );
+
+  it("availability is reachable without a token", async () => {
+    // Reads no database — a malformed date is rejected by the validator first,
+    // which is enough to prove the route is not behind the auth gate.
+    const res = await request(app).get("/api/demo/availability?date=not-a-date");
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("a forged or malformed token is refused", () => {

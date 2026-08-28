@@ -46,3 +46,19 @@ export function joinButton(link: string, provider: string): string {
     </div>
     <p style="font-size:13px; color:#666; text-align:center; word-break:break-all;">${escapeHtml(link)}</p>`;
 }
+
+/**
+ * "1 hour 30 minutes", not "90 minutes".
+ *
+ * Nobody books ninety minutes of their Saturday; they book an hour and a half.
+ * Minutes past sixty are for the config file, not for the person reading the
+ * invitation.
+ */
+export function formatDuration(minutes: number): string {
+  const mins = Number(minutes) || 0;
+  const hours = Math.floor(mins / 60);
+  const rest = mins % 60;
+  if (!hours) return `${rest} minutes`;
+  const hourPart = `${hours} hour${hours > 1 ? "s" : ""}`;
+  return rest ? `${hourPart} ${rest} minutes` : hourPart;
+}

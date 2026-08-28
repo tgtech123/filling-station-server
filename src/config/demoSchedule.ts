@@ -37,30 +37,87 @@ function listFromEnv(name: string, fallback: string[]): string[] {
 export const DEMO_TZ_OFFSET_MINUTES = intFromEnv("DEMO_TZ_OFFSET_MINUTES", 60);
 export const DEMO_TZ_LABEL = process.env.DEMO_TZ_LABEL || "WAT (GMT+1)";
 
-/** How long one demo runs, in minutes. */
-export const DEMO_DURATION_MINUTES = intFromEnv("DEMO_DURATION_MINUTES", 45);
-
 /** A slot must be at least this far in the future to be bookable. */
 export const DEMO_LEAD_TIME_MINUTES = intFromEnv("DEMO_LEAD_TIME_MINUTES", 120);
 
 /** How far ahead the calendar opens. */
 export const DEMO_MAX_DAYS_AHEAD = intFromEnv("DEMO_MAX_DAYS_AHEAD", 45);
 
-/** Days the team takes demos on. 0 = Sunday … 6 = Saturday. Default Mon–Fri. */
-export const DEMO_WORK_DAYS: number[] = listFromEnv("DEMO_WORK_DAYS", ["1", "2", "3", "4", "5"])
+/** Days the team takes demos on. 0 = Sunday … 6 = Saturday. Default Mon–Sat. */
+export const DEMO_WORK_DAYS: number[] = listFromEnv("DEMO_WORK_DAYS", ["1", "2", "3", "4", "5", "6"])
   .map((d) => Number(d))
   .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
 
-/** Start times, business local, 24h "HH:mm". The 13:00 gap is lunch. */
-export const DEMO_SLOT_TIMES: string[] = listFromEnv("DEMO_SLOT_TIMES", [
-  "09:00",
-  "10:00",
-  "11:00",
-  "12:00",
-  "14:00",
-  "15:00",
-  "16:00",
-]).filter((t) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(t));
+const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/**
+ * What a given kind of day looks like: when demos start, and how long one runs.
+ *
+ * Two bands rather than one flat list, because a weekday demo and a Saturday
+ * demo are not the same appointment. A weekday slot is an hour squeezed between
+ * other work; Saturday is when an owner can actually sit down with their
+ * manager, so it gets ninety minutes and a later, shorter window.
+ *
+ * Duration lives HERE rather than as one global, because it is what decides
+ * when a slot ends — and a 90-minute Saturday booking stored against a
+ * 60-minute global would put the wrong end time in the customer's calendar.
+ */
+export interface DemoDaySchedule {
+  times: string[];
+  durationMinutes: number;
+}
+
+/** Mon–Fri: hourly, so back-to-back hours fit exactly. The 13:00 gap is lunch. */
+export const DEMO_WEEKDAY_SCHEDULE: DemoDaySchedule = {
+  times: listFromEnv("DEMO_WEEKDAY_SLOT_TIMES", [
+    "09:00",
+    "10:00",
+    "11:00",
+    "12:00",
+    "14:00",
+    "15:00",
+    "16:00",
+  ]).filter((t) => TIME_PATTERN.test(t)),
+  durationMinutes: intFromEnv("DEMO_WEEKDAY_DURATION_MINUTES", 60),
+};
+
+/**
+ * Saturday: from midday, ninety minutes each.
+ *
+ * Three starts fill the stated 12:00–16:00 window; the last one runs to 16:30.
+ * Drop "15:00" from DEMO_SATURDAY_SLOT_TIMES to have everything wrapped up by
+ * 15:00 instead — it is one environment variable, no deploy.
+ */
+export const DEMO_SATURDAY_SCHEDULE: DemoDaySchedule = {
+  times: listFromEnv("DEMO_SATURDAY_SLOT_TIMES", ["12:00", "13:30", "15:00"]).filter((t) =>
+    TIME_PATTERN.test(t)
+  ),
+  durationMinutes: intFromEnv("DEMO_SATURDAY_DURATION_MINUTES", 90),
+};
+
+const SATURDAY = 6;
+
+/**
+ * The schedule for one weekday, or null when the team takes no demos that day.
+ * Null rather than an empty schedule so callers cannot accidentally treat a
+ * closed day as an open one with nothing left in it.
+ */
+export function scheduleForWeekday(weekday: number): DemoDaySchedule | null {
+  if (!DEMO_WORK_DAYS.includes(weekday)) return null;
+  return weekday === SATURDAY ? DEMO_SATURDAY_SCHEDULE : DEMO_WEEKDAY_SCHEDULE;
+}
+
+/** The same, for a "YYYY-MM-DD" business-local day. */
+export function scheduleForDate(dateKey: string): DemoDaySchedule | null {
+  return scheduleForWeekday(weekdayOf(dateKey));
+}
+
+/**
+ * The duration to quote before a day has been chosen — the weekday one, since
+ * that is what most visitors will book. Anything shown against a specific date
+ * must use that date's own schedule instead.
+ */
+export const DEMO_DEFAULT_DURATION_MINUTES = DEMO_WEEKDAY_SCHEDULE.durationMinutes;
 
 /** The reusable Google Meet room. Empty until an admin sets it — see below. */
 export const DEMO_MEETING_LINK = (process.env.DEMO_MEETING_LINK || "").trim();
