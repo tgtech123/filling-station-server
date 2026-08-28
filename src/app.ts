@@ -48,6 +48,7 @@ import fuelLoyaltyRoutes from "./routes/fuelLoyalty.route";
 import reportRoutes from "./routes/report.route";
 import accountingRoutes from "./routes/accounting.route";
 import stockReconciliationRoutes from "./routes/stockReconciliation.route";
+import demoBookingRoutes from "./routes/demoBooking.route";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -248,6 +249,18 @@ const resetLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Public, unauthenticated, and it writes to the database and sends two emails
+// per call — so it gets a tighter bucket than the general /api limit. Six an
+// hour is far more than any genuine prospect needs and cheap to defend.
+const demoBookingLimiter = rateLimit({
+  store: makeRateLimitStore("demo"),
+  windowMs: 60 * 60 * 1000,
+  max: 6,
+  message: { error: "Too many demo booking attempts. Please try again in an hour." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use("/api/activity", activityLimiter);
 app.use("/api/dashboard", dashboardLimiter);
 app.use("/api", generalLimiter);
@@ -258,11 +271,13 @@ app.use("/api/auth/register", registerLimiter);
 app.use("/api/payments", paymentLimiter);
 app.use("/api/auth/forgot-password", resetLimiter);
 app.use("/api/auth/reset-password", resetLimiter);
+app.use("/api/demo/book", demoBookingLimiter);
 
 // ── Routes 
 app.use("/api/auth", authRoutes);
 app.use("/api/register", fillinStation);
 app.use("/api/contactus", contactus);
+app.use("/api/demo", demoBookingRoutes);
 app.use("/api/tank", tank);
 app.use("/api/pump", pump);
 app.use("/api/delivery", delivery);

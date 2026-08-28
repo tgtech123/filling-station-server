@@ -3,6 +3,7 @@ import FillingStation from "../models/fillingStation.model";
 import { applyDueDowngrade } from "./planLifecycle.service";
 import { generateDueRecurringInvoices } from "../controllers/accountsReceivable.controller";
 import { sweepExpiringStock } from "./stockExpiry.service";
+import { sweepDemoReminders } from "./demoReminder.service";
 
 /**
  * In-process scheduler for time-based work that must NOT depend on user traffic.
@@ -80,12 +81,18 @@ async function sweepStockExpiry(): Promise<void> {
   if (alerted) console.log(`[scheduler] flagged ${alerted} product(s) nearing expiry`);
 }
 
+async function sweepDemoReminderQueue(): Promise<void> {
+  const sent = await sweepDemoReminders();
+  if (sent) console.log(`[scheduler] sent ${sent} demo reminder(s)`);
+}
+
 // ── Tick ──────────────────────────────────────────────────────────────────────
 
 async function tick(): Promise<void> {
   await runJob("downgrades", applyDueDowngrades);
   await runJob("recurring-billing", sweepRecurringBilling);
   await runJob("stock-expiry", sweepStockExpiry);
+  await runJob("demo-reminders", sweepDemoReminderQueue);
 }
 
 export function startScheduler(): void {
