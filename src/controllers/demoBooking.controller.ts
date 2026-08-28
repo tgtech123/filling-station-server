@@ -4,12 +4,11 @@ import mongoose from "mongoose";
 import DemoBooking, { ACTIVE_DEMO_STATUSES, DemoBookingStatus } from "../models/demoBooking.model";
 import { transporter } from "../middlewares/transporter.middleware";
 import {
-  DEMO_DURATION_MINUTES,
+  DEMO_DEFAULT_DURATION_MINUTES,
   DEMO_LEAD_TIME_MINUTES,
   DEMO_MAX_DAYS_AHEAD,
   DEMO_MEETING_LINK,
   DEMO_MEETING_PROVIDER,
-  DEMO_SLOT_TIMES,
   DEMO_TZ_LABEL,
   businessLastBookableDay,
   businessToday,
@@ -18,10 +17,11 @@ import {
   isValidDateKey,
   isValidMonthKey,
   isWorkDay,
+  scheduleForDate,
   slotStartUtc,
   weekdayOf,
 } from "../config/demoSchedule";
-import { demoEmailShell, escapeHtml, joinButton } from "../utils/demoEmail";
+import { demoEmailShell, escapeHtml, formatDuration, joinButton } from "../utils/demoEmail";
 
 const DAY_MS = 86_400_000;
 
@@ -110,6 +110,35 @@ function googleCalendarUrl(opts: {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+/**
+ * Send the confirmation; if Brevo rejects the REQUEST, send it again with no
+ * attachment.
+ *
+ * The .ics is the one part of this email that has never been through Brevo
+ * before — attachment support was added for it. If the payload shape is wrong,
+ * Brevo answers 400 and the customer gets no confirmation at all: no time, no
+ * link, nothing, for a booking that did save. A calendar file is a convenience;
+ * the email is not.
+ *
+ * Only on 400. A timeout or an auth failure is rethrown untouched, because
+ * retrying those risks sending the same confirmation twice — and "no calendar
+ * attachment" is a far smaller problem than "two emails" or "no email".
+ */
+async function sendConfirmation(mail: Parameters<typeof transporter.sendMail>[0]): Promise<void> {
+  try {
+    await transporter.sendMail(mail);
+  } catch (err: any) {
+    const rejectedPayload = err?.cause?.response?.status === 400;
+    if (!rejectedPayload || !mail.attachments?.length) throw err;
+
+    console.error(
+      "[demo] Brevo rejected the confirmation payload — resending without the .ics attachment"
+    );
+    const { attachments, ...plain } = mail;
+    await transporter.sendMail(plain);
+  }
+}
+
 /* ─────────────────────────── availability ─────────────────────────── */
 
 type SlotView = { time: string; label: string; available: boolean; startsAt: string };
@@ -142,10 +171,14 @@ export const getDemoAvailability = async (req: Request, res: Response) => {
 
     const earliest = new Date(Date.now() + DEMO_LEAD_TIME_MINUTES * 60_000);
     const lastDay = businessLastBookableDay();
-    const openDay = isWorkDay(date) && date >= businessToday() && date <= lastDay;
+    // A closed day has no schedule at all, so it also has no slots to show —
+    // which is different from an open day whose slots have all been taken, and
+    // the calendar says so differently.
+    const schedule = scheduleForDate(date);
+    const openDay = !!schedule && date >= businessToday() && date <= lastDay;
     const taken = openDay ? await takenTimesForDay(date) : new Set<string>();
 
-    const slots: SlotView[] = DEMO_SLOT_TIMES.map((time) => {
+    const slots: SlotView[] = (schedule?.times ?? []).map((time) => {
       const startsAt = slotStartUtc(date, time) as Date;
       return {
         time,
@@ -158,7 +191,9 @@ export const getDemoAvailability = async (req: Request, res: Response) => {
     return res.status(200).json({
       date,
       timezone: DEMO_TZ_LABEL,
-      durationMinutes: DEMO_DURATION_MINUTES,
+      // This day's own duration — Saturday runs longer than a weekday, and the
+      // customer is told the length of the appointment they are actually taking.
+      durationMinutes: schedule?.durationMinutes ?? DEMO_DEFAULT_DURATION_MINUTES,
       isWorkDay: isWorkDay(date),
       slots,
     });
@@ -201,21 +236,24 @@ export const getDemoMonthAvailability = async (req: Request, res: Response) => {
     const days = Array.from({ length: daysInMonth }, (_, i) => {
       const date = `${month}-${String(i + 1).padStart(2, "0")}`;
       const withinWindow = date >= today && date <= lastDay;
-      const workDay = isWorkDay(date);
+      const schedule = scheduleForDate(date);
       const taken = bookedByDay.get(date) ?? new Set<string>();
       const openSlots =
-        withinWindow && workDay
-          ? DEMO_SLOT_TIMES.filter(
+        withinWindow && schedule
+          ? schedule.times.filter(
               (t) => !taken.has(t) && (slotStartUtc(date, t) as Date) >= earliest
             ).length
           : 0;
       return {
         date,
         weekday: weekdayOf(date),
-        isWorkDay: workDay,
+        isWorkDay: !!schedule,
         withinWindow,
         openSlots,
-        totalSlots: DEMO_SLOT_TIMES.length,
+        totalSlots: schedule?.times.length ?? 0,
+        // Carried per day so the calendar can say "90 minutes" the moment a
+        // Saturday is picked, without another request.
+        durationMinutes: schedule?.durationMinutes ?? DEMO_DEFAULT_DURATION_MINUTES,
         selectable: openSlots > 0,
       };
     });
@@ -223,7 +261,9 @@ export const getDemoMonthAvailability = async (req: Request, res: Response) => {
     return res.status(200).json({
       month,
       timezone: DEMO_TZ_LABEL,
-      durationMinutes: DEMO_DURATION_MINUTES,
+      // The headline figure, used before any day is chosen. Each day carries
+      // its own above.
+      durationMinutes: DEMO_DEFAULT_DURATION_MINUTES,
       minDate: today,
       maxDate: lastDay,
       days,
@@ -251,7 +291,14 @@ export const bookDemo = async (req: Request, res: Response) => {
     if (!fullName || !email || !phone || !date || !time) {
       return res.status(400).json({ message: "Name, email, phone, date and time are required" });
     }
-    if (!isValidDateKey(date) || !DEMO_SLOT_TIMES.includes(String(time))) {
+    if (!isValidDateKey(date)) {
+      return res.status(400).json({ message: "That date is not one we offer" });
+    }
+    // The schedule for THIS day decides both which starts are valid and how
+    // long the booking runs — a Saturday time posted against a weekday, or the
+    // reverse, is rejected here rather than silently booked at the wrong length.
+    const schedule = scheduleForDate(date);
+    if (!schedule || !schedule.times.includes(String(time))) {
       return res.status(400).json({ message: "That date or time is not one we offer" });
     }
 
@@ -260,9 +307,6 @@ export const bookDemo = async (req: Request, res: Response) => {
 
     // Every rule the calendar shows is re-checked here. The client is a
     // convenience; this is the authority.
-    if (!isWorkDay(date)) {
-      return res.status(400).json({ message: "We only run demos on working days" });
-    }
     if (slotStart.getTime() < Date.now() + DEMO_LEAD_TIME_MINUTES * 60_000) {
       const hours = Math.max(1, Math.round(DEMO_LEAD_TIME_MINUTES / 60));
       return res
@@ -293,7 +337,8 @@ export const bookDemo = async (req: Request, res: Response) => {
       });
     }
 
-    const slotEnd = new Date(slotStart.getTime() + DEMO_DURATION_MINUTES * 60_000);
+    const durationMinutes = schedule.durationMinutes;
+    const slotEnd = new Date(slotStart.getTime() + durationMinutes * 60_000);
     const payload = {
       fullName: String(fullName).trim().slice(0, 120),
       email: normalisedEmail,
@@ -306,6 +351,10 @@ export const bookDemo = async (req: Request, res: Response) => {
       slotDate: date,
       slotTime: String(time),
       timezone: DEMO_TZ_LABEL,
+      // Stored on the booking, not read back from config: changing Saturday's
+      // length next month must not rewrite the end time of a demo already in
+      // someone's calendar.
+      durationMinutes,
       meetingLink: DEMO_MEETING_LINK,
       meetingProvider: DEMO_MEETING_PROVIDER,
       status: "pending" as DemoBookingStatus,
@@ -340,7 +389,7 @@ export const bookDemo = async (req: Request, res: Response) => {
     const joinInfo = DEMO_MEETING_LINK
       ? `Join on ${DEMO_MEETING_PROVIDER}: ${DEMO_MEETING_LINK}`
       : `We will email you the ${DEMO_MEETING_PROVIDER} link before the session.`;
-    const details = `${DEMO_DURATION_MINUTES}-minute walkthrough of FuelDesk. Reference ${booking.reference}. ${joinInfo}`;
+    const details = `A ${formatDuration(durationMinutes)} walkthrough of FuelDesk. Reference ${booking.reference}. ${joinInfo}`;
 
     const ics = buildIcs({
       start: slotStart,
@@ -363,7 +412,7 @@ export const bookDemo = async (req: Request, res: Response) => {
     const salesInbox = demoSalesInbox();
     const firstName = payload.fullName.split(" ")[0] || payload.fullName;
 
-    const prospectMail = transporter.sendMail({
+    const prospectMail = sendConfirmation({
       from: sender,
       to: payload.email,
       ...(salesInbox ? { replyTo: salesInbox } : {}),
@@ -379,7 +428,7 @@ export const bookDemo = async (req: Request, res: Response) => {
         <p>Thanks for booking a walkthrough of FuelDesk. Here are the details:</p>
         <table style="width:100%; border-collapse:collapse; margin:16px 0;">
           <tr><td style="padding:8px 0; color:#666;">When</td><td style="padding:8px 0; font-weight:600;">${escapeHtml(when)}</td></tr>
-          <tr><td style="padding:8px 0; color:#666;">Duration</td><td style="padding:8px 0; font-weight:600;">${DEMO_DURATION_MINUTES} minutes</td></tr>
+          <tr><td style="padding:8px 0; color:#666;">Duration</td><td style="padding:8px 0; font-weight:600;">${formatDuration(durationMinutes)}</td></tr>
           <tr><td style="padding:8px 0; color:#666;">Where</td><td style="padding:8px 0; font-weight:600;">${DEMO_MEETING_PROVIDER}</td></tr>
           <tr><td style="padding:8px 0; color:#666;">Reference</td><td style="padding:8px 0; font-weight:600;">${escapeHtml(booking.reference)}</td></tr>
         </table>
@@ -456,7 +505,7 @@ export const bookDemo = async (req: Request, res: Response) => {
         startsAt: slotStart.toISOString(),
         when,
         timezone: DEMO_TZ_LABEL,
-        durationMinutes: DEMO_DURATION_MINUTES,
+        durationMinutes,
         meetingProvider: DEMO_MEETING_PROVIDER,
         meetingLink: DEMO_MEETING_LINK,
       },

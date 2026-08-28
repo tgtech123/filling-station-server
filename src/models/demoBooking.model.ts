@@ -21,10 +21,19 @@ export interface IDemoBooking extends Document {
    *  availability lookups do not have to re-run the timezone maths per row. */
   slotDate: string;
   slotTime: string;
+  /** How long THIS booking runs. Weekdays and Saturdays differ, and a later
+   *  config change must not silently move an appointment that already exists. */
+  durationMinutes: number;
   timezone: string;
   meetingLink: string;
   meetingProvider: string;
   status: DemoBookingStatus;
+  /**
+   * True exactly while this booking is holding its slot against everyone else.
+   * Derived from status — never set by hand — and it exists so the uniqueness
+   * index can be a plain equality filter. See the index below.
+   */
+  slotHeld: boolean;
   source: string;
   /**
    * When each reminder actually went out. Null means "not yet sent", and the
@@ -51,6 +60,7 @@ const DemoBookingSchema = new Schema<IDemoBooking>(
     slotEnd: { type: Date, required: true },
     slotDate: { type: String, required: true },
     slotTime: { type: String, required: true },
+    durationMinutes: { type: Number, required: true },
     timezone: { type: String, default: "" },
     meetingLink: { type: String, default: "" },
     meetingProvider: { type: String, default: "Google Meet" },
@@ -59,12 +69,25 @@ const DemoBookingSchema = new Schema<IDemoBooking>(
       enum: ["pending", "confirmed", "completed", "cancelled"],
       default: "pending",
     },
+    slotHeld: { type: Boolean, default: true },
     source: { type: String, default: "landing" },
     reminder24SentAt: { type: Date, default: null },
     reminder1hSentAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
+
+/**
+ * slotHeld follows status automatically, on create and on every save — so the
+ * admin cancelling a booking releases its slot without anyone having to
+ * remember a second field. A pre-validate hook rather than controller code
+ * because a derived value maintained at call sites is a derived value that will
+ * eventually disagree with the thing it was derived from.
+ */
+DemoBookingSchema.pre("validate", function (next) {
+  this.slotHeld = ACTIVE_DEMO_STATUSES.includes(this.status);
+  next();
+});
 
 /**
  * One live booking per slot, enforced by the database rather than by a
@@ -76,8 +99,14 @@ DemoBookingSchema.index(
   { slotStart: 1 },
   {
     unique: true,
-    partialFilterExpression: { status: { $in: ACTIVE_DEMO_STATUSES } },
-    name: "uniq_active_slot",
+    // Equality on a derived boolean, NOT { status: { $in: [...] } }.
+    // partialFilterExpression only accepts $in from MongoDB 6.0 onwards, and on
+    // anything older the index build fails while the application carries on
+    // starting normally — so the one guarantee that stops two customers holding
+    // the same 12:00 slot would be silently absent, and nobody would find out
+    // until it happened. Plain equality is valid on every server version.
+    partialFilterExpression: { slotHeld: true },
+    name: "uniq_held_slot",
   }
 );
 
