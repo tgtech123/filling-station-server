@@ -21,6 +21,13 @@ interface MailOptions {
   category?: string;
   /** Station this message belongs to, when there is one. */
   fillingStation?: unknown;
+  /**
+   * Files to send with the message, already base64-encoded. Added for the demo
+   * booking confirmation, which carries a .ics so the slot lands in the
+   * prospect's own calendar instead of relying on them to copy the time out of
+   * an email. Brevo caps the total payload at 10 MB.
+   */
+  attachments?: { name: string; content: string }[];
 }
 
 /**
@@ -112,6 +119,7 @@ export const transporter = {
           subject: options.subject,
           htmlContent: options.html,
           ...(options.replyTo ? { replyTo: { email: options.replyTo } } : {}),
+          ...(options.attachments?.length ? { attachment: options.attachments } : {}),
         },
         {
           headers: { "api-key": apiKey, "Content-Type": "application/json" },

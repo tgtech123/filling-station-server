@@ -545,22 +545,61 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
           downgradeAt: null,
         };
 
-        const station = await FillingStation.findByIdAndUpdate(
-          existingManager.station,
-          planFields,
-          { new: true }
-        ).select("name").lean();
+        // Same race, different marker. This branch must NOT claim on `status`
+        // — the webhook deliberately marks guest payments "success" while
+        // skipping the upgrade, so a status claim here would reject every
+        // legitimate guest verify. The replay marker this flow already relies on
+        // is fillingStation moving off the placeholder, so that is what gets
+        // compared-and-set: whoever flips it owns the upgrade, and a concurrent
+        // verify is told the payment is already processed instead of applying
+        // the plan a second time.
+        const guestClaimed = await Payment.findOneAndUpdate(
+          { transactionRef: reference, fillingStation: GUEST_PLACEHOLDER },
+          { fillingStation: existingManager.station }
+        );
+        if (!guestClaimed) {
+          return res.status(200).json({
+            message: "Payment already verified",
+            data: {
+              isGuest: true,
+              isExistingUser: true,
+              alreadyProcessed: true,
+              plan: existingPayment.planName,
+              billingCycle: existingPayment.billingCycle,
+              amount: existingPayment.amount,
+            },
+          });
+        }
 
-        // Branches run on the parent's subscription — keep them in sync
-        await syncPlanToBranches(existingManager.station, planFields);
-        // Unlock the (previously expired) station for the auth gate immediately.
-        await invalidateStationAuthCache(existingManager.station);
+        // Released on failure for the same reason as the authenticated path:
+        // a held claim would strand a paid guest with no plan and no way to
+        // retry.
+        let station: any;
+        try {
+          station = await FillingStation.findByIdAndUpdate(
+            existingManager.station,
+            planFields,
+            { new: true }
+          ).select("name").lean();
 
-        // Link the payment to the station — this is also the replay marker
-        // checked above, so this upgrade can never be applied twice.
+          // Branches run on the parent's subscription — keep them in sync
+          await syncPlanToBranches(existingManager.station, planFields);
+          // Unlock the (previously expired) station for the auth gate immediately.
+          await invalidateStationAuthCache(existingManager.station);
+        } catch (applyErr) {
+          await Payment.findOneAndUpdate(
+            { transactionRef: reference },
+            { fillingStation: GUEST_PLACEHOLDER }
+          ).catch((e: any) => console.error("[verify] could not release guest claim:", e?.message));
+          throw applyErr;
+        }
+
+        // The station link itself was claimed above; this only records the
+        // station's display name, which is a label for the admin payment list
+        // and is not what guards the replay.
         await Payment.findOneAndUpdate(
           { transactionRef: reference },
-          { fillingStation: existingManager.station, stationName: (station as any)?.name || "Unknown" }
+          { stationName: (station as any)?.name || "Unknown" }
         );
 
         await deleteCachePattern(`dashboard:*:${existingManager.station}`);
@@ -614,6 +653,31 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
       expiryDate.setMonth(expiryDate.getMonth() + 1);
     }
 
+    // Atomic claim BEFORE applying — the same compare-and-set the webhook uses.
+    // The "already verified" check at the top of this handler is a READ, and a
+    // Paystack round trip sits between it and here, so two verifies of the same
+    // reference (a double-click, a refresh of /payment/verify, or a verify
+    // racing the webhook) both passed it and both applied the plan. That was
+    // harmless only by luck: these writes are absolute — planExpiryDate is
+    // computed from now, so a second run lands on the same value — and the day
+    // anything on this path becomes additive ($inc credits, a referral bonus)
+    // the duplicate becomes real money. Claiming here removes the race outright.
+    const claimed = await Payment.findOneAndUpdate(
+      { transactionRef: reference, status: { $ne: "success" } },
+      { status: "success", paidAt: now }
+    );
+    if (!claimed) {
+      return res.status(200).json({
+        message: "Payment already verified",
+        data: {
+          plan: existingPayment.planName,
+          billingCycle: existingPayment.billingCycle,
+          amount: existingPayment.amount,
+          alreadyProcessed: true,
+        },
+      });
+    }
+
     const planFields = {
       plan: planSlug,
       planId,
@@ -627,17 +691,25 @@ export const verifyPayment = async (req: AuthenticatedRequest, res: Response) =>
       downgradeAt: null,
     };
 
-    await FillingStation.findByIdAndUpdate(stationId, planFields);
+    // A claim that is never released is a lock, and a lock held after a failed
+    // apply is the worst outcome available here: the customer has paid, the plan
+    // was not applied, and every retry is turned away with "already verified".
+    // So the claim is rolled back on failure and the error is rethrown to the
+    // handler's own catch, leaving the reference verifiable again.
+    try {
+      await FillingStation.findByIdAndUpdate(stationId, planFields);
 
-    // Branches run on the parent's subscription — keep them in sync
-    await syncPlanToBranches(stationId, planFields);
-    // Unlock the (previously expired) station for the auth gate immediately.
-    await invalidateStationAuthCache(stationId);
-
-    await Payment.findOneAndUpdate(
-      { transactionRef: reference },
-      { status: "success", paidAt: now }
-    );
+      // Branches run on the parent's subscription — keep them in sync
+      await syncPlanToBranches(stationId, planFields);
+      // Unlock the (previously expired) station for the auth gate immediately.
+      await invalidateStationAuthCache(stationId);
+    } catch (applyErr) {
+      await Payment.findOneAndUpdate(
+        { transactionRef: reference },
+        { status: "pending" }
+      ).catch((e: any) => console.error("[verify] could not release claim:", e?.message));
+      throw applyErr;
+    }
 
     // Receipt for an existing station upgrading or renewing. The owner is the
     // billing contact — they are the one who can act on it. Not awaited, for the
