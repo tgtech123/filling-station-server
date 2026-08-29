@@ -198,7 +198,10 @@ export const getDemoAvailability = async (req: Request, res: Response) => {
       slots,
     });
   } catch (error: any) {
-    return res.status(500).json({ message: "server error", error: error.message });
+    // Logged, not returned. A Mongo error carries index names, field names and
+    // sometimes host detail, and this endpoint answers the open internet.
+    console.error("[demo] availability failed:", error?.message);
+    return res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 };
 
@@ -269,7 +272,10 @@ export const getDemoMonthAvailability = async (req: Request, res: Response) => {
       days,
     });
   } catch (error: any) {
-    return res.status(500).json({ message: "server error", error: error.message });
+    // Logged, not returned. A Mongo error carries index names, field names and
+    // sometimes host detail, and this endpoint answers the open internet.
+    console.error("[demo] month availability failed:", error?.message);
+    return res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 };
 
@@ -329,11 +335,14 @@ export const bookDemo = async (req: Request, res: Response) => {
       slotStart: { $gte: new Date() },
     }).lean();
     if (existing) {
+      // Deliberately vague. This endpoint is public and unauthenticated, and
+      // nobody has proved they own this address — the previous wording handed
+      // anyone who typed a competitor's email the date, time and reference of
+      // their meeting with us. The real owner does not need to be told: the
+      // details are already sitting in their inbox.
       return res.status(409).json({
-        message: `You already have a demo booked for ${formatBusinessDateTime(
-          new Date(existing.slotStart)
-        )}. Reply to your confirmation email to move it.`,
-        reference: existing.reference,
+        message:
+          "There is already a demo booked against that email address. Check your inbox for the confirmation, or reply to it and we will move the time.",
       });
     }
 
@@ -511,7 +520,10 @@ export const bookDemo = async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
-    return res.status(500).json({ message: "server error", error: error.message });
+    // Logged, not returned. A Mongo error carries index names, field names and
+    // sometimes host detail, and this endpoint answers the open internet.
+    console.error("[demo] booking failed:", error?.message);
+    return res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 };
 
@@ -564,7 +576,10 @@ export const listDemoBookings = async (req: Request, res: Response) => {
       timezone: DEMO_TZ_LABEL,
     });
   } catch (error: any) {
-    return res.status(500).json({ message: "server error", error: error.message });
+    // Logged, not returned. A Mongo error carries index names, field names and
+    // sometimes host detail, and this endpoint answers the open internet.
+    console.error("[demo] admin list failed:", error?.message);
+    return res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 };
 
@@ -613,6 +628,9 @@ export const updateDemoBooking = async (req: Request, res: Response) => {
 
     return res.status(200).json({ message: "Booking updated", booking });
   } catch (error: any) {
-    return res.status(500).json({ message: "server error", error: error.message });
+    // Logged, not returned. A Mongo error carries index names, field names and
+    // sometimes host detail, and this endpoint answers the open internet.
+    console.error("[demo] admin update failed:", error?.message);
+    return res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 };
