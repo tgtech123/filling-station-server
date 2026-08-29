@@ -6,6 +6,35 @@ import FillingStation from "../models/fillingStation.model";
 import { Types } from "mongoose";
 import jwt from "jsonwebtoken";
 import ResetPassword from "../models/resetPassword.model";
+
+/**
+ * Email address handling.
+ *
+ * Addresses were stored exactly as typed and looked up with an exact match, but
+ * updateOwnProfile lowercased them on save — so the same person could be
+ * findable under one spelling and invisible under another. The practical result
+ * was a permanent lockout: a manager created as "John@Gmail.com" who typed
+ * "john@gmail.com" was told "Invalid credentials" at login and then "No staff
+ * with that email" on the reset page, which reads as "your account does not
+ * exist". A phone keyboard capitalises the first letter by default, so this was
+ * waiting to happen to somebody.
+ *
+ * Two halves. Everything WRITTEN is normalised, so new records are consistent.
+ * Everything READ uses a case-insensitive collation, so records already stored
+ * with capitals keep working without a migration. Strength 2 compares letters
+ * while ignoring case.
+ *
+ * Lookups become no slower than they were: there is no index on Staff.email
+ * today, so these queries already scan.
+ */
+export const normaliseEmail = (value: unknown): string =>
+  String(value ?? "").trim().toLowerCase();
+
+const CASE_INSENSITIVE = { locale: "en", strength: 2 } as const;
+
+/** Find one staff member by email, regardless of how it was capitalised. */
+const findStaffByEmail = (email: unknown) =>
+  Staff.findOne({ email: normaliseEmail(email) }).collation(CASE_INSENSITIVE);
 import crypto from "crypto";
 import { transporter } from "../middlewares/transporter.middleware";
 import mongoose from "mongoose";
@@ -127,8 +156,9 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // Check for duplicate email
-    const existingStaff = await Staff.findOne({ email });
+    // Check for duplicate email. Case-insensitive, or "John@x.com" and
+    // "john@x.com" would become two accounts for one person.
+    const existingStaff = await findStaffByEmail(email);
     if (existingStaff) {
       return res
         .status(409)
@@ -142,7 +172,10 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     const newStaff = await Staff.create({
       firstName,
       lastName,
-      email,
+      // Stored normalised. Most of the codebase already lowercases an address
+      // before looking a member of staff up; only the write side did not, which
+      // is what let the two drift apart.
+      email: normaliseEmail(email),
       phone,
       image,
       role,
@@ -227,7 +260,7 @@ export const loginStaff = async (
     const { email, password } = req.body;
 
     // 1. Find staff by email
-    const staff = await Staff.findOne({ email });
+    const staff = await findStaffByEmail(email);
     if (!staff) {
       // No station available — skip activity log
       return res.status(401).json({ message: "Invalid credentials" });
@@ -435,6 +468,14 @@ export const loginStaff = async (
   }
 };
 
+/**
+ * The same sentence for every request, so the response cannot be used to test
+ * whether an address is registered. It has to be worded so that it is not a
+ * lie in either case.
+ */
+const GENERIC_RESET_REPLY =
+  "If that email address has an account, a password reset link is on its way. Check your inbox, and your spam folder.";
+
 export const forgotPassword = async (req: Request, res: Response) => {
   try {
     const { email } = req.body || "";
@@ -443,10 +484,14 @@ export const forgotPassword = async (req: Request, res: Response) => {
   return res.status(400).json({ message: "Email must not be empty" });
 }
  
-    // 1. Check staff exists
-    const staff = await Staff.findOne({ email });
+    // Answered identically whether or not the address is registered — see the
+    // matching reply at the end of this handler. A 404 here told anyone who
+    // asked which email addresses have accounts on the platform, one guess at a
+    // time, and the reply for a real account was visibly different from the
+    // reply for an invented one.
+    const staff = await findStaffByEmail(email);
     if (!staff) {
-      return res.status(404).json({ message: "No staff with that email" });
+      return res.json({ message: GENERIC_RESET_REPLY });
     }
 
     // 2. Generate reset token
@@ -528,7 +573,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
       }).catch((err) => console.error("Notification error (password reset):", err));
     }
 
-    return res.json({ message: "Password reset email sent" });
+    return res.json({ message: GENERIC_RESET_REPLY });
   } catch (error: any) {
     console.error("Forgot Password error:", error);
     return res.status(500).json({ message: "Server error", error: error.message });
@@ -543,6 +588,14 @@ export const resetPassword = async (req: Request, res: Response) => {
 
     if (!token || !password) {
       return res.status(400).json({ message: "Token and new password are required" });
+    }
+
+    // Registration demands 8 characters; this path demanded nothing at all, so
+    // the reset flow was a way to set a one-character password on any account.
+    if (String(password).length < 8) {
+      return res
+        .status(400)
+        .json({ message: "Password must be at least 8 characters long" });
     }
 
     // 1. Hash the provided token
@@ -778,8 +831,8 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // If email is being changed, ensure uniqueness
-    if (updates.email && updates.email !== staff.email) {
-      const existing = await Staff.findOne({ email: updates.email });
+    if (updates.email && normaliseEmail(updates.email) !== normaliseEmail(staff.email)) {
+      const existing = await findStaffByEmail(updates.email);
       if (existing && existing.id.toString() !== staff.id.toString()) {
         return res.status(409).json({ message: "Another staff already uses that email" });
       }

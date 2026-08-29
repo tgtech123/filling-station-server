@@ -10,6 +10,7 @@ import Payment from "../models/payment.model";
 import { activatePaidPlan, findClaimablePayment } from "../services/planActivation.service";
 import { Types } from "mongoose";
 import { notifyAdmin } from "../utils/notifyHelpers";
+import { normaliseEmail } from "./auth.controller";
 
 
 export const createFillingStation = async (req: Request, res: Response) => {
@@ -105,7 +106,10 @@ export const createFillingStation = async (req: Request, res: Response) => {
     const manager = await Staff.create({
       firstName,
       lastName,
-      email,
+      // The duplicate check above already lowercases what it searches for;
+      // store the same thing, or the owner ends up findable under one spelling
+      // and invisible under the other.
+      email: normaliseEmail(email),
       phone,
       address,
       city,
