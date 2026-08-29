@@ -42,8 +42,18 @@ const getNigeriaRanges = () => {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const calcGrowth = (current: number, previous: number): number => {
-  if (previous === 0) return 0;
+/**
+ * Percentage change against the previous period, or null when there is no
+ * previous period to compare against.
+ *
+ * It used to return 0 in that case, which is indistinguishable from a genuine
+ * "unchanged" — so a platform in its first month reported 0% and the dashboard
+ * painted it as growth, in green, with an upward arrow. Null means "no
+ * comparison is possible" and the card shows nothing at all, which is the only
+ * honest thing to put in front of someone reading their own numbers.
+ */
+const calcGrowth = (current: number, previous: number): number | null => {
+  if (previous === 0) return null;
   return parseFloat(((current - previous) / previous * 100).toFixed(1));
 };
 
