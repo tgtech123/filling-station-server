@@ -1520,10 +1520,23 @@ export const getPaymentStats = async (req: AuthenticatedRequest, res: Response) 
     const [y, m] = todayStr.split("-").map(Number);
     const startOfMonth = new Date(Date.UTC(y, m - 1, 1, -1, 0, 0, 0));
 
-    const [totalPayments, successfulPayments, failedPayments, revenueAgg] = await Promise.all([
-      Payment.countDocuments(),
+    // "Total" counts attempts that CONCLUDED — success or failure. It used to
+    // count every Payment document, and a pending one is not a payment: the
+    // record is written before the customer is sent to Paystack, because the
+    // verify and webhook paths both refuse any reference this server did not
+    // initialise. So closing the card form, or simply changing your mind, left a
+    // row behind and the total went up without a naira moving. Counting those
+    // also made the card inconsistent with the two beside it, since successful
+    // plus failed never added up to the total.
+    const [totalPayments, successfulPayments, failedPayments, pendingPayments, revenueAgg] =
+      await Promise.all([
+      Payment.countDocuments({ status: { $in: ["success", "failed"] } }),
       Payment.countDocuments({ status: "success" }),
       Payment.countDocuments({ status: "failed" }),
+      // Surfaced separately rather than hidden: a lot of abandoned checkouts is
+      // worth knowing about — it usually means something on the payment screen
+      // is putting people off.
+      Payment.countDocuments({ status: "pending" }),
       Payment.aggregate([
         { $match: { status: "success", createdAt: { $gte: startOfMonth } } },
         { $group: { _id: null, total: { $sum: "$amount" } } },
@@ -1536,6 +1549,7 @@ export const getPaymentStats = async (req: AuthenticatedRequest, res: Response) 
         totalPayments,
         successfulPayments,
         failedPayments,
+        pendingPayments,
         totalRevenue: revenueAgg[0]?.total || 0,
       },
     });
