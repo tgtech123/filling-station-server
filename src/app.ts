@@ -48,6 +48,7 @@ import fuelLoyaltyRoutes from "./routes/fuelLoyalty.route";
 import reportRoutes from "./routes/report.route";
 import accountingRoutes from "./routes/accounting.route";
 import stockReconciliationRoutes from "./routes/stockReconciliation.route";
+import stockPositionRoutes from "./routes/stockPosition.route";
 import demoBookingRoutes from "./routes/demoBooking.route";
 
 const app = express();
@@ -318,6 +319,7 @@ app.use("/api/fuel-loyalty", fuelLoyaltyRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/accounting", accountingRoutes);
 app.use("/api/stock-reconcile", stockReconciliationRoutes);
+app.use("/api/stock-position", stockPositionRoutes);
 
 // ── Health check 
 app.get("/api/health", (_, res) => {
