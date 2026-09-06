@@ -17,7 +17,7 @@
 9. [Product Management — Pumps, Tanks & Pricing](#9-product-management--pumps-tanks--pricing)
 10. [Lubricant Sales & Inventory](#10-lubricant-sales--inventory)
 11. [Gas Department (CNG / LPG)](#11-gas-department-cng--lpg)
-12. [Financial Reports & Cash Reconciliation](#12-financial-reports--cash-reconciliation) — reports, reconciliation & the Accounting Suite
+12. [Financial Reports & Cash Reconciliation](#12-financial-reports--cash-reconciliation) — reports, reconciliation, opening stock & the Accounting Suite
 13. [Expense Management](#13-expense-management)
 14. [Payroll & Commissions](#14-payroll--commissions)
 15. [Procurement & Supplier Management](#15-procurement--supplier-management)
@@ -877,7 +877,37 @@ Summarises every shift — attendant, pump, hours, litres, revenue.
 **Fuel Inventory Report:**
 Stock movement — what came in (deliveries), what went out (sales), current stock.
 
-### 12.4 Exporting Reports
+### 12.4 Opening Stock (Manager / Accountant)
+
+Answers the question every trading day starts with: **what were we holding when the day opened, and what is it worth?**
+
+Go to **Opening Stock** in the sidebar. It opens on **today**, so the morning figure is already on screen — no dates to pick.
+
+**What it covers.** Every product line the station runs, each with its own quantity and its own naira value:
+
+| Line | Counted in | Valued at |
+|------|-----------|-----------|
+| Lubricants | units | what each consignment actually cost (FIFO) |
+| Store — drinks, snacks, other | units | what each consignment actually cost (FIFO) |
+| Fuel — one row per tank | litres | the tank's most recent delivered cost per litre |
+| Bulk gas (LPG) | kilograms | the most recent delivered cost per kg |
+| Gas cylinders | units | the cost each batch was bought at |
+
+Lines the station does not run are hidden, so a station without a gas department never sees empty rows.
+
+**Reading a day.** Pick **Today** in the morning to see what you opened with. Pick **Yesterday** (or any past date) after close to see what that day finished with. The two agree by design: **today's opening stock IS yesterday's closing stock** — the same figure carried forward, not a second calculation. While today is still trading the closing column is labelled **"now"**, because it is still moving; it settles as the last shift is entered.
+
+**The columns.** Each department shows Opening → Stock in → Sold (at cost) → Adjustments → Closing. These always balance: *opening + stock in − sold ± adjustments = closing*. If a closing figure looks wrong, a movement is missing — a delivery not recorded, or a shift not closed — rather than the arithmetic being wrong.
+
+**Longer periods.** The same screen does **Last 7 days**, **This month**, **Last month**, or any **Custom** range, for month-end and for handing an accountant a period's cost of sales.
+
+**"est." markers.** A line marked *est.* is one where the naira figure is the best available statement rather than a receipt — stock with no purchase record behind it, or fuel sold on a pump that is not linked to a tank. **The quantity is still exact.** Investigate these before signing anything off.
+
+> **Quantities are never added across departments.** Litres, kilograms and pieces do not share a unit, so only the naira column carries a station-wide total.
+
+**To print or file it:** click **Export** at the top right for a spreadsheet of every line.
+
+### 12.5 Exporting Reports
 
 Every report can be downloaded:
 1. Open the report you want
@@ -885,7 +915,7 @@ Every report can be downloaded:
 3. Choose your format: **CSV** (spreadsheet-compatible), **Excel**, or **PDF**
 4. The file will download to your device
 
-### 12.5 Analytics & Trends
+### 12.6 Analytics & Trends
 
 Go to **Analytics** to see:
 - **Revenue trend** — daily, weekly, or monthly charts
@@ -893,11 +923,11 @@ Go to **Analytics** to see:
 - **Staff performance** — who is selling the most
 - **Period comparison** — this month vs. last month
 
-### 12.6 The Accounting Suite (Accountant)
+### 12.7 The Accounting Suite (Accountant)
 
 > **Who can use it:** Accountant only. The Manager sees a single read-only **Accounting Overview** (headline totals) but cannot open the working screens.
 >
-> **One exception — the Owner approves.** Large journals and supplier payment batches need a **second person**, and nobody may approve their own work. In a station with one accountant there is no second accountant, so the **owner** sees an **Approvals** entry in the Accounting menu and authorises there. The owner can only approve or reject — never create entries — so the two roles stay separate. Multi-branch chains can instead appoint a **group accountant** who approves across every branch (see 12.7).
+> **One exception — the Owner approves.** Large journals and supplier payment batches need a **second person**, and nobody may approve their own work. In a station with one accountant there is no second accountant, so the **owner** sees an **Approvals** entry in the Accounting menu and authorises there. The owner can only approve or reject — never create entries — so the two roles stay separate. Multi-branch chains can instead appoint a **group accountant** who approves across every branch (see 12.8).
 
 Beyond the simple reports above, FuelDesk includes a full **double-entry accounting system** — the kind a professional bookkeeper expects. Your accountant builds and runs it; nothing is pre-filled, so it is set up once at the start.
 
@@ -927,7 +957,7 @@ Each month-end task runs **once per month** and is recorded in the audit trail. 
 
 > **For Managers:** open **Accounting** to see the **Executive Overview** — revenue, expenses, profit, and cash at a glance. The detailed working screens belong to the accountant.
 
-### 12.7 Approvals — Who Signs Off (Owner / Group Accountant)
+### 12.8 Approvals — Who Signs Off (Owner / Group Accountant)
 
 Two things always need a **second pair of eyes** before they take effect:
 
@@ -1749,7 +1779,7 @@ Yes. Go to **System Settings** > **Subscription & Billing**, find the amber down
 No, this is correct. If you are on the highest available plan, there is nothing to upgrade to — so the button changes to **Renew Plan** instead. Click it to extend your current plan by another month or year.
 
 **Q: What is the difference between the Financial Reports and the Accounting Suite?**
-The **Financial Reports** (Section 12.3) are quick, ready-made summaries — income statement, cash flow, sales, and so on — that any accountant or manager can read. The **Accounting Suite** (Section 12.6) is a full double-entry bookkeeping system: chart of accounts, journals, payables, receivables, bank reconciliation, tax, fixed assets, and month-end close. The suite is **accountant-only**; the manager just sees a read-only overview.
+The **Financial Reports** (Section 12.3) are quick, ready-made summaries — income statement, cash flow, sales, and so on — that any accountant or manager can read. The **Accounting Suite** (Section 12.7) is a full double-entry bookkeeping system: chart of accounts, journals, payables, receivables, bank reconciliation, tax, fixed assets, and month-end close. The suite is **accountant-only**; the manager just sees a read-only overview.
 
 **Q: I am a branch manager and I cannot see the other branches or the main station. Why?**
 That is by design. A branch manager can only see and manage their **own** branch. Viewing all branches, switching between them, transferring staff, and consolidated reports are reserved for the **station owner** (super manager). If you need access to another branch, ask the owner to invite you there.

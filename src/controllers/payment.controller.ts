@@ -778,7 +778,16 @@ export const paystackWebhook = async (req: any, res: Response) => {
 
     const signature = req.headers["x-paystack-signature"];
 
-    if (hash !== signature) {
+    // Constant-time: a plain !== returns as soon as two bytes differ, so how
+    // long the comparison takes describes how much of the digest the caller
+    // already got right. Length is checked separately — a SHA-512 digest is
+    // always 128 hex characters, so its length was never the secret.
+    const expectedSig = Buffer.from(hash, "utf8");
+    const receivedSig = Buffer.from(String(signature ?? ""), "utf8");
+    if (
+      expectedSig.length !== receivedSig.length ||
+      !crypto.timingSafeEqual(expectedSig, receivedSig)
+    ) {
       console.error("âŒ Invalid Paystack webhook signature");
       return;
     }

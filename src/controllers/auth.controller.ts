@@ -35,6 +35,40 @@ const CASE_INSENSITIVE = { locale: "en", strength: 2 } as const;
 /** Find one staff member by email, regardless of how it was capitalised. */
 const findStaffByEmail = (email: unknown) =>
   Staff.findOne({ email: normaliseEmail(email) }).collation(CASE_INSENSITIVE);
+
+// ── Login one-time codes (2FA) ───────────────────────────────────────────────
+
+/** How long a login code stays valid. */
+const OTP_TTL_SECONDS = 300;
+
+/**
+ * How many wrong codes one login attempt gets before the code is burned.
+ *
+ * Six digits is a million combinations, which sounds like plenty until you
+ * notice that an unlimited guesser only has to outlast a five-minute window.
+ * The IP rate limiter is not the answer on its own — it is per address, so it
+ * spreads across a botnet, and the code being attacked belongs to one account
+ * regardless of where the guesses come from. Counting per USER closes that.
+ */
+const OTP_MAX_ATTEMPTS = 5;
+
+const otpKey = (userId: string) => `otp:${userId}`;
+const otpAttemptsKey = (userId: string) => `otp:attempts:${userId}`;
+
+/**
+ * Compare two secrets without letting the clock describe them.
+ *
+ * A plain `!==` on strings stops at the first differing byte, so how long the
+ * comparison takes is a function of how much of the secret the caller already
+ * guessed. Length is compared first and separately — for a fixed-length code or
+ * a fixed-length HMAC digest, the length is not the secret.
+ */
+export const secretsMatch = (a: string, b: string): boolean => {
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
 import crypto from "crypto";
 import { transporter } from "../middlewares/transporter.middleware";
 import mongoose from "mongoose";
@@ -316,11 +350,21 @@ export const loginStaff = async (
 
     // 2b. If 2FA is enabled, attempt OTP flow — fall back to normal login if Redis is down
     if (staff.twoFactorAuthEnabled) {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      // crypto.randomInt, never Math.random(): V8 seeds Math.random from a
+      // xorshift128+ state that can be reconstructed from a handful of observed
+      // outputs. Anyone able to harvest codes from an account they control could
+      // then predict the next ones this process issues — including somebody
+      // else's. This value is the second factor on a login; it has to come from
+      // a CSPRNG. Range kept at 100000–999999 so a code never starts with a
+      // zero the user might drop while typing it.
+      const otp = crypto.randomInt(100000, 1000000).toString();
       let redisAvailable = false;
       try {
         if (redis) {
-          await redis.set(`otp:${staff._id}`, otp, { ex: 300 });
+          await redis.set(otpKey(String(staff._id)), otp, { ex: OTP_TTL_SECONDS });
+          // A fresh code deserves a fresh allowance; otherwise failures against
+          // an old code would lock out the new one the user just asked for.
+          await redis.del(otpAttemptsKey(String(staff._id)));
           redisAvailable = true;
         }
       } catch (redisErr: any) {
@@ -930,9 +974,12 @@ export const verifyOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "userId and otp are required" });
     }
 
+    const key = otpKey(String(userId));
+    const attemptsKey = otpAttemptsKey(String(userId));
+
     let storedOtp: string | null;
     try {
-      storedOtp = redis ? await redis.get(`otp:${userId}`) : null;
+      storedOtp = redis ? await redis.get(key) : null;
     } catch (redisErr: any) {
       console.error("Redis error during OTP fetch:", redisErr.message);
       return res.status(503).json({
@@ -944,12 +991,44 @@ export const verifyOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "OTP expired. Please log in again." });
     }
 
-    if (storedOtp !== otp.toString().trim()) {
+    if (!secretsMatch(String(storedOtp), otp.toString().trim())) {
+      /**
+       * Burn the code once the allowance runs out.
+       *
+       * Without this a wrong guess costs the attacker nothing and the code
+       * stays live for its whole five minutes. Counting per user rather than
+       * per IP is the point — the code belongs to an account, not to whoever
+       * happens to be guessing at it.
+       */
+      let attempts = 0;
+      try {
+        if (redis) {
+          attempts = await redis.incr(attemptsKey);
+          // Tie the counter's life to the code's, so it cannot outlive it and
+          // block a legitimate retry later.
+          if (attempts === 1) await redis.expire(attemptsKey, OTP_TTL_SECONDS);
+        }
+      } catch {
+        // Redis wobbled. Fall through to the plain rejection below rather than
+        // locking someone out over an infrastructure blip.
+      }
+
+      if (attempts >= OTP_MAX_ATTEMPTS) {
+        try {
+          if (redis) await Promise.all([redis.del(key), redis.del(attemptsKey)]);
+        } catch {
+          // The 5-minute TTL is the backstop.
+        }
+        return res.status(429).json({
+          message: "Too many incorrect codes. Please log in again to get a new one.",
+        });
+      }
+
       return res.status(400).json({ message: "Invalid OTP. Please try again." });
     }
 
     try {
-      if (redis) await redis.del(`otp:${userId}`);
+      if (redis) await Promise.all([redis.del(key), redis.del(attemptsKey)]);
     } catch {
       // Non-critical — OTP will expire on its own via the 5-min TTL
     }
