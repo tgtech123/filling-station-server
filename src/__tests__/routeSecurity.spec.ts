@@ -71,6 +71,8 @@ const PROTECTED = [
   ["patch", "/api/demo/bookings/000000000000000000000000"],
   ["put", "/api/register/000000000000000000000000"],
   ["delete", "/api/register/000000000000000000000000"],
+  // States what every litre and crate cost, across every department at once.
+  ["get", "/api/stock-position"],
 ] as const;
 
 describe("unauthenticated requests are refused", () => {
@@ -104,6 +106,20 @@ describe("station deletion is not reachable by a tenant", () => {
       .set("Authorization", `Bearer ${tokenFor("manager", { isOwner: true, isSuperManager: true })}`);
     expect(res.status).toBe(403);
   });
+});
+
+describe("stock costs are not open to the whole station", () => {
+  // The report spans fuel, gas and the shop at once and states what each cost.
+  // A till or a forecourt supervisor has no call on that figure.
+  it.each(["cashier", "attendant", "supervisor"])(
+    "%s cannot read the station's stock position",
+    async (role) => {
+      const res = await request(app)
+        .get("/api/stock-position")
+        .set("Authorization", `Bearer ${tokenFor(role)}`);
+      expect(res.status).toBe(403);
+    }
+  );
 });
 
 describe("the admin panel is closed to station roles", () => {
