@@ -7,6 +7,8 @@ import FillingStation from "../models/fillingStation.model";
 import PlatformSettings from "../models/platformSettings.model";
 import Notification from "../models/notification.model";
 import { transporter } from "../middlewares/transporter.middleware";
+import fs from "fs";
+import path from "path";
 
 const PRIORITY_MAP: Record<string, "low" | "medium" | "high" | "urgent"> = {
   "enterprise-max": "urgent",
@@ -353,6 +355,57 @@ export const deleteFaq = async (req: AuthenticatedRequest, res: Response) => {
     const faq = await FAQ.findByIdAndDelete(req.params.id);
     if (!faq) return res.status(404).json({ message: "FAQ not found" });
     return res.status(200).json({ message: "FAQ deleted" });
+  } catch (error: any) {
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// ── User manual ──────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/support/user-guide
+ *
+ * The full user manual as Markdown, for the in-app help pages to render and for
+ * anyone who wants to paste it into a word processor.
+ *
+ * Served from docs/user-guide.md — the same file `npm run guide` turns into the
+ * Word document — so the manual has exactly one source. Editing that file
+ * updates the app, the .docx and this endpoint together; a copy pasted into the
+ * client would be a second version to forget about.
+ */
+const GUIDE_CANDIDATES = [
+  // Running from source (ts-node): <root>/src/controllers → <root>/docs
+  path.resolve(__dirname, "../../docs/user-guide.md"),
+  // Running from dist: <root>/dist/controllers → <root>/docs
+  path.resolve(__dirname, "../../../docs/user-guide.md"),
+  // However the process was started, the repo root is the usual cwd.
+  path.resolve(process.cwd(), "docs/user-guide.md"),
+];
+
+/** Cached with the file's mtime so an edit is picked up without a restart. */
+let guideCache: { path: string; mtimeMs: number; markdown: string } | null = null;
+
+export const getUserGuide = async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const found = GUIDE_CANDIDATES.find((p) => fs.existsSync(p));
+    if (!found) {
+      return res.status(404).json({
+        message: "The user manual is not available on this server.",
+      });
+    }
+
+    const { mtimeMs } = fs.statSync(found);
+    if (!guideCache || guideCache.path !== found || guideCache.mtimeMs !== mtimeMs) {
+      guideCache = { path: found, mtimeMs, markdown: fs.readFileSync(found, "utf8") };
+    }
+
+    return res.status(200).json({
+      data: {
+        markdown: guideCache.markdown,
+        updatedAt: new Date(mtimeMs).toISOString(),
+        bytes: Buffer.byteLength(guideCache.markdown, "utf8"),
+      },
+    });
   } catch (error: any) {
     return res.status(500).json({ message: "Server error", error: error.message });
   }

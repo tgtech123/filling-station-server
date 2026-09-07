@@ -108,6 +108,37 @@ describe("station deletion is not reachable by a tenant", () => {
   });
 });
 
+describe("pay data stays with the roles that answer for it", () => {
+  // Allowances set the pension base, so they decide what the company remits.
+  // The accountant maintains them and the owner oversees them; nobody on the
+  // forecourt has any business reading or changing what anyone is paid.
+  it.each(["cashier", "attendant", "supervisor"])(
+    "%s cannot read the allowance catalogue",
+    async (role) => {
+      const res = await request(app)
+        .get("/api/salary/allowances/settings")
+        .set("Authorization", `Bearer ${tokenFor(role)}`);
+      expect(res.status).toBe(403);
+    }
+  );
+
+  it.each(["cashier", "attendant", "supervisor"])(
+    "%s cannot set another staff member's allowances",
+    async (role) => {
+      const res = await request(app)
+        .put("/api/salary/staff/5f8d0d55b54764421b7156da/allowances")
+        .set("Authorization", `Bearer ${tokenFor(role)}`)
+        .send({ allowances: [{ key: "housing", amount: 999_999 }] });
+      expect(res.status).toBe(403);
+    }
+  );
+
+  it("requires a session for the allowance catalogue", async () => {
+    const res = await request(app).get("/api/salary/allowances/settings");
+    expect([401, 403]).toContain(res.status);
+  });
+});
+
 describe("stock costs are not open to the whole station", () => {
   // The report spans fuel, gas and the shop at once and states what each cost.
   // A till or a forecourt supervisor has no call on that figure.
