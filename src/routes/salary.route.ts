@@ -14,6 +14,9 @@ import {
   getSalaryConfig,
   configureSalary,
   getSalaryStructure,
+  getAllowanceSettings,
+  updateAllowanceSettings,
+  updateStaffAllowances,
 } from "../controllers/salary.controller";
 
 const router = express.Router();
@@ -49,6 +52,20 @@ router.post("/:id/validate", requireOwner, validateDraft);
 
 // Owner or accountant: list validated history (summary only — the wage bill)
 router.get("/history", requireOwnerOrRoles("accountant"), getHistory);
+
+// ── Allowances ───────────────────────────────────────────────────────────────
+// The accountant prepares payroll and the pension schedule, so the allowance
+// catalogue is theirs to maintain; the owner sees it too, since it decides what
+// the company remits. Declared BEFORE "/:id" so "allowances" is never read as a
+// salary record id.
+router.get("/allowances/settings", checkRole("manager", "accountant"), getAllowanceSettings);
+router.put("/allowances/settings", checkRole("manager", "accountant"), updateAllowanceSettings);
+
+// Entering the figures per staff member. Narrower than the salary config below
+// on purpose — it hands the accountant allowances without handing them
+// everyone's basic pay. Manager rows are refused to anyone but the owner,
+// enforced in the controller.
+router.put("/staff/:staffId/allowances", checkRole("manager", "accountant"), updateStaffAllowances);
 
 // Own record, or the owner for anyone else's — enforced in the controller so a
 // hired manager can still read their OWN salary config here.

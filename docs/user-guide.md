@@ -19,7 +19,7 @@
 11. [Gas Department (CNG / LPG)](#11-gas-department-cng--lpg)
 12. [Financial Reports & Cash Reconciliation](#12-financial-reports--cash-reconciliation) — reports, reconciliation, opening stock & the Accounting Suite
 13. [Expense Management](#13-expense-management)
-14. [Payroll & Commissions](#14-payroll--commissions)
+14. [Payroll & Commissions](#14-payroll--commissions) — salaries, allowances & the pension base
 15. [Procurement & Supplier Management](#15-procurement--supplier-management)
 16. [Branches & Multi-Location Management](#16-branches--multi-location-management)
 17. [Subscription & Billing](#17-subscription--billing) — upgrade, renew, downgrade, billing history
@@ -1083,7 +1083,61 @@ The structure can be opened for any month, including one where payroll has not b
 
 Each row shows the month, the total payroll, who prepared it, who approved it and when. Click a month to open the full breakdown per staff member.
 
-### 14.2 Commission Structures
+### 14.2 Allowances & the Pension Base (PenCom)
+
+> Accountant and Owner
+
+**Why this matters.** The Pension Reform Act 2014 sets pension at **18% of monthly emolument** — 8% deducted from the employee and 10% paid by the employer. The Act defines monthly emolument as whatever the employment contract says, **but never less than basic salary + housing allowance + transport allowance**. A station that pays housing or transport allowances and computes pension on basic alone is **under-remitting**, and the shortfall accrues quietly, month after month.
+
+#### Turning allowances on
+
+Allowances are **off by default**, and a station that pays a single flat wage can leave them off — payroll behaves exactly as it always has, with pension charged on basic salary.
+
+1. Go to **Payroll** > **Salary Structure**
+2. Click **Set up allowances** (beside the pension toggle)
+3. Tick **Use allowances in payroll**
+4. Tick the allowances this station actually pays, and tick **Pensionable** for any your employment contracts treat as part of monthly emolument
+5. **Save settings**
+
+The catalogue ships with the allowances a Nigerian station commonly pays — housing, transport, meal, utility, entertainment, medical, leave, wardrobe, furniture, responsibility, hazard and shift. If you pay something not listed, type its name in the box at the bottom and click **Add**.
+
+> **Housing and transport cannot be switched off or excluded from pension.** They are the Act's minimum, so the system locks them on. Everything else is your choice, because the Act defers to your contracts for anything above that floor.
+
+#### Entering each staff member's figures
+
+1. In the salary structure table, click the **Allowances** figure on a staff member's row
+2. Enter the monthly amount for each allowance
+3. The panel shows the **pension base** updating live — basic + pensionable allowances — with the 8% and 10% it produces
+4. **Save allowances**
+
+The amounts are saved against the **staff member**, not the month, so they prefill every payroll from then on — the same way basic salary does. You only enter them once, and change them when the person's pay changes.
+
+#### What changes on the payroll
+
+| Figure | Without allowances | With allowances |
+|--------|-------------------|-----------------|
+| Pension base | Basic salary | Basic + pensionable allowances |
+| PAYE base | Basic salary | Basic + all allowances |
+| Salary to pay | Basic + bonuses − deductions | Basic + allowances + bonuses − deductions |
+
+Bonuses are **never** in the pension base. They are variable performance payments, not contractual monthly emolument, and pension that moved with somebody's sales month could not be defended.
+
+> **Splitting an existing wage is safe.** If a staff member is currently on ₦200,000 recorded as basic and you restructure that into ₦120,000 basic + ₦50,000 housing + ₦30,000 transport, their take-home and their PAYE do not change — the tax base counts allowances too. What changes is that the pension is now computed correctly.
+
+#### The remittance schedule
+
+Export the salary structure (**Export** > CSV) and it carries **Total Allowances**, **Pensionable Allowances** and **Pensionable Earnings** as named columns, so the file doubles as the schedule your PFA needs — it shows the emolument each 8% and 10% was struck on.
+
+#### Who can do what
+
+| Who | What they can do |
+|-----|-----------------|
+| **Accountant** | Maintain the catalogue; enter allowances for any staff member except managers |
+| **Owner** | Everything the accountant can, plus managers' allowances |
+| **Hired manager** | Nothing — a manager's own pay is the owner's decision |
+| Everyone else | No access |
+
+### 14.3 Commission Structures
 
 Commissions reward staff for sales performance.
 
@@ -1100,7 +1154,7 @@ Commissions reward staff for sales performance.
 1. Go to **Commissions** > **Payment History**
 2. See earned commissions by staff member and period
 
-### 14.3 Consolidated Payroll (Multi-Branch)
+### 14.4 Consolidated Payroll (Multi-Branch)
 
 If you manage multiple branches:
 1. Go to **Consolidated Payroll**

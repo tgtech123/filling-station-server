@@ -7,7 +7,18 @@ import FillingStation from "../models/fillingStation.model";
 import CommissionStructure from "../models/commissionStructure.model";
 import BonusStructure from "../models/bonusStructure.model";
 import Expense from "../models/expense.model";
+import AllowanceSettings, {
+  DEFAULT_ALLOWANCE_TYPES,
+  STATUTORY_ALLOWANCE_KEYS,
+} from "../models/allowanceSettings.model";
+import { computePayrollEntry, resolveAllowances } from "../utils/payrollMath";
 import { isOwnerAccount } from "../middlewares/requireOwner";
+
+/** What a station's allowance catalogue looks like once loaded. */
+type AllowanceContext = {
+  enabled: boolean;
+  types: { key: string; label: string; pensionable: boolean; active: boolean; order: number }[];
+};
 
 // Generate human-readable staff code from ObjectId
 const toStaffCode = (id: mongoose.Types.ObjectId): string =>
@@ -37,30 +48,65 @@ const buildBonusMap = (structures: any[]): Map<string, number> => {
   return map;
 };
 
-// Recalculate derived amounts â€" pension is applied only when pensionEnabled = true
-const recalcEntry = (e: Partial<ISalaryEntry>, pensionEnabled = true): Partial<ISalaryEntry> => {
-  const basic = Number(e.basicSalary) || 0;
-  const ba = e.bonusAmounts ?? { monthlySalesTarget: 0, zeroDiscrepancies: 0, topPerformer: 0 };
+/**
+ * The station's allowance catalogue, created on first use.
+ *
+ * Seeded disabled with housing and transport already defined, so opening the
+ * settings screen shows the two the Act names rather than an empty page — while
+ * an untouched station's payroll behaves exactly as it did before allowances
+ * existed.
+ */
+const loadAllowanceContext = async (stationOid: mongoose.Types.ObjectId) => {
+  let settings = await AllowanceSettings.findOne({ fillingStation: stationOid });
+  if (!settings) {
+    settings = await AllowanceSettings.create({ fillingStation: stationOid });
+  }
+  return {
+    enabled: settings.enabled,
+    types: settings.types.map((t) => ({
+      key: t.key,
+      label: t.label,
+      pensionable: t.pensionable,
+      active: t.active,
+      order: t.order,
+    })),
+  };
+};
 
-  const mst = Number(ba.monthlySalesTarget) || 0;
-  const zd  = Number(ba.zeroDiscrepancies)  || 0;
-  const tp  = Number(ba.topPerformer)       || 0;
-  const totalBonus = mst + zd + tp;
-
-  const taxAmount       = Math.round(basic * (Number(e.taxPercentage) || 0) / 100);
-  const shortage        = Number(e.shortage) || 0;
-  const employeePension = pensionEnabled ? Math.round(basic * 0.08) : 0;
-  const employerPension = pensionEnabled ? Math.round(basic * 0.10) : 0;
-  const salaryToPay     = Math.max(0, basic + totalBonus - taxAmount - employeePension - shortage);
+/**
+ * Recalculate one payroll line.
+ *
+ * The arithmetic lives in utils/payrollMath so the pension base has exactly one
+ * definition. Allowances already on the entry are kept: they are a snapshot of
+ * what this month pays, taken from the staff record when the row was built.
+ */
+const recalcEntry = (
+  e: Partial<ISalaryEntry>,
+  pensionEnabled = true,
+  allowancesEnabled = false
+): Partial<ISalaryEntry> => {
+  const r = computePayrollEntry(
+    {
+      basicSalary: e.basicSalary,
+      allowances: e.allowances,
+      bonusAmounts: e.bonusAmounts,
+      taxPercentage: e.taxPercentage,
+      shortage: e.shortage,
+    },
+    { pensionEnabled, allowancesEnabled }
+  );
 
   return {
     ...e,
-    bonusAmounts: { monthlySalesTarget: mst, zeroDiscrepancies: zd, topPerformer: tp },
-    totalBonus,
-    taxAmount,
-    employeePension,
-    employerPension,
-    salaryToPay,
+    allowances: r.allowances,
+    totalAllowances: r.totalAllowances,
+    pensionableEarnings: r.pensionableEarnings,
+    bonusAmounts: r.bonusAmounts,
+    totalBonus: r.totalBonus,
+    taxAmount: r.taxAmount,
+    employeePension: r.employeePension,
+    employerPension: r.employerPension,
+    salaryToPay: r.salaryToPay,
   };
 };
 
@@ -70,6 +116,7 @@ const buildFreshEntry = (
   structureByRole: Map<string, any>,
   bonusMap: Map<string, number>,
   pensionEnabled = true,
+  allowanceCtx: AllowanceContext = { enabled: false, types: [] },
 ): Partial<ISalaryEntry> => {
   const base: Partial<ISalaryEntry> = {
     staff: s._id as mongoose.Types.ObjectId,
@@ -80,6 +127,12 @@ const buildFreshEntry = (
     shiftType: s.shiftType ?? "",
     payType: s.payType ?? "Monthly",
     basicSalary: s.amount ?? 0,
+    // Prefilled from what the accountant saved against this staff member,
+    // read through the station's catalogue so labels and the pensionable flag
+    // are the ones in force today.
+    allowances: resolveAllowances(s.allowances, allowanceCtx.types),
+    totalAllowances: 0,
+    pensionableEarnings: 0,
     bonusAmounts: {
       monthlySalesTarget: bonusMap.get("monthlySalesTarget") ?? 0,
       zeroDiscrepancies:  bonusMap.get("zeroDiscrepancies")  ?? 0,
@@ -99,7 +152,7 @@ const buildFreshEntry = (
     // it counts toward the payroll total, but cannot edit it here.
     readOnly: s.role === "manager",
   };
-  return recalcEntry(base, pensionEnabled);
+  return recalcEntry(base, pensionEnabled, allowanceCtx.enabled);
 };
 
 // Resolve caller's full name â€" prefer token fields, fall back to DB
@@ -133,6 +186,8 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
     const draft = await SalaryDraft.findOne({ station: stationOid, month });
 
     // â"€â"€ Case 1: No draft yet â€" create from scratch â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    const allowanceCtx = await loadAllowanceContext(stationOid);
+
     if (!draft) {
       const [structures, bonusStructures] = await Promise.all([
         CommissionStructure.find({ fillingStation: stationOid }).lean(),
@@ -141,7 +196,9 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
       const structureByRole = new Map(structures.map((s) => [s.role, s]));
       const bonusMap = buildBonusMap(bonusStructures);
 
-      const entries = staffList.map((s) => buildFreshEntry(s, structureByRole, bonusMap, true));
+      const entries = staffList.map((s) =>
+        buildFreshEntry(s, structureByRole, bonusMap, true, allowanceCtx)
+      );
 
       const preparedByName = await resolveFullName(userId, firstName, lastName);
 
@@ -150,18 +207,35 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
         month,
         entries,
         pensionEnabled: true,
+        allowancesEnabled: allowanceCtx.enabled,
         status: "draft",
         preparedBy: new mongoose.Types.ObjectId(userId),
         preparedByName,
       });
 
-      return res.status(200).json({ success: true, data: newDraft });
+      return res.status(200).json({
+        success: true,
+        data: newDraft,
+        allowanceTypes: allowanceCtx.types,
+      });
     }
 
     // â"€â"€ Case 2: Draft is locked (submitted / validated) â€" return as-is â"€â"€â"€â"€â"€â"€â"€â"€
     if (draft.status !== "draft") {
-      return res.status(200).json({ success: true, data: draft });
+      return res.status(200).json({
+        success: true,
+        data: draft,
+        allowanceTypes: allowanceCtx.types,
+      });
     }
+
+    /**
+     * A station that switches allowances on (or off) mid-month must see the
+     * open draft follow. Without this the toggle would appear to do nothing
+     * until some unrelated staff edit happened to trigger a resync.
+     */
+    const allowanceModeChanged = draft.allowancesEnabled !== allowanceCtx.enabled;
+    draft.allowancesEnabled = allowanceCtx.enabled;
 
     // â"€â"€ Case 3: Draft exists and is editable â€" sync staff roster â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     //
@@ -188,6 +262,22 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
         // editable until some other field happens to change.
         const shouldBeReadOnly = s.role === "manager";
 
+        // Allowances are staff-owned like basic salary, so the row has to
+        // follow when the accountant changes one. Comparing the resolved lines
+        // rather than the raw staff field also catches a catalogue change —
+        // a type deactivated, renamed, or made pensionable — which alters what
+        // this month should pay and remit without the staff record moving.
+        const freshAllowances = resolveAllowances(s.allowances, allowanceCtx.types);
+        const allowancesChanged =
+          JSON.stringify(freshAllowances) !== JSON.stringify(
+            (e.allowances ?? []).map((a: any) => ({
+              key: a.key,
+              label: a.label,
+              amount: a.amount,
+              pensionable: a.pensionable,
+            }))
+          );
+
         const staffChanged =
           e.firstName  !== s.firstName       ||
           e.lastName   !== s.lastName        ||
@@ -195,7 +285,9 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
           e.shiftType  !== (s.shiftType ?? "") ||
           e.payType    !== (s.payType ?? "Monthly") ||
           e.basicSalary !== (s.amount ?? 0)  ||
-          !!e.readOnly !== shouldBeReadOnly;
+          !!e.readOnly !== shouldBeReadOnly  ||
+          (allowanceCtx.enabled && allowancesChanged) ||
+          allowanceModeChanged;
 
         if (!staffChanged) return e as Partial<ISalaryEntry>;
 
@@ -213,6 +305,7 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
           shiftType: s.shiftType ?? "",
           payType:   s.payType ?? "Monthly",
           basicSalary: s.amount ?? 0,
+          allowances: freshAllowances,
           // â€" accountant-owned (preserved) â€"
           bonusAmounts: {
             monthlySalesTarget: e.bonusAmounts.monthlySalesTarget,
@@ -230,13 +323,15 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
           // manager role flips the row's editability with it.
           readOnly: s.role === "manager",
           // placeholders â€" will be recalculated by recalcEntry
+          totalAllowances: 0,
+          pensionableEarnings: 0,
           totalBonus: 0,
           taxAmount:  0,
           employeePension: 0,
           employerPension: 0,
           salaryToPay: 0,
         };
-        return recalcEntry(merged, draft.pensionEnabled);
+        return recalcEntry(merged, draft.pensionEnabled, allowanceCtx.enabled);
       });
 
     // Detect if any staff were removed (length changed)
@@ -252,15 +347,23 @@ export const getOrCreateDraft = async (req: AuthenticatedRequest, res: Response)
       ]);
       const structureByRole = new Map(structures.map((s) => [s.role, s]));
       const bonusMap = buildBonusMap(bonusStructures);
-      newStaff.forEach((s) => syncedEntries.push(buildFreshEntry(s, structureByRole, bonusMap, draft.pensionEnabled)));
+      newStaff.forEach((s) =>
+        syncedEntries.push(
+          buildFreshEntry(s, structureByRole, bonusMap, draft.pensionEnabled, allowanceCtx)
+        )
+      );
     }
 
-    if (modified) {
+    if (modified || allowanceModeChanged) {
       draft.entries = syncedEntries as typeof draft.entries;
       await draft.save();
     }
 
-    return res.status(200).json({ success: true, data: draft });
+    return res.status(200).json({
+      success: true,
+      data: draft,
+      allowanceTypes: allowanceCtx.types,
+    });
   } catch (err) {
     console.error("getOrCreateDraft:", err);
     return res.status(500).json({ message: "Server error" });
@@ -292,6 +395,20 @@ export const saveDraft = async (req: AuthenticatedRequest, res: Response) => {
     const pension = pensionEnabled !== undefined ? pensionEnabled : draft.pensionEnabled;
     draft.pensionEnabled = pension;
 
+    /**
+     * Allowances are NOT an accountant edit on this screen.
+     *
+     * They are set per staff member (and saved to the staff record), then
+     * prefilled here — the same treatment basic salary gets. So the stored
+     * lines win over anything the client posts: a payroll table that could
+     * rewrite an allowance would be a second, invisible place to change
+     * somebody's pay, and the two would drift.
+     */
+    const allowancesByStaffId = new Map(
+      draft.entries.map((e) => [e.staff.toString(), e.allowances ?? []])
+    );
+    const allowancesEnabled = draft.allowancesEnabled;
+
     // Manager rows are read-only to the accountant. Rather than trusting the
     // client to respect the flag, the stored row wins: whatever was posted for
     // a manager is discarded and the row is recalculated from what the OWNER
@@ -305,13 +422,18 @@ export const saveDraft = async (req: AuthenticatedRequest, res: Response) => {
 
     let rejectedEdits = 0;
     const nextEntries = entries.map((e) => {
-      const locked = e.staff ? lockedByStaffId.get(e.staff.toString()) : undefined;
-      if (!locked) return recalcEntry(e, pension);
+      const staffId = e.staff ? e.staff.toString() : "";
+      const locked = staffId ? lockedByStaffId.get(staffId) : undefined;
+      if (!locked) {
+        // Stored allowances, never the posted ones.
+        const withStored = { ...e, allowances: allowancesByStaffId.get(staffId) ?? [] };
+        return recalcEntry(withStored, pension, allowancesEnabled);
+      }
       rejectedEdits++;
       // Subdocuments carry mongoose internals; convert to a plain object before
       // recalculating so nothing mongoose-specific leaks into the new array.
       const plain = (locked as any).toObject ? (locked as any).toObject() : { ...locked };
-      return recalcEntry(plain, pension);
+      return recalcEntry(plain, pension, allowancesEnabled);
     });
 
     draft.entries = nextEntries as typeof draft.entries;
@@ -570,7 +692,10 @@ export const getSalaryStructure = async (req: AuthenticatedRequest, res: Respons
       ]);
       const structureByRole = new Map(structures.map((s) => [s.role, s]));
       const bonusMap = buildBonusMap(bonusStructures);
-      entries = staffList.map((s) => buildFreshEntry(s, structureByRole, bonusMap, true));
+      const allowanceCtx = await loadAllowanceContext(stationOid);
+      entries = staffList.map((s) =>
+        buildFreshEntry(s, structureByRole, bonusMap, true, allowanceCtx)
+      );
     }
 
     if (!seesEveryone) {
@@ -604,7 +729,7 @@ export const getSalaryConfig = async (req: AuthenticatedRequest, res: Response) 
     const callerId = req.user?._id || req.user?.id;
 
     const target = await Staff.findById(staffId)
-      .select("firstName lastName role amount payType taxPercentage bankDetails station")
+      .select("firstName lastName role amount allowances payType taxPercentage bankDetails station")
       .lean() as any;
     if (!target) return res.status(404).json({ message: "Staff not found" });
 
@@ -669,6 +794,212 @@ export const configureSalary = async (req: AuthenticatedRequest, res: Response) 
     return res.status(200).json({ success: true, data: updated });
   } catch (err) {
     console.error("configureSalary:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ── Allowances ───────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/salary/allowances/settings
+ *
+ * The station's allowance catalogue: which allowances it pays, which count
+ * toward the pension base, and whether allowances are in use at all.
+ */
+export const getAllowanceSettings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationOid = new mongoose.Types.ObjectId(req.user!.station);
+    let settings = await AllowanceSettings.findOne({ fillingStation: stationOid });
+    if (!settings) settings = await AllowanceSettings.create({ fillingStation: stationOid });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        enabled: settings.enabled,
+        types: [...settings.types].sort((a, b) => a.order - b.order),
+        statutoryKeys: STATUTORY_ALLOWANCE_KEYS,
+      },
+    });
+  } catch (err) {
+    console.error("getAllowanceSettings:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * PUT /api/salary/allowances/settings
+ *
+ * Turn allowances on or off for the station, choose which are offered, and
+ * declare which count toward monthly emolument.
+ *
+ * Housing and transport cannot be deactivated or made non-pensionable: the
+ * Pension Reform Act 2014 puts them in the base, so allowing either would let a
+ * station configure itself below the statutory minimum. Everything else is the
+ * station's own call, because the Act defers to what the employment contract
+ * defines as emolument.
+ */
+export const updateAllowanceSettings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const stationOid = new mongoose.Types.ObjectId(req.user!.station);
+    const { enabled, types } = req.body as {
+      enabled?: boolean;
+      types?: { key: string; label?: string; pensionable?: boolean; active?: boolean }[];
+    };
+
+    let settings = await AllowanceSettings.findOne({ fillingStation: stationOid });
+    if (!settings) settings = await AllowanceSettings.create({ fillingStation: stationOid });
+
+    if (enabled !== undefined) settings.enabled = !!enabled;
+
+    if (Array.isArray(types)) {
+      const incoming = new Map(types.map((t) => [String(t.key), t]));
+
+      // Update what is already catalogued.
+      settings.types = settings.types.map((t) => {
+        const patch = incoming.get(t.key);
+        if (!patch) return t;
+        incoming.delete(t.key);
+        return {
+          ...t,
+          label: patch.label?.trim() || t.label,
+          // The pre-save hook is the real guarantee; this keeps the response
+          // honest rather than echoing a value that is about to be corrected.
+          pensionable: t.statutory ? true : patch.pensionable === true,
+          active: t.statutory ? true : patch.active === true,
+        } as any;
+      });
+
+      /**
+       * Anything left is a new allowance the station invented — a payment its
+       * contracts name that this catalogue never anticipated. Allowed, because
+       * the Act's base is whatever the contract says it is.
+       */
+      let order = settings.types.reduce((n, t) => Math.max(n, t.order), 0);
+      for (const t of incoming.values()) {
+        const label = String(t.label ?? "").trim();
+        if (!label) continue;
+        const key =
+          String(t.key || label)
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 40) || `allowance-${order + 1}`;
+        if (settings.types.some((x) => x.key === key)) continue;
+        settings.types.push({
+          key,
+          label,
+          pensionable: t.pensionable === true,
+          statutory: false,
+          active: t.active !== false,
+          order: ++order,
+        } as any);
+      }
+    }
+
+    settings.updatedBy = new mongoose.Types.ObjectId(req.user!.id);
+    await settings.save();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        enabled: settings.enabled,
+        types: [...settings.types].sort((a, b) => a.order - b.order),
+        statutoryKeys: STATUTORY_ALLOWANCE_KEYS,
+      },
+    });
+  } catch (err) {
+    console.error("updateAllowanceSettings:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * PUT /api/salary/staff/:staffId/allowances
+ *
+ * What one staff member is paid under each allowance.
+ *
+ * Deliberately separate from configureSalary, which sets basic pay and is the
+ * OWNER's alone. Allowances are the accountant's working detail — they prepare
+ * the payroll and the pension schedule — so this endpoint is narrow enough to
+ * hand them without also handing them everyone's basic salary. A manager's or
+ * the owner's own allowances stay with the owner, matching the rule that a
+ * manager's pay is never the accountant's to edit.
+ */
+export const updateStaffAllowances = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { staffId } = req.params;
+    const callerId = String(req.user?._id || req.user?.id || "");
+    const stationOid = new mongoose.Types.ObjectId(req.user!.station);
+    const { allowances } = req.body as { allowances?: { key: string; amount: number }[] };
+
+    if (!Array.isArray(allowances)) {
+      return res.status(400).json({ message: "allowances array is required" });
+    }
+
+    const target = await Staff.findById(staffId).select("role station").lean() as any;
+    if (!target) return res.status(404).json({ message: "Staff not found" });
+    if (String(target.station) !== String(stationOid)) {
+      return res.status(403).json({ message: "You do not have access to this staff member" });
+    }
+
+    const isOwner = await isOwnerAccount(callerId);
+    if (target.role === "manager" && !isOwner) {
+      return res.status(403).json({
+        message: "A manager's pay is set by the station owner, allowances included.",
+      });
+    }
+
+    const settings = await AllowanceSettings.findOne({ fillingStation: stationOid });
+    if (!settings || !settings.enabled) {
+      return res.status(400).json({
+        message: "Allowances are switched off for this station. Turn them on in payroll settings first.",
+      });
+    }
+
+    // Only catalogued, active allowances can hold a figure — otherwise a stale
+    // client could park money against a line nobody can see or audit.
+    const activeKeys = new Set(settings.types.filter((t) => t.active).map((t) => t.key));
+    const clean: { key: string; amount: number }[] = [];
+    const rejected: string[] = [];
+
+    for (const a of allowances) {
+      const key = String(a?.key ?? "");
+      const amount = Number(a?.amount);
+      if (!activeKeys.has(key)) {
+        if (key) rejected.push(key);
+        continue;
+      }
+      if (!Number.isFinite(amount) || amount < 0) {
+        return res.status(400).json({ message: `"${key}" must be a non-negative amount` });
+      }
+      clean.push({ key, amount: Math.round(amount) });
+    }
+
+    const updated = await Staff.findByIdAndUpdate(
+      staffId,
+      { allowances: clean },
+      { new: true }
+    ).select("firstName lastName role amount allowances");
+
+    const resolved = resolveAllowances(clean, settings.types as any);
+    const pensionable = resolved.filter((a) => a.pensionable).reduce((n, a) => n + a.amount, 0);
+
+    return res.status(200).json({
+      success: true,
+      data: updated,
+      // Shown back so the accountant sees the base they just changed, rather
+      // than having to reopen payroll to find out what it became.
+      summary: {
+        totalAllowances: resolved.reduce((n, a) => n + a.amount, 0),
+        pensionableAllowances: pensionable,
+        pensionableEarnings: (Number((updated as any)?.amount) || 0) + pensionable,
+      },
+      ...(rejected.length > 0 && {
+        notice: `Ignored ${rejected.length} allowance(s) that are not switched on for this station.`,
+      }),
+    });
+  } catch (err) {
+    console.error("updateStaffAllowances:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };

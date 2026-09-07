@@ -9,6 +9,29 @@ export interface ISalaryEntry {
   shiftType: string;
   payType: string; // "Monthly" | "Weekly" — from staff record
   basicSalary: number;
+  /**
+   * The allowances this person was paid THIS month, frozen as they stood.
+   *
+   * Snapshotted rather than looked up, including each line's `pensionable`
+   * flag. A station that adds transport allowance in June, or decides in
+   * September that meal allowance is pensionable after all, must not silently
+   * rewrite what March remitted to the PFA — the remittance was made on the
+   * figures of the day and the record has to keep saying so.
+   */
+  allowances: {
+    key: string;
+    label: string;
+    amount: number;
+    pensionable: boolean;
+  }[];
+  totalAllowances: number;
+  /**
+   * Basic + pensionable allowances: the "monthly emolument" the Pension Reform
+   * Act 2014 charges 8% + 10% against. Stored because it is the number an
+   * auditor or a PFA schedule asks to see, and deriving it later would depend
+   * on catalogue settings that may since have moved.
+   */
+  pensionableEarnings: number;
   // Bonus amounts prefilled from BonusStructure; editable by accountant
   bonusAmounts: {
     monthlySalesTarget: number;
@@ -18,8 +41,8 @@ export interface ISalaryEntry {
   totalBonus: number;
   taxPercentage: number;
   taxAmount: number;
-  employeePension: number; // 8% of basic when pension enabled, else 0
-  employerPension: number; // 10% of basic when pension enabled, else 0
+  employeePension: number; // 8% of pensionable earnings when enabled, else 0
+  employerPension: number; // 10% of pensionable earnings when enabled, else 0
   shortage: number;
   salaryToPay: number;
   bankDetails: {
@@ -53,6 +76,14 @@ export interface ISalaryDraft extends Document {
   validatedByName?: string;
   validatedAt?: Date;
   pensionEnabled: boolean;              // company-level toggle — persisted with the draft
+  /**
+   * Whether allowances applied when this month was prepared.
+   *
+   * Persisted with the draft for the same reason as pensionEnabled: reopening
+   * an old payroll must show the rules it was actually run under, not the ones
+   * in force today.
+   */
+  allowancesEnabled: boolean;
   expenseRef?: mongoose.Types.ObjectId; // auto-created expense on validation
   totalPayroll?: number;                // cached at validation time
   createdAt?: Date;
@@ -69,6 +100,20 @@ const salaryEntrySchema = new Schema<ISalaryEntry>(
     shiftType: { type: String, default: "" },
     payType: { type: String, default: "Monthly" },
     basicSalary: { type: Number, required: true, default: 0 },
+    allowances: {
+      type: [
+        {
+          _id: false,
+          key: { type: String, required: true },
+          label: { type: String, required: true },
+          amount: { type: Number, required: true, default: 0 },
+          pensionable: { type: Boolean, default: false },
+        },
+      ],
+      default: [],
+    },
+    totalAllowances: { type: Number, default: 0 },
+    pensionableEarnings: { type: Number, default: 0 },
     bonusAmounts: {
       monthlySalesTarget: { type: Number, default: 0 },
       zeroDiscrepancies: { type: Number, default: 0 },
@@ -108,6 +153,7 @@ const salaryDraftSchema = new Schema<ISalaryDraft>(
     validatedByName: { type: String },
     validatedAt: { type: Date },
     pensionEnabled: { type: Boolean, default: true },
+    allowancesEnabled: { type: Boolean, default: false },
     expenseRef: { type: Schema.Types.ObjectId, ref: "Expense" },
     totalPayroll: { type: Number, default: 0 },
   },

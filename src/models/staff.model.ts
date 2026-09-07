@@ -21,6 +21,16 @@ export interface IStaff extends Document {
   addSaleTarget?: boolean;
   payType?: string;
   amount: number;
+  /**
+   * Monthly allowances, by catalogue key — housing, transport and whatever else
+   * the station has switched on in AllowanceSettings.
+   *
+   * Amounts only. Whether a line is pensionable, what it is called and whether
+   * it is still offered all live in the station's catalogue, so changing the
+   * rule never means rewriting every staff record — and cannot leave two
+   * records disagreeing about what "housing" means.
+   */
+  allowances?: { key: string; amount: number }[];
   taxPercentage?: number;
   bankDetails?: { acctNo: string; acctName: string; bankName: string };
   onDuty?: boolean;
@@ -106,6 +116,16 @@ const StaffSchema = new Schema<IStaff>(
     addSaleTarget: { type: Boolean, required: true, default: false },
     payType: { type: String },
     amount: { type: Number, required: true, default: 0 },
+    allowances: {
+      type: [
+        {
+          _id: false,
+          key: { type: String, required: true, trim: true },
+          amount: { type: Number, required: true, min: 0, default: 0 },
+        },
+      ],
+      default: [],
+    },
     taxPercentage: { type: Number, default: 0 },
     bankDetails: {
       acctNo: { type: String, default: "" },
