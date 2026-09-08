@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "guide": "node docs/generate-word-guide.js",
+    "proposal": "node docs/proposal/generate-proposal.js",
     "who-is-admin": "ts-node --transpile-only src/scripts/whoIsAdmin.ts",
     "reset-password": "ts-node --transpile-only src/scripts/resetPassword.ts"
   },

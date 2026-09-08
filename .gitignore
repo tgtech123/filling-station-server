@@ -56,3 +56,7 @@ jest-html-reporters-*
 
 # TypeScript
 *.tsbuildinfo
+
+# Generated per-prospect proposals (carry client names and pricing)
+docs/proposal/*.docx
+docs/proposal/*.pdf

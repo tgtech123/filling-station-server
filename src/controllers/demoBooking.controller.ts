@@ -495,12 +495,25 @@ export const bookDemo = async (req: Request, res: Response) => {
     // The booking is already saved. A mail outage must not lose it, so delivery
     // is reported rather than thrown — the prospect sees their slot confirmed
     // on screen either way and sales still has the record.
-    const [prospectResult] = await Promise.allSettled([prospectMail, salesMail]);
+    const [prospectResult, salesResult] = await Promise.allSettled([prospectMail, salesMail]);
     const emailSent = prospectResult.status === "fulfilled";
     if (!emailSent) {
       console.error(
         "[demo] confirmation email failed:",
         (prospectResult as PromiseRejectedResult).reason?.message
+      );
+    }
+
+    // The alert is the only thing that tells us a lead arrived — nobody watches
+    // the admin list all day. If it fails, the whole lead goes to the log so it
+    // can be worked from there, instead of sitting unseen until the prospect
+    // gives up on us. Not surfaced to the prospect: their booking is fine, and
+    // our mail trouble is not their problem.
+    if (salesResult.status === "rejected") {
+      console.error(
+        `[demo] SALES ALERT FAILED — lead not delivered to ${salesInbox || "(no inbox configured)"}: ` +
+          `${booking.reference} | ${payload.fullName} | ${payload.email} | ${payload.phone} | ${when}`,
+        (salesResult as PromiseRejectedResult).reason?.message
       );
     }
 
