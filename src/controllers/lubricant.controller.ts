@@ -1460,6 +1460,18 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
     const processedItems = [];
     let totalAmount = 0;
 
+    /**
+     * What this basket has already taken off each product, in base units.
+     *
+     * One product can now appear on more than one line — two packs and three
+     * loose pieces — and each line claims its stock separately. The stock read
+     * in the failure path below runs inside the session, so it sees the shelf
+     * AFTER those earlier claims. Without this ledger, a basket needing 27 off
+     * a shelf holding 25 reports "only 1 available", which sends the cashier
+     * hunting a stock error that does not exist.
+     */
+    const claimedByProduct = new Map<string, { baseQty: number; labels: string[] }>();
+
     // ðŸ”„ Process each item
     for (const item of items) {
       const { lubricantId, quantity, unitPrice, unitName } = item;
@@ -1643,6 +1655,10 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
         { new: true, session }
       );
 
+      const unitLabel = saleUnit
+        ? `${quantity} × ${saleUnit.name}`
+        : `${quantity} ${baseUnitName}(s)`;
+
       if (!lubricant) {
         // The claim failed. Read the product back only to explain WHY - a
         // missing product and an insufficient one need different messages.
@@ -1662,22 +1678,58 @@ export const addLubricantTransaction = async (req: AuthenticatedRequest, res: Re
             error: `Lubricant not found: ${lubricantId}`,
           });
         }
-        if ((existing.qtyInStock ?? 0) <= 0) {
+
+        /**
+         * The shelf figure the cashier can actually see.
+         *
+         * The read above runs inside the session, so this basket's earlier
+         * lines have already been deducted from it. Adding them back gives the
+         * number on the shelf — the one the till is showing, and the one the
+         * cashier will count if they walk over and look.
+         */
+        const priorClaim = claimedByProduct.get(String(lubricantId));
+        const alreadyClaimed = priorClaim?.baseQty ?? 0;
+        const shelfQty = (existing.qtyInStock ?? 0) + alreadyClaimed;
+
+        if (shelfQty <= 0) {
           return res.status(400).json({
             success: false,
             error: `Out of stock: ${existing.productName}`,
           });
         }
+
+        // More than one line of this product on the bill: the shortfall belongs
+        // to the basket, not to this line. Blaming the last line reads as a bug
+        // when the earlier lines were accepted off the same shelf.
+        if (alreadyClaimed > 0) {
+          const labels = [...(priorClaim?.labels ?? []), unitLabel].join(" + ");
+          return res.status(409).json({
+            success: false,
+            error: `Cannot sell ${labels} of ${existing.productName} on one bill — that needs ${alreadyClaimed + baseQty} ${baseUnitName}(s) in total and only ${shelfQty} are in stock.`,
+            available: shelfQty,
+          });
+        }
+
         // Said in the unit they tried to sell, plus the shelf count in base
         // units — "1 Pack needs 12 pieces, there are 7" is actionable; "cannot
         // sell 1, only 7 available" reads like a bug.
-        const unitLabel = saleUnit ? `${quantity} × ${saleUnit.name}` : `${quantity} ${baseUnitName}(s)`;
         return res.status(409).json({
           success: false,
           error: saleUnit
-            ? `Cannot sell ${unitLabel} of ${existing.productName} — that needs ${baseQty} ${baseUnitName}(s) and only ${existing.qtyInStock} are in stock.`
-            : `Cannot sell ${unitLabel} of ${existing.productName}. Only ${existing.qtyInStock} available.`,
-          available: existing.qtyInStock,
+            ? `Cannot sell ${unitLabel} of ${existing.productName} — that needs ${baseQty} ${baseUnitName}(s) and only ${shelfQty} are in stock.`
+            : `Cannot sell ${unitLabel} of ${existing.productName}. Only ${shelfQty} available.`,
+          available: shelfQty,
+        });
+      }
+
+      // Claim succeeded — record it, so a later line of the same product that
+      // runs short can describe the whole bill rather than the remainder.
+      {
+        const key = String(lubricantId);
+        const prior = claimedByProduct.get(key) ?? { baseQty: 0, labels: [] };
+        claimedByProduct.set(key, {
+          baseQty: prior.baseQty + baseQty,
+          labels: [...prior.labels, unitLabel],
         });
       }
 
