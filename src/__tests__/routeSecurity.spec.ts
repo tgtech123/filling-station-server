@@ -73,6 +73,11 @@ const PROTECTED = [
   ["delete", "/api/register/000000000000000000000000"],
   // States what every litre and crate cost, across every department at once.
   ["get", "/api/stock-position"],
+  // States cost and margin on every product the station sells.
+  ["get", "/api/sales-analysis"],
+  // The station's debts, its ageing and who it owes.
+  ["get", "/api/suppliers/payables"],
+  ["get", "/api/suppliers/invoice-log"],
 ] as const;
 
 describe("unauthenticated requests are refused", () => {
@@ -149,6 +154,42 @@ describe("stock costs are not open to the whole station", () => {
         .get("/api/stock-position")
         .set("Authorization", `Bearer ${tokenFor(role)}`);
       expect(res.status).toBe(403);
+    }
+  );
+});
+
+describe("sales margins are not open to the whole station", () => {
+  // Same line as the stock position, for the same reason: every row states what
+  // the goods cost and what was made on them. A cashier ringing up a sale and a
+  // supervisor running a shift need neither figure to do the job, and the
+  // report spans departments neither of them answers for.
+  // "admin" is the platform operator, not the station owner — the owner reads
+  // this through the manager role. A tenant's margins are not the software
+  // vendor's to read, so admin is refused here too.
+  it.each(["cashier", "attendant", "supervisor", "admin"])(
+    "%s cannot read the station's sales analysis",
+    async (role) => {
+      const res = await request(app)
+        .get("/api/sales-analysis")
+        .set("Authorization", `Bearer ${tokenFor(role)}`);
+      expect(res.status).toBe(403);
+    }
+  );
+});
+
+describe("supplier debts are not open to the till", () => {
+  // The supplier register states what the station owes and what it has paid.
+  // A cashier needs supplier NAMES to record a purchase — that is a different
+  // endpoint — but never the debts or the ageing behind them.
+  it.each(["cashier", "attendant", "supervisor"])(
+    "%s cannot read supplier payables or the invoice log",
+    async (role) => {
+      for (const path of ["/api/suppliers/payables", "/api/suppliers/invoice-log"]) {
+        const res = await request(app)
+          .get(path)
+          .set("Authorization", `Bearer ${tokenFor(role)}`);
+        expect(res.status).toBe(403);
+      }
     }
   );
 });

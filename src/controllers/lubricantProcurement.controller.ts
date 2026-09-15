@@ -11,6 +11,8 @@ import { transporter } from "../middlewares/transporter.middleware";
 import { repriceSaleUnits, toNaira } from "../utils/storePricing";
 import { receiveBatch } from "../services/stockBatch.service";
 import { emitToStation } from "../services/socket.service";
+import Supplier from "../models/supplier.model";
+import LubricantPurchase from "../models/lubricant-purchase.model";
 
 // â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -18,6 +20,87 @@ async function buildProcurementNumber(stationId: any): Promise<string> {
   const year = new Date().getFullYear();
   const count = await LubricantProcurement.countDocuments({ fillingStation: stationId });
   return `PRO-${year}-${String(count + 1).padStart(3, "0")}`;
+}
+
+/** What one supplier has supplied of one product, from past invoices. */
+interface SupplyRecord {
+  timesSupplied: number;
+  lastSuppliedAt: Date | null;
+  lastUnitCost: number;
+  lastQuantity: number;
+  lastInvoiceNo: string;
+}
+
+/**
+ * What this supplier has actually delivered, product by product.
+ *
+ * Read from recorded purchase invoices — the goods-in record, not the order
+ * that requested them. An order can be raised against any vendor; an invoice
+ * means the supplier really supplied that product, which is the question being
+ * asked when someone picks a supplier and expects to see "their" items.
+ *
+ * Suppliers are joined by NAME because that is the only link the invoice
+ * carries: LubricantPurchase.supplier is free text typed at goods-in, with no
+ * reference to the Supplier collection. Matched case-insensitively and trimmed,
+ * because "Total Nig Ltd" and "total nig ltd " are one supplier to everyone
+ * except a string comparison.
+ */
+async function supplyHistoryFor(
+  stationId: any,
+  supplierName: string
+): Promise<Map<string, SupplyRecord>> {
+  if (!String(supplierName || "").trim()) return new Map();
+
+  const invoices = await LubricantPurchase.find({ fillingStation: stationId })
+    .select("supplier invoiceNo purchaseDate createdAt items")
+    .lean();
+
+  return buildSupplyHistory(invoices as any[], supplierName);
+}
+
+/**
+ * The reduction itself, separated from the query so it can be tested.
+ *
+ * Exported for that reason alone — nothing else calls it. The rules it encodes
+ * (which invoices count as this supplier's, and which of them supplies the
+ * "last" figures) are the part that would silently rot.
+ */
+export function buildSupplyHistory(
+  invoices: any[],
+  supplierName: string
+): Map<string, SupplyRecord> {
+  const history = new Map<string, SupplyRecord>();
+  const wanted = String(supplierName || "").trim().toLowerCase();
+  if (!wanted) return history;
+
+  for (const invoice of invoices || []) {
+    if (String(invoice.supplier || "").trim().toLowerCase() !== wanted) continue;
+
+    // purchaseDate is stored as a string; createdAt is the reliable instant and
+    // is used when the typed date is missing or unparseable.
+    const typed = invoice.purchaseDate ? new Date(invoice.purchaseDate) : null;
+    const at =
+      typed && !Number.isNaN(typed.getTime()) ? typed : new Date(invoice.createdAt);
+
+    for (const item of (invoice.items || []) as any[]) {
+      if (!item?.lubricantId) continue;
+      const key = String(item.lubricantId);
+      const prior = history.get(key);
+
+      // Only overwrite the "last" figures when this invoice is genuinely newer,
+      // so an old invoice entered late does not become the quoted cost.
+      const newer = !prior || !prior.lastSuppliedAt || at > prior.lastSuppliedAt;
+      history.set(key, {
+        timesSupplied: (prior?.timesSupplied ?? 0) + 1,
+        lastSuppliedAt: newer ? at : prior!.lastSuppliedAt,
+        lastUnitCost: newer ? Number(item.unitCost) || 0 : prior!.lastUnitCost,
+        lastQuantity: newer ? Number(item.quantity) || 0 : prior!.lastQuantity,
+        lastInvoiceNo: newer ? String(invoice.invoiceNo || "") : prior!.lastInvoiceNo,
+      });
+    }
+  }
+
+  return history;
 }
 
 // â”€â”€â”€ GET /api/procurement/reorder-items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -34,7 +117,7 @@ export const getReorderItems = async (req: AuthenticatedRequest, res: Response) 
      * whoever is raising it has to mentally filter first, which is exactly the
      * step that gets it wrong.
      */
-    const { orderType } = req.query as { orderType?: string };
+    const { orderType, supplierId } = req.query as { orderType?: string; supplierId?: string };
     // Nobody should be prompted to reorder something the station stopped
     // selling; that is the whole point of retiring it.
     const query: Record<string, unknown> = { fillingStation: stationId, isActive: { $ne: false } };
@@ -42,6 +125,35 @@ export const getReorderItems = async (req: AuthenticatedRequest, res: Response) 
     else if (orderType === "store") query.category = { $ne: "lubricant" };
 
     const items = await Lubricant.find(query).lean();
+
+    /**
+     * `?supplierId=` narrows the list to what raising a PO for THIS supplier
+     * actually needs: the products they have supplied before, that are at or
+     * below their reorder level right now.
+     *
+     * Both halves matter. Their whole catalogue would put things on the order
+     * that do not need ordering; every product at reorder level would put
+     * things on it this supplier has never stocked. The intersection is the
+     * list somebody would otherwise build by hand from the invoice file.
+     */
+    let history: Map<string, SupplyRecord> | null = null;
+    let supplierName = "";
+    if (supplierId) {
+      const supplier = await Supplier.findOne({
+        _id: supplierId,
+        fillingStation: stationId,
+      })
+        .select("name")
+        .lean();
+
+      // A supplier id that is not this station's is treated as no filter at all
+      // rather than an error: the screen stays usable, and no other station's
+      // supplier name is confirmed or denied to the caller.
+      if (supplier) {
+        supplierName = String((supplier as any).name || "");
+        history = await supplyHistoryFor(stationId, supplierName);
+      }
+    }
 
     const URGENCY_ORDER: Record<string, number> = { out_of_stock: 0, critical: 1, low: 2, healthy: 3 };
 
@@ -63,18 +175,68 @@ export const getReorderItems = async (req: AuthenticatedRequest, res: Response) 
       // Surface the category on every row so the UI can group or badge without
       // a second lookup, and default it for products created before categories.
       const category = (item as any).category || "lubricant";
+      const supplied = history?.get(String(item._id)) ?? null;
+
+      /**
+       * A starting quantity, not an instruction.
+       *
+       * What this supplier last delivered is the better guide where it exists —
+       * it already reflects their pack sizes and what the station actually gets
+       * through. Otherwise top the shelf up to twice its reorder level, which
+       * clears the threshold instead of landing exactly back on it. Whoever is
+       * raising the order types over it.
+       */
+      const topUp = Math.max(0, Math.ceil(item.reOrderLevel * 2 - item.qtyInStock));
+      const suggestedQty = Math.max(1, supplied?.lastQuantity || topUp || 1);
+
       return {
         ...item,
         category,
         orderType: category === "lubricant" ? "lubricant" : "store",
         urgency,
         stockRatio,
+        ...(history
+          ? {
+              suppliedBySelected: !!supplied,
+              timesSupplied: supplied?.timesSupplied ?? 0,
+              lastSuppliedAt: supplied?.lastSuppliedAt ?? null,
+              lastUnitCost: supplied?.lastUnitCost ?? 0,
+              lastQuantity: supplied?.lastQuantity ?? 0,
+              lastInvoiceNo: supplied?.lastInvoiceNo ?? "",
+              suggestedQty,
+            }
+          : {}),
       };
     });
 
     enriched.sort((a, b) => (URGENCY_ORDER[a.urgency] ?? 3) - (URGENCY_ORDER[b.urgency] ?? 3));
 
-    return res.status(200).json({ data: enriched });
+    // Without a supplier the screen is the old full inventory list, unchanged.
+    if (!history) return res.status(200).json({ data: enriched });
+
+    const suppliedItems = enriched.filter((i: any) => i.suppliedBySelected);
+    const needsReorder = (i: any) => i.urgency !== "healthy";
+
+    /**
+     * The counts behind an empty list.
+     *
+     * "Nothing to order" and "this supplier has never supplied anything" look
+     * identical on screen and mean completely different things — one is good
+     * news, the other means the supplier is new or the name on their invoices
+     * differs from the name they are registered under. The UI needs to be able
+     * to say which.
+     */
+    return res.status(200).json({
+      data: suppliedItems.filter(needsReorder),
+      meta: {
+        supplierId,
+        supplierName,
+        suppliedCount: suppliedItems.length,
+        atReorderCount: enriched.filter(needsReorder).length,
+        // Offered as the escape hatch when the filtered list comes back empty.
+        allAtReorder: enriched.filter(needsReorder),
+      },
+    });
   } catch (err: any) {
     return res.status(500).json({ message: "Server error", error: err.message });
   }
@@ -773,9 +935,45 @@ export const recordPayment = async (req: AuthenticatedRequest, res: Response) =>
       0
     );
 
-    const paid = Number(amountPaid);
+    /**
+     * This instalment ADDS to what has been paid; it does not replace it.
+     *
+     * The field used to be assigned outright, so a supplier paid ₦100,000 and
+     * then ₦150,000 a week later ended up recorded as having been paid
+     * ₦150,000 — the first instalment silently erased and the balance owed
+     * overstated by ₦100,000. Anyone settling in stages was accumulating wrong
+     * figures, and every report reading this field repeated them.
+     */
+    const instalment = Number(amountPaid);
+    const alreadyPaid = Number(procurement.amountPaid) || 0;
+    const outstanding = Math.max(0, totalCost - alreadyPaid);
+
+    // Paying more than is owed is a typo, not a decision. Refusing it costs one
+    // re-entry; accepting it puts a false credit on the supplier's account.
+    if (totalCost > 0 && instalment > outstanding + 0.01) {
+      return res.status(400).json({
+        message: `₦${instalment.toLocaleString()} is more than the ₦${outstanding.toLocaleString()} still owing on this order.`,
+      });
+    }
+
+    const paid = Math.round((alreadyPaid + instalment + Number.EPSILON) * 100) / 100;
     procurement.amountPaid   = paid;
     procurement.paymentNotes = paymentNotes?.trim() || "";
+
+    // Zero is a valid submission from the old "mark as unpaid" path; it moves
+    // no money and should not leave a payment in the history.
+    if (instalment > 0) {
+      const who = await Staff.findById(userId).select("firstName lastName").lean();
+      (procurement.payments as any).push({
+        amount: instalment,
+        paidAt: new Date(),
+        notes: paymentNotes?.trim() || "",
+        recordedBy: userId ?? null,
+        recordedByName: who
+          ? `${(who as any).firstName || ""} ${(who as any).lastName || ""}`.trim()
+          : "",
+      });
+    }
 
     if (paid >= totalCost && totalCost > 0) {
       procurement.paymentStatus = "paid";

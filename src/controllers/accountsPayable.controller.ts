@@ -539,28 +539,108 @@ export const createPaymentBatch = async (req: AuthenticatedRequest, res: Respons
       return res.status(400).json({ message: "payDate, method, bankAccountId and invoiceIds are required" });
     }
 
+    /**
+     * An entry is either an id, or an id with the amount to pay against it.
+     *
+     *   "64f…"                              → settle the whole balance
+     *   { invoiceId: "64f…", amount: 2e7 }  → pay this much of it
+     *
+     * The plain-string form is what every existing caller sends and it still
+     * means "pay it off", so nothing that worked before changes. The object
+     * form is what makes an instalment possible: a ₦35m load paid ₦20m now and
+     * the balance next week is two batches against the same invoice, which the
+     * engine below already handles — it accumulates `amountPaid` and only
+     * marks the invoice paid once the balance is cleared.
+     */
+    const requested: { invoiceId: string; amount: number | null }[] = [];
+    for (const entry of invoiceIds) {
+      if (entry && typeof entry === "object") {
+        const id = String((entry as any).invoiceId || (entry as any)._id || "");
+        if (!id) {
+          return res.status(400).json({ message: "Each payment line needs an invoiceId" });
+        }
+        const raw = (entry as any).amount;
+        // An absent amount means the whole balance; a present one must be real
+        // money. Silently coercing rubbish to 0 would post an empty payment.
+        if (raw === undefined || raw === null || raw === "") {
+          requested.push({ invoiceId: id, amount: null });
+        } else if (!Number.isFinite(Number(raw)) || Number(raw) <= 0) {
+          return res.status(400).json({
+            message: "A part payment must be a positive amount",
+          });
+        } else {
+          requested.push({ invoiceId: id, amount: round2(Number(raw)) });
+        }
+      } else {
+        requested.push({ invoiceId: String(entry), amount: null });
+      }
+    }
+
+    // One line per invoice. Two lines against the same invoice in one batch
+    // would each be measured against the same untouched balance, so together
+    // they could overpay it — and the existing length check below would not
+    // catch it, because `$in` de-duplicates.
+    const seen = new Set(requested.map((r) => r.invoiceId));
+    if (seen.size !== requested.length) {
+      return res.status(400).json({
+        message: "The same invoice appears twice in this batch. Put one line per invoice.",
+      });
+    }
+
     const invoices = await APInvoice.find({
-      _id: { $in: invoiceIds },
+      _id: { $in: requested.map((r) => r.invoiceId) },
       fillingStation: station,
       status: { $in: ["booked", "partially_paid"] },
     });
-    if (invoices.length !== invoiceIds.length) {
+    if (invoices.length !== requested.length) {
       return res.status(400).json({ message: "Some invoices are not payable (must be booked and unpaid)" });
     }
 
-    const payments = invoices.map((inv) => {
+    const amountFor = new Map(requested.map((r) => [r.invoiceId, r.amount]));
+
+    const payments: any[] = [];
+    for (const inv of invoices) {
       // Supplier credit notes already applied reduce what's left to pay
       const outstanding = round2(inv.totalBase - inv.amountPaid - (inv.creditApplied || 0));
+      const asked = amountFor.get(String(inv._id));
+      const amount = asked === null || asked === undefined ? outstanding : asked;
+
+      if (amount > outstanding + 0.01) {
+        return res.status(400).json({
+          message: `${inv.invoiceNumber || inv.internalRef}: ₦${amount.toLocaleString()} is more than the ₦${outstanding.toLocaleString()} still owing on it.`,
+        });
+      }
+
+      /**
+       * Withholding tax comes off the FIRST payment, in full.
+       *
+       * That rule predates part payments and stays as it is: WHT is a
+       * percentage of the invoice, not of the instalment, and deducting a
+       * share of it per instalment would file a different figure with the
+       * revenue than the invoice states.
+       *
+       * The one case it cannot survive is a first instalment smaller than the
+       * WHT itself, which would hand the supplier a negative cheque. That is
+       * refused rather than netted to zero, because a payment that pays the
+       * supplier nothing is not what anybody meant to enter.
+       */
       const wht = round2(inv.whtAmount * inv.fxRate);
-      return {
+      const whtWithheld = inv.amountPaid === 0 ? wht : 0;
+      if (whtWithheld > amount) {
+        return res.status(400).json({
+          message: `${inv.invoiceNumber || inv.internalRef}: the first payment must cover at least the ₦${wht.toLocaleString()} withholding tax on this invoice.`,
+        });
+      }
+
+      payments.push({
         invoice: inv._id,
         internalRef: inv.internalRef,
         supplierName: inv.supplierName,
-        amount: outstanding,
-        whtWithheld: inv.amountPaid === 0 ? wht : 0, // withhold once, on first payment
-        netPaid: round2(outstanding - (inv.amountPaid === 0 ? wht : 0)),
-      };
-    });
+        amount,
+        whtWithheld,
+        netPaid: round2(amount - whtWithheld),
+      });
+    }
 
     const totalAmount = round2(payments.reduce((s, p) => s + p.amount, 0));
     const totalWht = round2(payments.reduce((s, p) => s + p.whtWithheld, 0));
