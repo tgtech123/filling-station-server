@@ -71,6 +71,20 @@ export interface ILubricantProcurement extends Document {
   amountPaid: number;
   paidAt: Date | null;
   paymentNotes: string;
+  /**
+   * Every instalment, in the order it was paid.
+   *
+   * `amountPaid` is the running total. This is how that total was arrived at,
+   * which is the question anyone settling a supplier in stages actually asks —
+   * and without it a mistyped figure cannot be told from a real payment.
+   */
+  payments: {
+    amount: number;
+    paidAt: Date;
+    notes: string;
+    recordedBy: mongoose.Types.ObjectId | null;
+    recordedByName: string;
+  }[];
   items: IProcurementItem[];
   notes: string;
   stationName: string;
@@ -131,6 +145,21 @@ const LubricantProcurementSchema = new Schema<ILubricantProcurement>(
     amountPaid:   { type: Number, default: 0 },
     paidAt:       { type: Date, default: null },
     paymentNotes: { type: String, default: "" },
+    payments: {
+      type: [
+        new mongoose.Schema(
+          {
+            amount:         { type: Number, required: true, min: 0 },
+            paidAt:         { type: Date, default: Date.now },
+            notes:          { type: String, default: "" },
+            recordedBy:     { type: mongoose.Schema.Types.ObjectId, ref: "Staff", default: null },
+            recordedByName: { type: String, default: "" },
+          },
+          { _id: true }
+        ),
+      ],
+      default: [],
+    },
     status: {
       type: String,
       enum: ["draft", "submitted", "ordered", "confirmed", "received"],
